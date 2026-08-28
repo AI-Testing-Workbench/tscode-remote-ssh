@@ -6,7 +6,7 @@ import { HostTreeDataProvider } from './hostTreeView';
 import { getRemoteWorkspaceLocationData, RemoteLocationHistory } from './remoteLocationHistory';
 
 export async function activate(context: vscode.ExtensionContext) {
-    const logger = new Log('Remote - SSH');
+    const logger = new Log('TestAgent - Remote');
     context.subscriptions.push(logger);
 
     const remoteSSHResolver = new RemoteSSHResolver(context, logger);
