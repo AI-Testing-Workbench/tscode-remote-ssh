@@ -47,7 +47,7 @@
 		"simple-socks": "3.6.0",
 		"socks": "2.8.9",
 		"ssh-config": "5.2.0",
-		"ssh2": "git+https://github.com/jeanp413/ssh2#master"
+		"ssh2": "git+https://github.com/JustWorkingAndWorking/ssh2#master"
 	},
 	"devDependencies": {
 		"@commitlint/cli": "20.5.3",
