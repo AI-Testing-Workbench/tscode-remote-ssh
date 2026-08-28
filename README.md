@@ -1,7 +1,5 @@
 # Open Remote - SSH
 
-![Open Remote SSH](https://raw.githubusercontent.com/jeanp413/open-remote-ssh/master/docs/images/open-remote-ssh.gif)
-
 ## SSH Host Requirements
 You can connect to a running SSH server on the following platforms.
 
