@@ -99,13 +99,13 @@
 			"properties": {
 				"remote.SSH.configFile": {
 					"type": "string",
-					"description": "The absolute file path to a custom SSH config file.",
+					"description": "自定义 SSH 配置文件的绝对路径。",
 					"default": "",
 					"scope": "application"
 				},
 				"remote.SSH.connectTimeout": {
 					"type": "number",
-					"description": "Specifies the timeout in seconds used for the SSH command that connects to the remote.",
+					"description": "指定用于连接远程主机的 SSH 命令超时时间 (秒)。",
 					"default": 60,
 					"scope": "application",
 					"minimum": 1
@@ -115,29 +115,29 @@
 					"items": {
 						"type": "string"
 					},
-					"description": "List of extensions that should be installed automatically on all SSH hosts.",
+					"description": "应自动安装到所有 SSH 主机上的扩展列表。",
 					"scope": "application"
 				},
 				"remote.SSH.enableDynamicForwarding": {
 					"type": "boolean",
-					"description": "Whether to use SSH dynamic forwarding to allow setting up new port tunnels over an existing SSH connection.",
+					"description": "是否使用 SSH 动态转发，以便通过现有 SSH 连接建立新的端口隧道。",
 					"scope": "application",
 					"default": true
 				},
 				"remote.SSH.enableAgentForwarding": {
 					"type": "boolean",
-					"markdownDescription": "Enable fixing the remote environment so that the SSH config option `ForwardAgent` will take effect as expected from VS Code's remote extension host.",
+					"markdownDescription": "启用远程环境修复，使 SSH 配置选项 `ForwardAgent` 在 TestAgent 工作台的远程扩展主机中按预期生效。",
 					"scope": "application",
 					"default": true
 				},
 				"remote.SSH.serverDownloadUrlTemplate": {
 					"type": "string",
-					"description": "The URL from where the vscode server will be downloaded. You can use the following variables and they will be replaced dynamically:\n- ${quality}: vscode server quality, e.g. stable or insiders\n- ${version}: vscode server version, e.g. 1.69.0\n- ${commit}: vscode server release commit\n- ${arch}: vscode server arch, e.g. x64, armhf, arm64\n- ${release}: release number, vscodium only https://github.com/VSCodium/vscodium/pull/1192",
+					"description": "下载 TestAgent 服务器的 URL。可使用以下变量，它们会被动态替换：\n- ${quality}：TestAgent 服务器版本类型，例如 stable 或 insiders\n- ${version}：TestAgent 服务器版本，例如 1.69.0\n- ${commit}：TestAgent 服务器发布提交\n- ${arch}：TestAgent 服务器架构，例如 x64、armhf、arm64\n- ${release}：发行版本号，仅适用于 VSCodium，参见 https://github.com/VSCodium/vscodium/pull/1192",
 					"scope": "application"
 				},
 				"remote.SSH.remotePlatform": {
 					"type": "object",
-					"description": "A map of the remote hostname to the platform for that remote. Valid values: linux, macos, windows.",
+					"description": "将远程主机名映射到对应平台。有效值：linux、macos、windows。",
 					"scope": "application",
 					"default": {},
 					"additionalProperties": {
@@ -151,12 +151,12 @@
 				},
 				"remote.SSH.remoteServerListenOnSocket": {
 					"type": "boolean",
-					"description": "When true, the remote vscode server will listen on a socket path instead of opening a port. Only valid for Linux and macOS remotes. Requires `AllowStreamLocalForwarding` to be enabled for the SSH server.",
+					"description": "为 true 时，远程 TestAgent 服务器将监听套接字路径，而不是打开端口。仅适用于 Linux 和 macOS 远程主机。要求 SSH 服务器启用 `AllowStreamLocalForwarding`。",
 					"default": false
 				},
 				"remote.SSH.serverInstallPath": {
 					"type": "object",
-					"description": "Specifies custom installation directories for the VS Code server on remote hosts. Maps each remote hostname (or pattern) to an absolute path where the server should be installed. Supports wildcards: use `*` for catch-all, or `*.domain.com` for domain-specific paths. More specific patterns take precedence over general ones. When not specified, the server installs in the default home directory. **Note**: Changing this setting may require manual cleanup of existing server installations in previous locations.",
+					"description": "指定 TestAgent 服务器在远程主机上的自定义安装目录。将每个远程主机名 (或模式) 映射到服务器应安装的绝对路径。支持通配符：使用 `*` 匹配所有主机，或使用 `*.domain.com` 指定域名路径。更具体的模式优先于通用模式。未指定时，服务器将安装到默认主目录。**注意**：更改此设置可能需要手动清理之前位置中的现有服务器安装。",
 					"scope": "application",
 					"default": {},
 					"additionalProperties": {
@@ -165,19 +165,19 @@
 				},
 				"remote.SSH.serverBinaryName": {
 					"type": "string",
-					"description": "The name of the server binary, use this **only if** you are using a client without a corresponding server release",
+					"description": "服务器二进制文件的名称。仅在使用没有对应服务器版本的客户端时使用此项。",
 					"scope": "application",
 					"default": ""
 				},
 				"remote.SSH.serverVersion": {
 					"type": "string",
-					"description": "The version number of the remote VSCodium server. Can take the values: 'match' (default), 'latest', 'closest' or a specific version (e.g. '1.117.0').",
+					"description": "远程 VSCodium 服务器的版本号。可取以下值：`match` (默认)、`latest`、`closest` 或特定版本 (例如 `1.117.0`)。",
 					"scope": "application",
 					"default": "match"
 				},
 				"remote.SSH.serverValidation": {
 					"type": "string",
-					"description": "Type of server validation: 'strict' (default) enforces that the remote and local server are the same version by matching the commit, 'force' modifies the remote commit to match the local server, 'skip' skips validation all together.",
+					"description": "服务器验证类型：`strict` (默认)要求通过匹配提交 ID 确保远程和本地服务器版本一致；`force` 修改远程提交 ID 以匹配本地服务器；`skip` 完全跳过验证。",
 					"scope": "application",
 					"default": "strict",
 					"enum": [
@@ -186,9 +186,9 @@
 						"strict"
 					],
 					"enumDescriptions": [
-						"Modify the commit of the remote server.",
-						"The remote server won't validate the client.",
-						"The remote server and client's commits must match. (default)"
+						"修改远程服务器的提交 ID。",
+						"远程服务器不会验证客户端。",
+						"远程服务器与客户端的提交 ID 必须匹配。 (默认)"
 					]
 				}
 			}
@@ -197,7 +197,7 @@
 			"remote": [
 				{
 					"id": "sshHosts",
-					"name": "SSH Targets",
+					"name": "SSH 主机",
 					"group": "targets@1",
 					"remoteName": "ssh-remote"
 				}
@@ -206,60 +206,60 @@
 		"commands": [
 			{
 				"command": "openremotessh.openEmptyWindow",
-				"title": "Connect to Host...",
-				"category": "Remote-SSH"
+				"title": "连接到主机...",
+				"category": "远程 SSH"
 			},
 			{
 				"command": "openremotessh.openEmptyWindowInCurrentWindow",
-				"title": "Connect Current Window to Host...",
-				"category": "Remote-SSH"
+				"title": "将当前窗口连接到主机...",
+				"category": "远程 SSH"
 			},
 			{
 				"command": "openremotessh.openConfigFile",
-				"title": "Open SSH Configuration File...",
-				"category": "Remote-SSH"
+				"title": "打开 SSH 配置文件...",
+				"category": "远程 SSH"
 			},
 			{
 				"command": "openremotessh.showLog",
-				"title": "Show Log",
-				"category": "Remote-SSH"
+				"title": "显示日志",
+				"category": "远程 SSH"
 			},
 			{
 				"command": "openremotessh.explorer.emptyWindowInNewWindow",
-				"title": "Connect to Host in New Window",
+				"title": "在新窗口中连接到主机",
 				"icon": "$(empty-window)"
 			},
 			{
 				"command": "openremotessh.explorer.emptyWindowInCurrentWindow",
-				"title": "Connect to Host in Current Window"
+				"title": "在当前窗口中连接到主机"
 			},
 			{
 				"command": "openremotessh.explorer.reopenFolderInCurrentWindow",
-				"title": "Open on SSH Host in Current Window"
+				"title": "在当前窗口中打开 SSH 主机上的文件夹"
 			},
 			{
 				"command": "openremotessh.explorer.reopenFolderInNewWindow",
-				"title": "Open on SSH Host in New Window",
+				"title": "在新窗口中打开 SSH 主机上的文件夹",
 				"icon": "$(folder-opened)"
 			},
 			{
 				"command": "openremotessh.explorer.deleteFolderHistoryItem",
-				"title": "Remove From Recent List",
+				"title": "从最近列表中移除",
 				"icon": "$(x)"
 			},
 			{
 				"command": "openremotessh.explorer.refresh",
-				"title": "Refresh",
+				"title": "刷新",
 				"icon": "$(refresh)"
 			},
 			{
 				"command": "openremotessh.explorer.configure",
-				"title": "Configure",
+				"title": "配置",
 				"icon": "$(gear)"
 			},
 			{
 				"command": "openremotessh.explorer.add",
-				"title": "Add New",
+				"title": "添加新主机",
 				"icon": "$(plus)"
 			}
 		],
