@@ -1,16 +1,9 @@
 {
-	"name": "open-remote-ssh",
-	"displayName": "Open Remote - SSH",
-	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.3.1",
-	"publisher": "jeanp413",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/jeanp413/open-remote-ssh.git"
-	},
-	"bugs": {
-		"url": "https://github.com/jeanp413/open-remote-ssh/issues"
-	},
+	"name": "tscode-remote-ssh",
+	"displayName": "TestAgent Remote",
+	"description": "连接至 TestAgent 远程服务器",
+	"version": "1.0.0",
+	"publisher": "test-tech",
 	"engines": {
 		"vscode": "^1.70.2"
 	},
@@ -102,7 +95,7 @@
 	],
 	"contributes": {
 		"configuration": {
-			"title": "Remote - SSH",
+			"title": "TestAgent Remote",
 			"properties": {
 				"remote.SSH.configFile": {
 					"type": "string",
