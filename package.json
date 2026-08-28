@@ -439,11 +439,6 @@
 	"allowScripts": {
 		"fsevents": true
 	},
-	"keywords": [
-		"remote",
-		"remote development",
-		"ssh"
-	],
 	"api": "none",
 	"enabledApiProposals": [
 		"resolvers",
