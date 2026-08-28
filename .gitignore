@@ -13,3 +13,7 @@
 /coverage/
 /**/*.js
 /**/*.js.map
+
+.idea/
+.kilo/
+work/
