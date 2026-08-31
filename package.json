@@ -159,7 +159,7 @@
 			"remote": [
 				{
 					"id": "sshHosts",
-					"name": "SSH 主机",
+					"name": "TestAgent Cloud",
 					"group": "targets@1",
 					"remoteName": "ssh-remote"
 				}
@@ -169,22 +169,17 @@
 			{
 				"command": "openremotessh.openEmptyWindow",
 				"title": "连接到主机...",
-				"category": "远程 SSH"
+				"category": "TestAgent Cloud"
 			},
 			{
 				"command": "openremotessh.openEmptyWindowInCurrentWindow",
 				"title": "将当前窗口连接到主机...",
-				"category": "远程 SSH"
-			},
-			{
-				"command": "openremotessh.openConfigFile",
-				"title": "打开 SSH 配置文件...",
-				"category": "远程 SSH"
+				"category": "TestAgent Cloud"
 			},
 			{
 				"command": "openremotessh.showLog",
 				"title": "显示日志",
-				"category": "远程 SSH"
+				"category": "TestAgent Cloud"
 			},
 			{
 				"command": "openremotessh.explorer.emptyWindowInNewWindow",
