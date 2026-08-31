@@ -57,7 +57,7 @@ export class HostTreeDataProvider extends Disposable implements vscode.TreeDataP
 
     getTreeItem(element: DataTreeItem): vscode.TreeItem {
         if (element instanceof HostLocationItem) {
-            const label = path.posix.basename(element.path).replace(/\.code-workspace$/, ' (Workspace)');
+            const label = path.posix.basename(element.path).replace(/\.code-workspace$/, '(工作区)');
             const treeItem = new vscode.TreeItem(label);
             treeItem.description = path.posix.dirname(element.path);
             treeItem.iconPath = new vscode.ThemeIcon('folder');

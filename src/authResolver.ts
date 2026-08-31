@@ -133,7 +133,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const connectTimeout = remoteSSHconfig.get<number>('connectTimeout', 60)!;
 
         return vscode.window.withProgress({
-            title: `Setting up SSH Host ${sshDest.hostname}`,
+            title: `正在连接至 TestAgent Cloud 服务...`,
             location: vscode.ProgressLocation.Notification,
             cancellable: false
         }, async () => {
@@ -291,7 +291,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                         label: '${path}',
                         separator: '/',
                         tildify: true,
-                        workspaceSuffix: `SSH: ${sshDest.hostname}` + (sshDest.port && sshDest.port !== 22 ? `:${sshDest.port}` : '')
+                        workspaceSuffix: '位于 TestAgent Cloud 中'
                     }
                 });
 
@@ -305,13 +305,21 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 if (context.resolveAttempt === 1) {
                     this.logger.show();
 
-                    const closeRemote = 'Close Remote';
-                    const retry = 'Retry';
-                    const result = await vscode.window.showErrorMessage(`Could not establish connection to "${sshDest.hostname}"`, { modal: true }, closeRemote, retry);
+                    const closeRemote = '关闭连接';
+                    const retry = '重试';
+                    const copyLog = '复制日志';
+                    const result = await vscode.window.showErrorMessage(`连接至 TestAgent Cloud 服务 "${sshDest.hostname}" 时失败，\n请重试或者复制日志并联系支持人员。`, { modal: true }, retry, copyLog, closeRemote);
                     if (result === closeRemote) {
                         await vscode.commands.executeCommand('workbench.action.remote.close');
                     } else if (result === retry) {
                         await vscode.commands.executeCommand('workbench.action.reloadWindow');
+                    } else if (result === copyLog) {
+                        try {
+                            await this.logger.copyToClipboard();
+                            await vscode.commands.executeCommand('workbench.action.remote.close');
+                        } catch {
+                            // Ignore clipboard errors and preserve the original connection error.
+                        }
                     }
                 }
 

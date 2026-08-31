@@ -10,7 +10,10 @@ const commands = {
 };
 
 const env = {
-    appRoot: '/bin/vscodium/app'
+    appRoot: '/bin/vscodium/app',
+    clipboard: {
+        writeText: vi.fn(() => Promise.resolve())
+    }
 };
 
 class ExtensionContext {

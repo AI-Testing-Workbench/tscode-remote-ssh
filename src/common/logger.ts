@@ -6,6 +6,7 @@ type LogLevel = 'Trace' | 'Info' | 'Error';
 
 export class Log {
     private output: vscode.OutputChannel;
+    private readonly outputLines: string[] = [];
 
     constructor(name: string) {
         this.output = vscode.window.createOutputChannel(name);
@@ -24,10 +25,18 @@ export class Log {
     }
 
     public logLevel(level: LogLevel, message: string, data?: unknown): void {
-        this.output.appendLine(`[${level}  - ${this.now()}] ${message}`);
+        const line = `[${level}  - ${this.now()}] ${message}`;
+        this.outputLines.push(line);
+        this.output.appendLine(line);
         if (data) {
-            this.output.appendLine(toString(data));
+            const dataLine = toString(data);
+            this.outputLines.push(dataLine);
+            this.output.appendLine(dataLine);
         }
+    }
+
+    public copyToClipboard(): Thenable<void> {
+        return vscode.env.clipboard.writeText(this.outputLines.join('\n'));
     }
 
     private now(): string {

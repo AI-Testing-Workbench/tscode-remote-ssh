@@ -23,6 +23,10 @@ export class Log {
         this.logLevel('Error', message, data);
     }
 
+    public copyToClipboard(): Promise<void> {
+        return Promise.resolve();
+    }
+
     public logLevel(level: LogLevel, message: string, data?: unknown): void {
         if(DEBUG) {
             console.log(`[${level}  - ${this.now()}] ${message}`);

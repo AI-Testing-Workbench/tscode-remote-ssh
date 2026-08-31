@@ -168,12 +168,12 @@
 		"commands": [
 			{
 				"command": "openremotessh.openEmptyWindow",
-				"title": "连接到主机...",
+				"title": "连接到 TestAgent Cloud...",
 				"category": "TestAgent Cloud"
 			},
 			{
 				"command": "openremotessh.openEmptyWindowInCurrentWindow",
-				"title": "将当前窗口连接到主机...",
+				"title": "将当前窗口连接到 TestAgent Cloud...",
 				"category": "TestAgent Cloud"
 			},
 			{
@@ -183,20 +183,20 @@
 			},
 			{
 				"command": "openremotessh.explorer.emptyWindowInNewWindow",
-				"title": "在新窗口中连接到主机",
+				"title": "在新窗口中连接到 TestAgent Cloud",
 				"icon": "$(empty-window)"
 			},
 			{
 				"command": "openremotessh.explorer.emptyWindowInCurrentWindow",
-				"title": "在当前窗口中连接到主机"
+				"title": "在当前窗口中连接到 TestAgent Cloud"
 			},
 			{
 				"command": "openremotessh.explorer.reopenFolderInCurrentWindow",
-				"title": "在当前窗口中打开 SSH 主机上的文件夹"
+				"title": "在当前窗口中打开 TestAgent Cloud 上的文件夹"
 			},
 			{
 				"command": "openremotessh.explorer.reopenFolderInNewWindow",
-				"title": "在新窗口中打开 SSH 主机上的文件夹",
+				"title": "在新窗口中打开 TestAgent Cloud 上的文件夹",
 				"icon": "$(folder-opened)"
 			},
 			{
@@ -216,7 +216,7 @@
 			},
 			{
 				"command": "openremotessh.explorer.add",
-				"title": "添加新主机",
+				"title": "添加新的 TestAgent Cloud 连接",
 				"icon": "$(plus)"
 			}
 		],
@@ -234,26 +234,6 @@
 		],
 		"menus": {
 			"statusBar/remoteIndicator": [
-				{
-					"command": "openremotessh.openEmptyWindow",
-					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
-					"group": "remote_20_ssh_1general@1"
-				},
-				{
-					"command": "openremotessh.openEmptyWindowInCurrentWindow",
-					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
-					"group": "remote_20_ssh_1general@2"
-				},
-				{
-					"command": "openremotessh.openConfigFile",
-					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
-					"group": "remote_20_ssh_1general@3"
-				},
-				{
-					"command": "openremotessh.showLog",
-					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
-					"group": "remote_20_ssh_1general@4"
-				},
 				{
 					"command": "openremotessh.openEmptyWindow",
 					"when": "remoteConnectionState == disconnected",
@@ -278,11 +258,6 @@
 					"command": "openremotessh.openEmptyWindowInCurrentWindow",
 					"when": "!remoteName && !virtualWorkspace",
 					"group": "remote_20_ssh_3local@6"
-				},
-				{
-					"command": "openremotessh.openConfigFile",
-					"when": "!remoteName && !virtualWorkspace",
-					"group": "remote_20_ssh_3local@7"
 				}
 			],
 			"commandPalette": [

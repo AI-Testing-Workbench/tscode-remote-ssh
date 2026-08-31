@@ -31,7 +31,7 @@ async function promptForHost(): Promise<string | undefined> {
 
     if (!configuredHosts.length) {
         return vscode.window.showInputBox({
-            title: 'Enter [user@]hostname[:port]'
+            title: '请输入 [user@]hostname[:port]'
         });
     }
 
@@ -39,14 +39,14 @@ async function promptForHost(): Promise<string | undefined> {
 
     return new Promise<string | undefined>(resolve => {
         const quickPick = vscode.window.createQuickPick();
-        quickPick.title = 'Connect to Host';
-        quickPick.placeholder = 'Select a configured host, or enter [user@]hostname[:port]';
+        quickPick.title = '连接到 TestAgent Cloud';
+        quickPick.placeholder = '选择已配置的连接，或者输入 [user@]hostname[:port]';
         quickPick.items = hostItems;
 
         quickPick.onDidChangeValue(value => {
             const typed = value.trim();
             quickPick.items = typed && !configuredHosts.includes(typed)
-                ? [{ label: typed, description: 'Connect to this host' }, ...hostItems]
+                ? [{ label: typed, description: '连接到此 TestAgent Cloud 连接' }, ...hostItems]
                 : hostItems;
         });
 
