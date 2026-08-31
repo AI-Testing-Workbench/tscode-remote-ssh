@@ -124,7 +124,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
 
         // It looks like default values are not loaded yet when resolving a remote,
         // so let's hardcode the default values here
-        const remoteSSHconfig = vscode.workspace.getConfiguration('remote.SSH');
+        const remoteSSHconfig = vscode.workspace.getConfiguration('testagnet.remote');
         const enableDynamicForwarding = remoteSSHconfig.get<boolean>('enableDynamicForwarding', true)!;
         const enableAgentForwarding = remoteSSHconfig.get<boolean>('enableAgentForwarding', true)!;
         const defaultExtensions = remoteSSHconfig.get<string[]>('defaultExtensions', []);

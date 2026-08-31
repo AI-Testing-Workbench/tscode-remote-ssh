@@ -9,6 +9,16 @@ const commands = {
     executeCommand: vi.fn(),
 };
 
+const configurationValues = new Map<string, unknown>();
+
+function setConfigurationValue(section: string, key: string, value: unknown) {
+    configurationValues.set(`${section}.${key}`, value);
+}
+
+function resetConfiguration() {
+    configurationValues.clear();
+}
+
 const env = {
     appRoot: '/bin/vscodium/app',
     clipboard: {
@@ -84,9 +94,18 @@ const window = {
     },
 };
 
+const Uri = {
+    from: vi.fn((components: { scheme: string; authority: string; path: string }) => components),
+};
+
 const workspace = {
-    getConfiguration: vi.fn(() => ({
-        get: vi.fn((key: string, defaultValue?: unknown) => key === 'configFile' ? '/etc/ssh/ssh_config' : defaultValue),
+    getConfiguration: vi.fn((section?: string) => ({
+        get: vi.fn((key: string, defaultValue?: unknown) => {
+            const settingKey = `${section}.${key}`;
+            return configurationValues.has(settingKey)
+                ? configurationValues.get(settingKey)
+                : key === 'configFile' ? '/etc/ssh/ssh_config' : defaultValue;
+        }),
         update: vi.fn(() => Promise.resolve())
     })),
     registerResourceLabelFormatter: vi.fn()
@@ -100,6 +119,9 @@ export {
     RemoteAuthorityResolverContext,
     RemoteAuthorityResolverError,
     ResolvedAuthority,
+    resetConfiguration,
+    setConfigurationValue,
+    Uri,
     window,
     version,
     workspace,

@@ -23,9 +23,8 @@ export type IServerConfig = {
 export async function getVSCodeServerConfig(): Promise<IServerConfig> {
     const productJson = await getVSCodeProductJson();
 
-    const customServerBinaryName = vscode.workspace.getConfiguration('remote.SSH').get<string>('serverBinaryName', '');
     return {
-        serverApplicationName: customServerBinaryName || productJson.serverApplicationName as string,
+        serverApplicationName: productJson.serverApplicationName as string,
         serverDataFolderName: productJson.serverDataFolderName as string,
     };
 }

@@ -44,7 +44,7 @@ export class HostTreeDataProvider extends Disposable implements vscode.TreeDataP
         this._register(vscode.commands.registerCommand('openremotessh.explorer.deleteFolderHistoryItem', e => this.deleteHostLocation(e)));
 
         this._register(vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('remote.SSH.configFile')) {
+            if (e.affectsConfiguration('testagnet.remote.configFile')) {
                 this.refresh();
             }
         }));

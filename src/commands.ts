@@ -66,6 +66,12 @@ async function promptForHost(): Promise<string | undefined> {
 }
 
 export function openRemoteSSHWindow(host: string, reuseWindow: boolean) {
+    const defaultPath = vscode.workspace.getConfiguration('testagnet.remote').get<string>('defaultPath', '');
+    if (defaultPath) {
+        openRemoteSSHLocationWindow(host, defaultPath, reuseWindow);
+        return;
+    }
+
     vscode.commands.executeCommand('vscode.newWindow', { remoteAuthority: getRemoteAuthority(host), reuseWindow });
 }
 
