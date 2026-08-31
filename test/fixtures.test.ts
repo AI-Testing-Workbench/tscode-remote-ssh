@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import fse from '@zokugun/fs-extra-plus/sync';
 import { xtry } from '@zokugun/xtry/sync';
 import { vol } from 'memfs';
@@ -7,6 +9,7 @@ import YAML from 'yaml';
 import SSHConnection from '../src/ssh/sshConnection';
 import { RemoteSSHResolver, SSHConfiguration, getRemoteAuthority } from './rewires/remote';
 import { Log } from './mocks/logger';
+import type { Log as SourceLog } from '../src/common/logger';
 import * as vscode from './mocks/vscode';
 import { runDocker } from './utils/run-docker';
 import { getMappedPort } from './utils/get-mapped-port';
@@ -54,7 +57,7 @@ for (const file of files.value) {
   const { client, server } = document.value as { client: ClientOptions; server: ServerOptions };
   const containerName = `open-remote-ssh-test-${randomUUID()}`;
 
-  describe(name, async () => {
+  describe.sequential(name, () => {
     let hostPort: number;
 
     beforeAll(async () => {
@@ -97,11 +100,19 @@ for (const file of files.value) {
     });
 
     it(`test-${name}`, async () => {
+      const fixtureFiles = { ...client.files };
+      const sshConfig = client.files['/etc/ssh/ssh_config'];
+      const includedSSHConfig = client.files['/etc/ssh/config.d/hosts'];
+      if (client.hosts && sshConfig && includedSSHConfig) {
+        const defaultSSHConfigPath = path.resolve(os.homedir(), '.ssh', 'config');
+        fixtureFiles[defaultSSHConfigPath] = sshConfig;
+        fixtureFiles[path.join(path.dirname(defaultSSHConfigPath), 'config.d', 'hosts')] = includedSSHConfig;
+      }
+
       vol.fromJSON({
-        ...client.files,
+        ...fixtureFiles,
         '/data/vscodium/extensions/open-remote-ssh/src/scripts/server-setup.sh': SERVER_SETUP,
       });
-
       vscode.window.setPassword(server.password);
 
       if (client.hosts) {
@@ -128,8 +139,8 @@ for (const file of files.value) {
         }
       }
 
-      const logger = new Log('Remote - SSH');
-      const extContext = new vscode.ExtensionContext();
+      const logger = new Log('Remote - SSH') as unknown as SourceLog;
+      const extContext = new vscode.ExtensionContext() as unknown as import('vscode').ExtensionContext;
       const remoteSSHResolver = new RemoteSSHResolver(extContext, logger);
       const remoteContext = new vscode.RemoteAuthorityResolverContext();
       const authority = getRemoteAuthority('test');
@@ -143,6 +154,9 @@ for (const file of files.value) {
       const result = await resultPromise;
 
       expect(result).toBeDefined();
+      if (!('host' in result)) {
+        throw new Error('Expected a resolved authority');
+      }
       expect(result.host).to.eql('127.0.0.1');
     }, 60_000);
   });

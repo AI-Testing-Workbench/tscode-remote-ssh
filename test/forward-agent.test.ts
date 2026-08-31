@@ -6,6 +6,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import SSHConnection from '../src/ssh/sshConnection';
 import { RemoteSSHResolver, getRemoteAuthority } from './rewires/remote';
 import { Log } from './mocks/logger';
+import type { Log as SourceLog } from '../src/common/logger';
 import * as vscode from './mocks/vscode';
 import { runDocker } from './utils/run-docker';
 import { getMappedPort } from './utils/get-mapped-port';
@@ -31,15 +32,25 @@ const PASSWORD = 'openremotessh';
 const containerName = `open-remote-ssh-test-${randomUUID()}`;
 
 let authSock: string;
-let agentPid: string;
+let agentPid: string | undefined;
 let hostPort: number;
 
 beforeAll(async () => {
   vol.reset();
 
-  const agentOutput = execFileSync('ssh-agent', ['-s'], { encoding: 'utf8' });
-  authSock = /SSH_AUTH_SOCK=([^;]+);/.exec(agentOutput)![1];
-  agentPid = /SSH_AGENT_PID=(\d+);/.exec(agentOutput)![1];
+  if (process.platform === 'win32') {
+    authSock = process.env.SSH_AUTH_SOCK || '\\\\.\\pipe\\openssh-ssh-agent';
+  } else {
+    const agentOutput = execFileSync('ssh-agent', ['-s'], { encoding: 'utf8' });
+    const socketMatch = /SSH_AUTH_SOCK=([^;]+);/.exec(agentOutput);
+    const pidMatch = /SSH_AGENT_PID=(\d+);/.exec(agentOutput);
+    if (!socketMatch || !pidMatch) {
+      throw new Error('Unable to parse ssh-agent output');
+    }
+
+    authSock = socketMatch[1];
+    agentPid = pidMatch[1];
+  }
 
   runDocker(['rm', '-f', containerName], true);
 
@@ -71,7 +82,9 @@ beforeAll(async () => {
 
 afterAll(() => {
   runDocker(['rm', '-f', containerName], true);
-  execFileSync('ssh-agent', ['-k'], { env: { ...process.env, SSH_AGENT_PID: agentPid, SSH_AUTH_SOCK: authSock } });
+  if (agentPid) {
+    execFileSync('ssh-agent', ['-k'], { env: { ...process.env, SSH_AGENT_PID: agentPid, SSH_AUTH_SOCK: authSock } });
+  }
 });
 
 it('forwards the agent through a socket that stays alive', async () => {
@@ -91,14 +104,17 @@ it('forwards the agent through a socket that stays alive', async () => {
 
   vscode.window.setPassword(PASSWORD);
 
-  const logger = new Log('Remote - SSH');
-  const extContext = new vscode.ExtensionContext();
+  const logger = new Log('Remote - SSH') as unknown as SourceLog;
+  const extContext = new vscode.ExtensionContext() as unknown as import('vscode').ExtensionContext;
   const remoteSSHResolver = new RemoteSSHResolver(extContext, logger);
   const remoteContext = new vscode.RemoteAuthorityResolverContext();
   const authority = getRemoteAuthority('test');
   const result = await remoteSSHResolver.resolve(authority, remoteContext);
 
   expect(result).toBeDefined();
+  if (!('host' in result)) {
+    throw new Error('Expected a resolved authority');
+  }
   expect(result.host).to.eql('127.0.0.1');
 
   const remoteAuthSock = result.extensionHostEnv?.SSH_AUTH_SOCK;

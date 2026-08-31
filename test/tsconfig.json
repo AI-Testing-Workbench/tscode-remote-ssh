@@ -4,13 +4,18 @@
 		/* Basic Options */
 		"outDir": "../.test",
 		"rootDir": "..",								/* Specify the root directory of input files. */
-		"module": "node20",
+		"module": "es2022",
+		"moduleResolution": "bundler",
+		"skipLibCheck": true,
 
 		/* Source Map Options */
 		"sourceMap": true,								/* Create source map files for emitted JavaScript files. */
 	},
 	"include": [
-		"./**/*.ts"
+		"./**/*.ts",
+		"../vscode.d.ts",
+		"../vscode.proposed.resolvers.d.ts",
+		"../vscode.proposed.contribViewsRemote.d.ts"
 	],
 	"exclude": [
 		"../node_modules"

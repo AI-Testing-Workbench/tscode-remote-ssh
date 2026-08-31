@@ -77,13 +77,13 @@ const window = {
             then: vi.fn(),
         };
 
-        return task(mockProgressReporter, {} as unknown) as Promise<unknown>;
+        return task(mockProgressReporter, {} as vscode.CancellationToken) as Promise<unknown>;
     },
 };
 
 const workspace = {
     getConfiguration: vi.fn(() => ({
-        get: vi.fn((_key: string, defaultValue?: unknown) => defaultValue),
+        get: vi.fn((key: string, defaultValue?: unknown) => key === 'configFile' ? '/etc/ssh/ssh_config' : defaultValue),
         update: vi.fn(() => Promise.resolve())
     })),
     registerResourceLabelFormatter: vi.fn()

@@ -21,7 +21,7 @@ import * as os from 'os';
 const PASSWORD_RETRY_COUNT = 3;
 const PASSPHRASE_RETRY_COUNT = 3;
 
-export const REMOTE_SSH_AUTHORITY = 'testagnet-remote';
+export const REMOTE_SSH_AUTHORITY = 'ssh-remote';
 
 export function getRemoteAuthority(host: string) {
     return `${REMOTE_SSH_AUTHORITY}+${host}`;

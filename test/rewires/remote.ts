@@ -9,6 +9,12 @@ vi.doMock('node:fs', () => (
 		default: fs,
 	}
 ));
+vi.doMock('fs', () => (
+	{
+		...fs,
+		default: fs,
+	}
+));
 vi.doMock('node:fs/promises', () => ({ default: fs.promises }));
 
 // `glob` reaches the filesystem through its own `PathScurry` instance, which
@@ -28,6 +34,7 @@ const { getRemoteAuthority, RemoteSSHResolver } = await import('../../src/authRe
 const { default: SSHConfiguration } = await import('../../src/ssh/sshConfig.js');
 
 vi.unmock('node:fs');
+vi.unmock('fs');
 vi.unmock('node:fs/promises');
 
 export {
