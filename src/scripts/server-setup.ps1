@@ -3,10 +3,7 @@
 $TMP_DIR="$env:TEMP\$([System.IO.Path]::GetRandomFileName())"
 $ProgressPreference = "SilentlyContinue"
 
-$DISTRO_VERSION="%%DISTRO_VERSION%%"
 $DISTRO_COMMIT="%%DISTRO_COMMIT%%"
-$DISTRO_QUALITY="%%DISTRO_QUALITY%%"
-$DISTRO_VSCODIUM_RELEASE="%%DISTRO_VSCODIUM_RELEASE%%"
 
 $SERVER_APP_NAME="%%SERVER_APP_NAME%%"
 $SERVER_INITIAL_EXTENSIONS="%%SERVER_INITIAL_EXTENSIONS%%"
@@ -18,15 +15,14 @@ $SERVER_SCRIPT="$SERVER_DIR\bin\$SERVER_APP_NAME.cmd"
 $SERVER_LOGFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.log"
 $SERVER_PIDFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.pid"
 $SERVER_TOKENFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.token"
-$SERVER_ARCH=
 $SERVER_CONNECTION_TOKEN=
-$SERVER_DOWNLOAD_URL="%%SERVER_DOWNLOAD_URL%%"
 $SERVER_VALIDATION_FLAG="%%SERVER_VALIDATION_FLAG%%"
 
 $LISTENING_ON=
 $OS_RELEASE_ID=
 $ARCH=
 $PLATFORM="win32"
+$ERROR_MESSAGE=
 
 function printInstallResults($code) {
   "%%SCRIPT_ID%%: start"
@@ -38,84 +34,23 @@ function printInstallResults($code) {
   "arch==$ARCH=="
   "platform==$PLATFORM=="
   "tmpDir==$TMP_DIR=="
+  "error==$ERROR_MESSAGE=="
 %%ENV_VAR_LINES%%
   "%%SCRIPT_ID%%: end"
 }
 
 # Check machine architecture
 $ARCH=$env:PROCESSOR_ARCHITECTURE
-# Use x64 version for ARM64, as it's not yet available.
-if(($ARCH -eq "AMD64") -or ($ARCH -eq "IA64") -or ($ARCH -eq "ARM64")) {
-  $SERVER_ARCH="x64"
-}
-else {
-  "Error architecture not supported: $ARCH"
+
+$SERVER_SCRIPT_ITEM = Get-Item $SERVER_SCRIPT -ErrorAction SilentlyContinue
+if(!$SERVER_SCRIPT_ITEM -or $SERVER_SCRIPT_ITEM.Length -eq 0) {
+  $ERROR_MESSAGE="Remote server script not found or empty: $SERVER_SCRIPT"
+  "Error: $ERROR_MESSAGE"
   printInstallResults 1
   exit 0
 }
 
-# Create installation folder
-if(!(Test-Path $SERVER_DIR)) {
-  try {
-    ni -it d $SERVER_DIR -f -ea si
-  } catch {
-    "Error creating server install directory - $($_.ToString())"
-    exit 1
-  }
-
-  if(!(Test-Path $SERVER_DIR)) {
-    "Error creating server install directory"
-    exit 1
-  }
-}
-
-cd $SERVER_DIR
-
-# Check if server script is already installed
-if(!(Test-Path $SERVER_SCRIPT)) {
-  if(Test-Path vscode-server.tar.gz) {
-    del vscode-server.tar.gz
-  }
-
-  $REQUEST_ARGUMENTS = @{
-    Uri="$SERVER_DOWNLOAD_URL"
-    TimeoutSec=20
-    OutFile="vscode-server.tar.gz"
-    UseBasicParsing=$True
-  }
-
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-  Invoke-RestMethod @REQUEST_ARGUMENTS
-
-  if(Test-Path "vscode-server.tar.gz") {
-    tar -xOf vscode-server.tar.gz | Out-Null
-
-    if($LastExitCode -ne 0) {
-      del vscode-server.tar.gz
-      "Error downloaded tarball is corrupt or incomplete"
-      exit 1
-    }
-
-    tar -xf vscode-server.tar.gz --strip-components 1
-
-    if($LastExitCode -ne 0) {
-      del vscode-server.tar.gz
-      "Error while extracting server contents"
-      exit 1
-    }
-
-    del vscode-server.tar.gz
-  }
-
-  if(!(Test-Path $SERVER_SCRIPT)) {
-    "Error while installing the server binary"
-    exit 1
-  }
-}
-else {
-  "Server script already installed in $SERVER_SCRIPT"
-}
+"Server script found in $SERVER_SCRIPT"
 
 # Modify the commit in the remote server to match the local value
 if(%%MODIFY_PRODUCT_JSON%%) {

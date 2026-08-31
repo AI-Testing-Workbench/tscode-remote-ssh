@@ -1,12 +1,7 @@
 client:
   files:
-    /etc/ssh/ssh_config: |
-      Host *
-        StrictHostKeyChecking no
-
-      Include config.d/*
-    /etc/ssh/config.d/hosts: |
-      Host test alias
+    /etc/ssh/ssh_config: >
+      Host test
         HostName 127.0.0.1
         Port 2222
         User openremotessh
@@ -22,10 +17,8 @@ client:
         "serverApplicationName": "codium-server",
         "serverDataFolderName": ".vscodium-server"
       }
-  hosts:
-    - test
-    - alias
 server:
   image: local-ubuntu-bash
   username: openremotessh
   password: openremotessh
+  removeServer: true

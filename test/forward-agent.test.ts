@@ -22,7 +22,6 @@ const PRODUCT_JSON = JSON.stringify({
   version: '1.126.04524',
   serverApplicationName: 'codium-server',
   serverDataFolderName: '.vscodium-server',
-  serverDownloadUrlTemplate: 'https://github.com/VSCodium/vscodium/releases/download/1.126.04524/vscodium-reh-${os}-${arch}-1.126.04524.tar.gz',
 });
 
 const IMAGE = 'local-ubuntu-bash';

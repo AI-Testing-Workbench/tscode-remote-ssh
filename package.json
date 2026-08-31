@@ -43,7 +43,6 @@
 	"dependencies": {
 		"@zokugun/is-it-type": "0.8.1",
 		"glob": "13.0.6",
-		"semver": "7.8.5",
 		"simple-socks": "3.6.0",
 		"socks": "2.8.9",
 		"ssh-config": "5.2.0",
@@ -55,7 +54,6 @@
 		"@eslint/js": "10.0.1",
 		"@stylistic/eslint-plugin": "5.10.0",
 		"@types/node": "20.19.43",
-		"@types/semver": "7.7.1",
 		"@types/ssh2": "0.5.52",
 		"@types/ssh2-streams": "0.1.13",
 		"@types/webpack": "5.28.5",
@@ -130,11 +128,6 @@
 					"scope": "application",
 					"default": true
 				},
-				"remote.SSH.serverDownloadUrlTemplate": {
-					"type": "string",
-					"description": "下载 TestAgent 服务器的 URL。可使用以下变量，它们会被动态替换：\n- ${quality}：TestAgent 服务器版本类型，例如 stable 或 insiders\n- ${version}：TestAgent 服务器版本，例如 1.69.0\n- ${commit}：TestAgent 服务器发布提交\n- ${arch}：TestAgent 服务器架构，例如 x64、armhf、arm64\n- ${release}：发行版本号，仅适用于 VSCodium，参见 https://github.com/VSCodium/vscodium/pull/1192",
-					"scope": "application"
-				},
 				"remote.SSH.remotePlatform": {
 					"type": "object",
 					"description": "将远程主机名映射到对应平台。有效值：linux、macos、windows。",
@@ -168,12 +161,6 @@
 					"description": "服务器二进制文件的名称。仅在使用没有对应服务器版本的客户端时使用此项。",
 					"scope": "application",
 					"default": ""
-				},
-				"remote.SSH.serverVersion": {
-					"type": "string",
-					"description": "远程 VSCodium 服务器的版本号。可取以下值：`match` (默认)、`latest`、`closest` 或特定版本 (例如 `1.117.0`)。",
-					"scope": "application",
-					"default": "match"
 				},
 				"remote.SSH.serverValidation": {
 					"type": "string",

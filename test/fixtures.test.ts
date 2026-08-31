@@ -4,6 +4,7 @@ import { xtry } from '@zokugun/xtry/sync';
 import { vol } from 'memfs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
+import SSHConnection from '../src/ssh/sshConnection';
 import { RemoteSSHResolver, SSHConfiguration, getRemoteAuthority } from './rewires/remote';
 import { Log } from './mocks/logger';
 import * as vscode from './mocks/vscode';
@@ -24,6 +25,7 @@ type ServerOptions = {
   image: string;
   username: string;
   password: string;
+  removeServer?: boolean;
 };
 
 const files = fse.walk(ROOT, {
@@ -53,6 +55,8 @@ for (const file of files.value) {
   const containerName = `open-remote-ssh-test-${randomUUID()}`;
 
   describe(name, async () => {
+    let hostPort: number;
+
     beforeAll(async () => {
       vol.reset();
 
@@ -83,7 +87,7 @@ for (const file of files.value) {
         server.image,
       ]);
 
-      const hostPort = getMappedPort(containerName);
+      hostPort = getMappedPort(containerName);
 
       await waitForSSHReady(server.username, server.password, hostPort, 60_000);
     }, 120_000);
@@ -106,12 +110,37 @@ for (const file of files.value) {
         expect(config.getAllConfiguredHosts()).to.eql(client.hosts);
       }
 
+      if (server.removeServer) {
+        const connection = new SSHConnection({
+          host: '127.0.0.1',
+          port: hostPort,
+          username: server.username,
+          password: server.password,
+          reconnect: false,
+          readyTimeout: 10000,
+          strictVendor: false,
+        });
+
+        try {
+          await connection.exec('rm -rf "$HOME/.vscodium-server"');
+        } finally {
+          await connection.close();
+        }
+      }
+
       const logger = new Log('Remote - SSH');
       const extContext = new vscode.ExtensionContext();
       const remoteSSHResolver = new RemoteSSHResolver(extContext, logger);
       const remoteContext = new vscode.RemoteAuthorityResolverContext();
       const authority = getRemoteAuthority('test');
-      const result = await remoteSSHResolver.resolve(authority, remoteContext);
+      const resultPromise = remoteSSHResolver.resolve(authority, remoteContext);
+
+      if (server.removeServer) {
+        await expect(resultPromise).rejects.toThrow('Remote server script not found or empty');
+        return;
+      }
+
+      const result = await resultPromise;
 
       expect(result).toBeDefined();
       expect(result.host).to.eql('127.0.0.1');

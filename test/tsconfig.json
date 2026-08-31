@@ -9,4 +9,10 @@
 		/* Source Map Options */
 		"sourceMap": true,								/* Create source map files for emitted JavaScript files. */
 	},
+	"include": [
+		"./**/*.ts"
+	],
+	"exclude": [
+		"../node_modules"
+	]
 }

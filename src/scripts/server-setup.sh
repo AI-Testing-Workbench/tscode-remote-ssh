@@ -2,10 +2,7 @@
 
 TMP_DIR="${XDG_RUNTIME_DIR:-"/tmp"}"
 
-DISTRO_VERSION="%%DISTRO_VERSION%%"
 DISTRO_COMMIT="%%DISTRO_COMMIT%%"
-DISTRO_QUALITY="%%DISTRO_QUALITY%%"
-DISTRO_VSCODIUM_RELEASE="%%DISTRO_VSCODIUM_RELEASE%%"
 
 SERVER_APP_NAME="%%SERVER_APP_NAME%%"
 SERVER_INITIAL_EXTENSIONS="%%SERVER_INITIAL_EXTENSIONS%%"
@@ -17,15 +14,14 @@ SERVER_SCRIPT="$SERVER_DIR/bin/$SERVER_APP_NAME"
 SERVER_LOGFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.log"
 SERVER_PIDFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.pid"
 SERVER_TOKENFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.token"
-SERVER_ARCH=
 SERVER_CONNECTION_TOKEN=
-SERVER_DOWNLOAD_URL=
 SERVER_VALIDATION_FLAG="%%SERVER_VALIDATION_FLAG%%"
 
 LISTENING_ON=
 OS_RELEASE_ID=
 ARCH=
 PLATFORM=
+ERROR_MESSAGE=
 
 # Mimic output from logs of remote-ssh extension
 print_install_results_and_exit() {
@@ -38,6 +34,7 @@ print_install_results_and_exit() {
   echo "arch==$ARCH=="
   echo "platform==$PLATFORM=="
   echo "tmpDir==$TMP_DIR=="
+  echo "error==$ERROR_MESSAGE=="
 %%ENV_VAR_LINES%%
   echo "%%SCRIPT_ID%%: end"
   exit 0
@@ -108,35 +105,7 @@ case $KERNEL in
     ;;
 esac
 
-# Check machine architecture
 ARCH="$(uname -m)"
-case $ARCH in
-  x86_64 | amd64)
-    SERVER_ARCH="x64"
-    ;;
-  armv7l | armv8l)
-    SERVER_ARCH="armhf"
-    ;;
-  arm64 | aarch64)
-    SERVER_ARCH="arm64"
-    ;;
-  ppc64le)
-    SERVER_ARCH="ppc64le"
-    ;;
-  riscv64)
-    SERVER_ARCH="riscv64"
-    ;;
-  loongarch64)
-    SERVER_ARCH="loong64"
-    ;;
-  s390x)
-    SERVER_ARCH="s390x"
-    ;;
-  *)
-    echo "Error: architecture not supported: $ARCH"
-    print_install_results_and_exit 1
-    ;;
-esac
 
 # https://www.freedesktop.org/software/systemd/man/os-release.html
 OS_RELEASE_ID="$(grep -i '^ID=' /etc/os-release 2>/dev/null | sed 's/^ID=//gi' | sed 's/"//g')"
@@ -147,78 +116,19 @@ if [[ -z $OS_RELEASE_ID ]]; then
   fi
 fi
 
-# Create installation folder
-if [[ ! -d $SERVER_DIR ]]; then
-  mkdir -p $SERVER_DIR
-  if (( $? > 0 )); then
-    echo "Error: creating server install directory"
-    print_install_results_and_exit 1
-  fi
-fi
-
-# adjust platform for vscodium download, if needed
+# Keep the platform name used by the server result for Alpine hosts.
 if [[ $OS_RELEASE_ID = alpine ]]; then
   PLATFORM=$OS_RELEASE_ID
 fi
 
-SERVER_DOWNLOAD_URL="$(echo "%%SERVER_DOWNLOAD_URL_TEMPLATE%%" | sed "s/\${quality}/$DISTRO_QUALITY/g" | sed "s/\${version}/$DISTRO_VERSION/g" | sed "s/\${commit}/$DISTRO_COMMIT/g" | sed "s/\${os}/$PLATFORM/g" | sed "s/\${arch}/$SERVER_ARCH/g" | sed "s/\${release}/$DISTRO_VSCODIUM_RELEASE/g")"
-
-# Check if server script is already installed
-if [[ ! -f $SERVER_SCRIPT ]]; then
-  case "$PLATFORM" in
-    darwin | linux | alpine | freebsd )
-      ;;
-    *)
-      echo "Error: '$PLATFORM' needs manual installation of remote extension host"
-      print_install_results_and_exit 1
-      ;;
-  esac
-
-  pushd $SERVER_DIR > /dev/null
-
-  if command -v wget >/dev/null 2>&1; then
-    wget --tries=3 --timeout=10 --continue --no-verbose -O vscode-server.tar.gz $SERVER_DOWNLOAD_URL
-  elif command -v curl >/dev/null 2>&1; then
-    curl --retry 3 --connect-timeout 10 --location --show-error --silent --output vscode-server.tar.gz $SERVER_DOWNLOAD_URL
-  elif command -v fetch >/dev/null 2>&1; then
-    fetch --retry --timeout=10 --quiet --output=vscode-server.tar.gz $SERVER_DOWNLOAD_URL
-  else
-    echo "Error: no tool to download server binary"
-    print_install_results_and_exit 1
-  fi
-
-  if (( $? > 0 )); then
-    echo "Error downloading server from $SERVER_DOWNLOAD_URL"
-    rm -rf vscode-server.tar.gz
-    print_install_results_and_exit 1
-  fi
-
-  tar -xOf vscode-server.tar.gz > /dev/null 2>&1
-  if (( $? > 0 )); then
-    echo "Error downloaded tarball is corrupt or incomplete"
-    rm -rf vscode-server.tar.gz
-    print_install_results_and_exit 1
-  fi
-
-  tar -xf vscode-server.tar.gz --strip-components 1
-  if (( $? > 0 )); then
-    echo "Error while extracting server contents"
-    rm -rf vscode-server.tar.gz
-    print_install_results_and_exit 1
-  fi
-
-  if [[ ! -f $SERVER_SCRIPT ]] || [[ ! -s $SERVER_SCRIPT ]]; then
-    rm -rf $SERVER_DIR/*
-    echo "Error: server contents are corrupted"
-    print_install_results_and_exit 1
-  fi
-
-  rm -f vscode-server.tar.gz
-
-  popd > /dev/null
-else
-  echo "Server script already installed in $SERVER_SCRIPT"
+# The remote server must be provisioned before this command runs.
+if [[ ! -f $SERVER_SCRIPT ]] || [[ ! -s $SERVER_SCRIPT ]]; then
+  ERROR_MESSAGE="Remote server script not found or empty: $SERVER_SCRIPT"
+  echo "Error: $ERROR_MESSAGE"
+  print_install_results_and_exit 1
 fi
+
+echo "Server script found in $SERVER_SCRIPT"
 
 # Modify the commit in the remote server to match the local value
 if %%MODIFY_PRODUCT_JSON%%; then

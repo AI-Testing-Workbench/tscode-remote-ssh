@@ -14,6 +14,7 @@ export default defineConfig(
     [
     globalIgnores([
         '**/node_modules/',
+        '**/.kilo/',
         '**/out/',
         '**/lib/',
         '**/*.d.ts',
@@ -78,7 +79,7 @@ export default defineConfig(
                 'warn',
                 'single',
                 {
-                    allowTemplateLiterals: true,
+                    allowTemplateLiterals: 'always',
                 }
             ],
         },

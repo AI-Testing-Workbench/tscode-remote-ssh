@@ -13,17 +13,12 @@ async function getVSCodeProductJson() {
     return vscodeProductJson;
 }
 
-export type ServerVersion = 'closest' | 'latest' | 'match' | string;
 export type ServerValidation = 'force' | 'skip' | 'strict';
 
 export type IServerConfig = {
-    version: string;
     commit: string;
-    quality: string;
-    release: string;
     serverApplicationName: string;
     serverDataFolderName: string;
-    serverDownloadUrlTemplate?: string;
     serverValidation: ServerValidation;
 };
 
@@ -34,13 +29,9 @@ export async function getVSCodeServerConfig(): Promise<IServerConfig> {
     const serverValidation = vscode.workspace.getConfiguration('remote.SSH').get<ServerValidation>('serverValidation', 'strict');
 
     return {
-        version: vscode.version.replace('-insider',''),
         commit: productJson.commit as string,
-        quality: productJson.quality as string,
-        release: productJson.release as string || '',
         serverApplicationName: customServerBinaryName || productJson.serverApplicationName as string,
         serverDataFolderName: productJson.serverDataFolderName as string,
-        serverDownloadUrlTemplate: productJson.serverDownloadUrlTemplate as string,
         serverValidation,
     };
 }
