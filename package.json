@@ -147,36 +147,11 @@
 					"description": "为 true 时，远程 TestAgent 服务器将监听套接字路径，而不是打开端口。仅适用于 Linux 和 macOS 远程主机。要求 SSH 服务器启用 `AllowStreamLocalForwarding`。",
 					"default": false
 				},
-				"remote.SSH.serverInstallPath": {
-					"type": "object",
-					"description": "指定 TestAgent 服务器在远程主机上的自定义安装目录。将每个远程主机名 (或模式) 映射到服务器应安装的绝对路径。支持通配符：使用 `*` 匹配所有主机，或使用 `*.domain.com` 指定域名路径。更具体的模式优先于通用模式。未指定时，服务器将安装到默认主目录。**注意**：更改此设置可能需要手动清理之前位置中的现有服务器安装。",
-					"scope": "application",
-					"default": {},
-					"additionalProperties": {
-						"type": "string"
-					}
-				},
 				"remote.SSH.serverBinaryName": {
 					"type": "string",
-					"description": "服务器二进制文件的名称。仅在使用没有对应服务器版本的客户端时使用此项。",
+					"description": "预装远程服务器二进制文件的名称。",
 					"scope": "application",
 					"default": ""
-				},
-				"remote.SSH.serverValidation": {
-					"type": "string",
-					"description": "服务器验证类型：`strict` (默认)要求通过匹配提交 ID 确保远程和本地服务器版本一致；`force` 修改远程提交 ID 以匹配本地服务器；`skip` 完全跳过验证。",
-					"scope": "application",
-					"default": "strict",
-					"enum": [
-						"force",
-						"skip",
-						"strict"
-					],
-					"enumDescriptions": [
-						"修改远程服务器的提交 ID。",
-						"远程服务器不会验证客户端。",
-						"远程服务器与客户端的提交 ID 必须匹配。 (默认)"
-					]
 				}
 			}
 		},

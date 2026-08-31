@@ -9,14 +9,12 @@ $SERVER_APP_NAME="%%SERVER_APP_NAME%%"
 $SERVER_INITIAL_EXTENSIONS="%%SERVER_INITIAL_EXTENSIONS%%"
 $SERVER_LISTEN_FLAG="%%SERVER_LISTEN_FLAG%%"
 $SERVER_DATA_DIR="%%SERVER_DATA_DIR%%"
-$SERVER_DATA_DIR_FLAG="%%SERVER_DATA_DIR_FLAG%%"
 $SERVER_DIR="$SERVER_DATA_DIR\bin\$DISTRO_COMMIT"
 $SERVER_SCRIPT="$SERVER_DIR\bin\$SERVER_APP_NAME.cmd"
 $SERVER_LOGFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.log"
 $SERVER_PIDFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.pid"
 $SERVER_TOKENFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.token"
 $SERVER_CONNECTION_TOKEN=
-$SERVER_VALIDATION_FLAG="%%SERVER_VALIDATION_FLAG%%"
 
 $LISTENING_ON=
 $OS_RELEASE_ID=
@@ -52,13 +50,6 @@ if(!$SERVER_SCRIPT_ITEM -or $SERVER_SCRIPT_ITEM.Length -eq 0) {
 
 "Server script found in $SERVER_SCRIPT"
 
-# Modify the commit in the remote server to match the local value
-if(%%MODIFY_PRODUCT_JSON%%) {
-  echo "Will modify product.json on remote to match the commit value"
-  (Get-Content -Raw "$SERVER_DIR\product.json") -replace '"commit": "[0-9a-f]+",', ('"commit": "' + $DISTRO_COMMIT + '",') |
-  Set-Content -NoNewLine "$SERVER_DIR\product.json"
-}
-
 # Try to find if server is already running
 if(Get-Process node -ErrorAction SilentlyContinue | Where-Object Path -Like "$SERVER_DIR\*") {
   echo "Server script is already running $SERVER_SCRIPT"
@@ -77,7 +68,7 @@ else {
   $SERVER_CONNECTION_TOKEN="%%SERVER_CONNECTION_TOKEN%%"
   [System.IO.File]::WriteAllLines($SERVER_TOKENFILE, $SERVER_CONNECTION_TOKEN)
 
-  $SCRIPT_ARGUMENTS="--start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_DATA_DIR_FLAG $SERVER_VALIDATION_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms *> '$SERVER_LOGFILE'"
+  $SCRIPT_ARGUMENTS="--start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms *> '$SERVER_LOGFILE'"
 
   $START_ARGUMENTS = @{
     FilePath = "powershell.exe"

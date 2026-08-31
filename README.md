@@ -54,31 +54,21 @@ sudo apk add bash libstdc++
 [OpenSSH](https://www.openssh.com/) supports using a [configuration file](https://linuxize.com/post/using-the-ssh-config-file/) to store all your different SSH connections.
 To use an SSH config file, run the `Remote-SSH: Open SSH Configuration File...` command.
 
-## Note for VSCode-OSS users
+## Note for preinstalled remote servers
 
-If you are using VSCode-OSS instead of VSCodium, the remote extension host must be
-installed on the remote machine before connecting. The extension does not download
-or install the server binary.
+The remote server must be installed on the remote machine before connecting. The
+extension does not download or install the server binary.
 
 Modify the following entry when the preinstalled server uses a custom executable name:
 
 ```
-"remote.SSH.serverBinaryName": "codium-server",
-"remote.SSH.serverValidation": "force",
+"remote.SSH.serverBinaryName": "codium-server"
 ```
 
-The server executable is expected at the path derived from the local product metadata:
+The server executable is expected at the following path:
 
 ```
-$HOME/<serverDataFolderName>/bin/<local commit>/bin/<serverBinaryName>
+$HOME/<serverDataFolderName>/bin/testagent/bin/<serverBinaryName>
 ```
 
-Use `remote.SSH.serverInstallPath` to change `<serverDataFolderName>` to a custom
-remote installation directory. A connection fails immediately when the executable
-is missing or empty.
-
-If the local and remote VSCodium versions don't match, which will be the case on VSCode-OSS,
-remote server validation needs to be bypassed. Setting `serverValidation` to `"force"` will
-modify the commit of the remote server to make it match the local VSCode commit.
-If `serverValidation` is set to `"skip"`, the remote server will skip checking that the commits
-match. This option is working only if the remote VSCodium version is `>=1.120`.
+A connection fails immediately when the executable is missing or empty.

@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Log } from './common/logger';
-import { getVSCodeServerConfig, ServerValidation } from './serverConfig';
+import { DISTRO_COMMIT, getVSCodeServerConfig } from './serverConfig';
 import SSHConnection from './ssh/sshConnection';
 import { sanitizeExtensionIds } from './utils/sanitize-extension-ids';
 
@@ -19,70 +19,13 @@ function compileTemplate(templateName: string, variables: Record<string, string>
     return content;
 }
 
-/**
- * Matches a hostname against a pattern that may contain wildcards.
- * Returns a specificity score: higher scores indicate more specific matches.
- * Returns -1 if no match.
- */
-function matchHostnamePattern(hostname: string, pattern: string): number {
-    // Exact match has highest priority
-    if (hostname === pattern) {
-        return 1000;
-    }
-
-    // Catch-all wildcard has lowest priority
-    if (pattern === '*') {
-        return 1;
-    }
-
-    // Convert wildcard pattern to regex
-    // Escape special regex characters except *
-    const regexPattern = pattern
-        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*/g, '.*');
-
-    const regex = new RegExp(`^${regexPattern}$`);
-
-    if (regex.test(hostname)) {
-        // Calculate specificity based on the number of non-wildcard characters
-        // More specific patterns (more characters) get higher scores
-        const nonWildcardChars = pattern.replace(/\*/g, '').length;
-        return 10 + nonWildcardChars;
-    }
-
-    return -1;
-}
-
-/**
- * Finds the best matching path for a hostname from a map of patterns to paths.
- * Supports wildcards with priority: exact match > specific wildcard > general wildcard.
- */
-export function findServerInstallPath(hostname: string, pathMap: Record<string, string>): string | undefined {
-    let bestMatch: { pattern: string; path: string; score: number } | undefined;
-
-    for (const [pattern, path] of Object.entries(pathMap)) {
-        const score = matchHostnamePattern(hostname, pattern);
-
-        if (score > 0) {
-            if (!bestMatch || score > bestMatch.score) {
-                bestMatch = { pattern, path, score };
-            }
-        }
-    }
-
-    return bestMatch?.path;
-}
-
 export type ServerInstallOptions = {
     id: string;
-    commit: string;
     extensionIds: string[];
     envVariables: string[];
     useSocketPath: boolean;
     serverApplicationName: string;
     serverDataFolderName: string;
-    customInstallPath?: string;
-    serverValidation: ServerValidation;
 };
 
 export type ServerInstallResult = {
@@ -109,7 +52,6 @@ export async function installCodeServer(
     envVariables: string[],
     platform: string | undefined,
     useSocketPath: boolean,
-    customInstallPath: string | undefined,
     logger: Log,
     extensionPath: string
 ): Promise<ServerInstallResult> {
@@ -148,14 +90,11 @@ export async function installCodeServer(
 
     const installOptions: ServerInstallOptions = {
         id: scriptId,
-        commit: vscodeServerConfig.commit,
         extensionIds : sanitizeExtensionIds(extensionIds),
         envVariables,
         useSocketPath,
         serverApplicationName: vscodeServerConfig.serverApplicationName,
         serverDataFolderName: vscodeServerConfig.serverDataFolderName,
-        customInstallPath,
-        serverValidation: vscodeServerConfig.serverValidation,
     };
 
     let commandOutput: { stdout: string; stderr: string };
@@ -165,7 +104,7 @@ export async function installCodeServer(
         logger.trace('Server install command:', installServerScript);
 
         const installDir = `$HOME\\${vscodeServerConfig.serverDataFolderName}\\install`;
-        const installScript = `${installDir}\\${vscodeServerConfig.commit}.ps1`;
+        const installScript = `${installDir}\\${DISTRO_COMMIT}.ps1`;
         const endRegex = new RegExp(`${scriptId}: end`);
 
         // investigate if it's possible to use `-EncodedCommand` flag
@@ -276,52 +215,42 @@ function parseServerInstallOutput(str: string, scriptId: string): { [k: string]:
     return resultMap;
 }
 
-function generateBashInstallScript({ id, commit, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, customInstallPath, serverValidation }: ServerInstallOptions, extensionPath: string): string {
+function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName }: ServerInstallOptions, extensionPath: string): string {
     const extensions = extensionIds.map(extId => '--install-extension ' + extId).join(' ');
-    const serverDataDir = customInstallPath
-        ? customInstallPath.replace(/^~(?=\/|$)/, '$HOME')
-        : `$HOME/${serverDataFolderName}`;
+    const serverDataDir = `$HOME/${serverDataFolderName}`;
     const listenFlag = useSocketPath
         ? `--socket-path="$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}"`
         : '--port=0';
     const envVarLines = envVariables.map(envVar => `  echo "${envVar}==$${envVar}=="`).join('\n');
 
     return compileTemplate('server-setup.sh', {
-        DISTRO_COMMIT: commit,
+        DISTRO_COMMIT,
         SERVER_APP_NAME: serverApplicationName,
         SERVER_INITIAL_EXTENSIONS: extensions,
         SERVER_LISTEN_FLAG: listenFlag,
         SERVER_DATA_DIR: serverDataDir,
-        SERVER_DATA_DIR_FLAG: customInstallPath ? '--server-data-dir="$SERVER_DATA_DIR"' : '',
-        SERVER_VALIDATION_FLAG: serverValidation === 'skip' ? '--disable-client-validation' : '',
         SCRIPT_ID: id,
         ENV_VAR_LINES: envVarLines,
-        MODIFY_PRODUCT_JSON: serverValidation === 'force' ? 'true' : 'false',
         SERVER_CONNECTION_TOKEN: crypto.randomUUID(),
     }, extensionPath);
 }
 
-function generatePowerShellInstallScript({ id, commit, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, customInstallPath, serverValidation }: ServerInstallOptions, extensionPath: string): string {
+function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName }: ServerInstallOptions, extensionPath: string): string {
     const extensions = extensionIds.map(extId => '--install-extension ' + extId).join(' ');
-    const serverDataDir = customInstallPath
-        ? customInstallPath.replace(/^~(?=[\\/]|$)/, '$(Resolve-Path ~)')
-        : `$(Resolve-Path ~)\\${serverDataFolderName}`;
+    const serverDataDir = `$(Resolve-Path ~)\\${serverDataFolderName}`;
     const listenFlag = useSocketPath
         ? `--socket-path="$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}"`
         : '--port=0';
     const envVarLines = envVariables.map(envVar => `    "$${envVar}==$${envVar}=="`).join('\n');
 
     return compileTemplate('server-setup.ps1', {
-        DISTRO_COMMIT: commit,
+        DISTRO_COMMIT,
         SERVER_APP_NAME: serverApplicationName,
         SERVER_INITIAL_EXTENSIONS: extensions,
         SERVER_LISTEN_FLAG: listenFlag,
         SERVER_DATA_DIR: serverDataDir,
-        SERVER_DATA_DIR_FLAG: customInstallPath ? '--server-data-dir=""$SERVER_DATA_DIR""' : '',
-        SERVER_VALIDATION_FLAG: serverValidation === 'skip' ? '--disable-client-validation' : '',
         SCRIPT_ID: id,
         ENV_VAR_LINES: envVarLines,
-        MODIFY_PRODUCT_JSON: serverValidation === 'force' ? '$true' : '$false',
         SERVER_CONNECTION_TOKEN: crypto.randomUUID(),
     }, extensionPath);
 }

@@ -8,14 +8,12 @@ SERVER_APP_NAME="%%SERVER_APP_NAME%%"
 SERVER_INITIAL_EXTENSIONS="%%SERVER_INITIAL_EXTENSIONS%%"
 SERVER_LISTEN_FLAG="%%SERVER_LISTEN_FLAG%%"
 SERVER_DATA_DIR="%%SERVER_DATA_DIR%%"
-SERVER_DATA_DIR_FLAG="%%SERVER_DATA_DIR_FLAG%%"
 SERVER_DIR="$SERVER_DATA_DIR/bin/$DISTRO_COMMIT"
 SERVER_SCRIPT="$SERVER_DIR/bin/$SERVER_APP_NAME"
 SERVER_LOGFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.log"
 SERVER_PIDFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.pid"
 SERVER_TOKENFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.token"
 SERVER_CONNECTION_TOKEN=
-SERVER_VALIDATION_FLAG="%%SERVER_VALIDATION_FLAG%%"
 
 LISTENING_ON=
 OS_RELEASE_ID=
@@ -130,16 +128,6 @@ fi
 
 echo "Server script found in $SERVER_SCRIPT"
 
-# Modify the commit in the remote server to match the local value
-if %%MODIFY_PRODUCT_JSON%%; then
-  if command -v sed >/dev/null 2>&1; then
-    echo "Will modify product.json on remote to match the commit value"
-    sed -i -E 's/"commit": "[0-9a-f]+",/"commit": "'"$DISTRO_COMMIT"'",/' "$SERVER_DIR/product.json";
-  else
-    echo "Cannot find the 'sed' command, make sure it is installed to modify product.json with the matching commit."
-  fi
-fi
-
 # Try to find if server is already running
 if [[ -f $SERVER_PIDFILE ]]; then
   SERVER_PID="$(cat $SERVER_PIDFILE)"
@@ -161,7 +149,7 @@ if [[ -z $SERVER_RUNNING_PROCESS ]]; then
   SERVER_CONNECTION_TOKEN="%%SERVER_CONNECTION_TOKEN%%"
   echo $SERVER_CONNECTION_TOKEN > $SERVER_TOKENFILE
 
-  $SERVER_SCRIPT --start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_DATA_DIR_FLAG $SERVER_VALIDATION_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms &> $SERVER_LOGFILE &
+  $SERVER_SCRIPT --start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms &> $SERVER_LOGFILE &
   echo $! > $SERVER_PIDFILE
 else
   echo "Server script is already running $SERVER_SCRIPT"
