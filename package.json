@@ -104,7 +104,7 @@
 				"testagnet.remote.defaultPath": {
 					"type": "string",
 					"description": "远程连接主机默认打开的绝对路径。",
-					"default": "",
+					"default": "/app",
 					"scope": "application"
 				},
 				"testagnet.remote.connectTimeout": {
