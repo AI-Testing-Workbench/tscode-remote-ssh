@@ -46,7 +46,7 @@ async function promptForHost(): Promise<string | undefined> {
         quickPick.onDidChangeValue(value => {
             const typed = value.trim();
             quickPick.items = typed && !configuredHosts.includes(typed)
-                ? [{ label: typed, description: '连接到此 TestAgent Cloud 连接' }, ...hostItems]
+                ? [{ label: typed, description: '连接到此 TestAgent Cloud 服务' }, ...hostItems]
                 : hostItems;
         });
 

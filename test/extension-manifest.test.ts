@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 type ExtensionManifest = {
+    activationEvents: string[];
     contributes: {
         commands: Array<{ command: string }>;
         menus: Record<string, Array<{ command: string }>>;
@@ -37,6 +38,8 @@ describe('extension manifest', () => {
             'testagnet.remote.skipKnownHostsCheck': { type: 'boolean', default: true },
             'testagnet.remote.historyLimit': { type: 'integer', default: 5 },
             'testagnet.remote.statusSyncInterval': { type: 'number', default: 5 },
+            'testagnet.remote.debug': { type: 'boolean', default: false },
+            'testagnet.remote.configFile': { type: 'string', default: '~/.local/share/testagent' },
         });
 
         for (const key of [
@@ -44,8 +47,17 @@ describe('extension manifest', () => {
             'testagnet.remote.skipKnownHostsCheck',
             'testagnet.remote.historyLimit',
             'testagnet.remote.statusSyncInterval',
+            'testagnet.remote.debug',
+            'testagnet.remote.configFile',
         ]) {
             expect(properties[key].description).toBeTruthy();
         }
+    });
+
+    it('declares the container refresh command activation', () => {
+        const commandIds = manifest.contributes.commands.map(({ command }) => command);
+
+        expect(commandIds).toContain('openremotessh.refreshContainers');
+        expect(manifest.activationEvents).toContain('onCommand:openremotessh.refreshContainers');
     });
 });

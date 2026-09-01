@@ -76,6 +76,8 @@ const window = {
         show: vi.fn(),
         dispose: vi.fn()
     })),
+    showErrorMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
     setPassword: (password: string) => {
         $password = password;
     },
@@ -108,7 +110,7 @@ const workspace = {
             const settingKey = `${section}.${key}`;
             return configurationValues.has(settingKey)
                 ? configurationValues.get(settingKey)
-                : key === 'configFile' ? '/etc/ssh/ssh_config' : defaultValue;
+                : key === 'configFile' ? '~/.local/share/testagent' : defaultValue;
         }),
         update: vi.fn(() => Promise.resolve())
     })),

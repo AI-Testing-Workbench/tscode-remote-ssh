@@ -13,7 +13,16 @@ export async function exists(path: string) {
 }
 
 export function untildify(path: string){
-    return path.replace(/^~(?=$|\/|\\)/, homeDir);
+    return expandPath(path);
+}
+
+export function expandPath(path: string, homeDirectory: string = homeDir): string {
+    return path
+        .replace(/^~(?=$|\/|\\)/, homeDirectory)
+        .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|%([^%]+)%/g, (match, bracedName, plainName, windowsName) => {
+            const variableName = bracedName || plainName || windowsName;
+            return process.env[variableName] ?? match;
+        });
 }
 
 export function normalizeToSlash(path: string) {

@@ -88,6 +88,7 @@
 		"onCommand:openremotessh.openEmptyWindowInCurrentWindow",
 		"onCommand:openremotessh.openConfigFile",
 		"onCommand:openremotessh.showLog",
+		"onCommand:openremotessh.refreshContainers",
 		"onResolveRemoteAuthority:ssh-remote",
 		"onView:sshHosts"
 	],
@@ -97,40 +98,14 @@
 			"properties": {
 				"testagnet.remote.backendApiUrl": {
 					"type": "string",
-					"description": "后端服务的 API 地址。",
+					"description": "后端 TestAgent Cloud 服务的 API 地址。",
 					"default": "",
-					"scope": "application"
-				},
-				"testagnet.remote.skipKnownHostsCheck": {
-					"type": "boolean",
-					"description": "是否在 SSH 配置中为新增主机声明跳过指纹验证。",
-					"default": true,
-					"scope": "application"
-				},
-				"testagnet.remote.historyLimit": {
-					"type": "integer",
-					"description": "指定过期主机的保留个数。",
-					"default": 5,
-					"minimum": 0,
-					"scope": "application"
-				},
-				"testagnet.remote.statusSyncInterval": {
-					"type": "number",
-					"description": "指定主机状态的同步时间 (秒)。",
-					"default": 5,
-					"minimum": 1,
 					"scope": "application"
 				},
 				"testagnet.remote.configFile": {
 					"type": "string",
-					"description": "自定义 SSH 配置文件的绝对路径。",
-					"default": "",
-					"scope": "application"
-				},
-				"testagnet.remote.defaultPath": {
-					"type": "string",
-					"description": "远程连接主机默认打开的绝对路径。",
-					"default": "/app",
+					"description": "指定 SSH 配置文件的绝对路径。",
+					"default": "~/.local/share/testagent",
 					"scope": "application"
 				},
 				"testagnet.remote.connectTimeout": {
@@ -140,6 +115,12 @@
 					"scope": "application",
 					"minimum": 1
 				},
+				"testagnet.remote.debug": {
+					"type": "boolean",
+					"description": "启用调试模式。",
+					"default": false,
+					"scope": "application"
+				},
 				"testagnet.remote.defaultExtensions": {
 					"type": "array",
 					"items": {
@@ -148,17 +129,30 @@
 					"description": "应自动安装到所有 SSH 主机上的扩展列表。",
 					"scope": "application"
 				},
-				"testagnet.remote.enableDynamicForwarding": {
-					"type": "boolean",
-					"description": "是否使用 SSH 动态转发，以便通过现有 SSH 连接建立新的端口隧道。",
-					"scope": "application",
-					"default": true
+				"testagnet.remote.defaultPath": {
+					"type": "string",
+					"description": "远程连接主机默认打开的绝对路径。",
+					"default": "/app",
+					"scope": "application"
 				},
 				"testagnet.remote.enableAgentForwarding": {
 					"type": "boolean",
 					"markdownDescription": "启用远程环境修复，使 SSH 配置选项 `ForwardAgent` 在 TestAgent 工作台的远程扩展主机中按预期生效。",
 					"scope": "application",
 					"default": true
+				},
+				"testagnet.remote.enableDynamicForwarding": {
+					"type": "boolean",
+					"description": "是否使用 SSH 动态转发，以便通过现有 SSH 连接建立新的端口隧道。",
+					"scope": "application",
+					"default": true
+				},
+				"testagnet.remote.historyLimit": {
+					"type": "integer",
+					"description": "指定过期主机的保留个数。",
+					"default": 5,
+					"minimum": 0,
+					"scope": "application"
 				},
 				"testagnet.remote.remotePlatform": {
 					"type": "object",
@@ -178,6 +172,19 @@
 					"type": "boolean",
 					"description": "为 true 时，远程 TestAgent 服务器将监听套接字路径，而不是打开端口。仅适用于 Linux 和 macOS 远程主机。要求 SSH 服务器启用 `AllowStreamLocalForwarding`。",
 					"default": false
+				},
+				"testagnet.remote.skipKnownHostsCheck": {
+					"type": "boolean",
+					"description": "是否在 SSH 配置中为新增主机跳过指纹验证。",
+					"default": true,
+					"scope": "application"
+				},
+				"testagnet.remote.statusSyncInterval": {
+					"type": "number",
+					"description": "指定主机状态的同步时间 (秒)。",
+					"default": 5,
+					"minimum": 1,
+					"scope": "application"
 				}
 			}
 		},
@@ -210,6 +217,11 @@
 			{
 				"command": "openremotessh.showLog",
 				"title": "显示日志",
+				"category": "TestAgent Cloud"
+			},
+			{
+				"command": "openremotessh.refreshContainers",
+				"title": "刷新 TestAgent Cloud 列表",
 				"category": "TestAgent Cloud"
 			},
 			{

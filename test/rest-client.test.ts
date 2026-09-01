@@ -38,6 +38,7 @@ describe('RestClient', () => {
         await client.user.createContainer({ user_id: 'user-1' });
         await client.user.getContainerIds({ user_id: 'user-1', gitee_repository: 'repo' });
         await client.user.getContainer('container/1');
+        await client.user.checkAdmin({ user_id: 'user-1' });
         await client.user.startContainer('container/1');
         await client.user.stopContainer('container/1');
         await client.user.restartContainer('container/1');
@@ -73,6 +74,7 @@ describe('RestClient', () => {
             'POST /v1/user/containers',
             'GET /v1/user/containers',
             'GET /v1/user/containers/container%2F1',
+            'POST /v1/user/check',
             'POST /v1/user/containers/container%2F1/start',
             'POST /v1/user/containers/container%2F1/stop',
             'POST /v1/user/containers/container%2F1/restart',
@@ -106,8 +108,9 @@ describe('RestClient', () => {
 
         expect(requests[1].url.search).toBe('?user_id=user-1&gitee_repository=repo');
         expect(Buffer.from(requests[0].body ?? '').toString('utf8')).toBe('{"user_id":"user-1"}');
-        const multipartBody = Buffer.from(requests[7].body ?? '').toString('utf8');
-        expect(requests[7].headers['Content-Type']).toMatch(/^multipart\/form-data; boundary=/);
+        expect(Buffer.from(requests[3].body ?? '').toString('utf8')).toBe('{"user_id":"user-1"}');
+        const multipartBody = Buffer.from(requests[8].body ?? '').toString('utf8');
+        expect(requests[8].headers['Content-Type']).toMatch(/^multipart\/form-data; boundary=/);
         expect(multipartBody).toContain('name="auto_push"');
         expect(multipartBody).toContain('name="file"; filename="image.tar"');
         expect(multipartBody).toContain('tar');

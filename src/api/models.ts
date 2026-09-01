@@ -25,9 +25,25 @@ export interface ContainerStatusResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    gitee_user: string;
+    gitee_repository: string;
 }
 
-export type CreateContainerResponse = ContainerStatusResponse;
+export interface CreateContainerResponse {
+    container_id: string;
+    status: string;
+    endpoint?: string | null;
+    started_at?: string | null;
+    expires_at?: string | null;
+}
+
+export interface AdminCheckRequest {
+    user_id: string;
+}
+
+export interface AdminCheckResponse {
+    admin: boolean;
+}
 
 export interface AdminCreateContainerRequest {
     user_id: string;

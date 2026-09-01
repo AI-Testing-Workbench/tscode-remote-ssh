@@ -16,6 +16,14 @@ import { findRandomPort } from './common/ports';
 import { disposeAll } from './common/disposable';
 import { installCodeServer, ServerInstallError } from './serverSetup';
 import { isWindows } from './common/platform';
+import {
+    confirmDebugEnvironment,
+    DebugEnvironmentPreparationCancelledError,
+    formatContainerEndpoint,
+    InvalidContainerEndpointError,
+    parseContainerEndpoint,
+} from './containerEndpoint';
+import { getRemoteSettings } from './settings';
 import * as os from 'os';
 
 const PASSWORD_RETRY_COUNT = 3;
@@ -143,6 +151,19 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 const sshHostName = sshHostConfig['HostName'] ? sshHostConfig['HostName'].replace('%h', sshDest.hostname) : sshDest.hostname;
                 const sshUser = sshHostConfig['User'] || sshDest.user || os.userInfo().username || ''; // https://github.com/openssh/openssh-portable/blob/5ec5504f1d328d5bfa64280cd617c3efec4f78f3/sshconnect.c#L1561-L1562
                 const sshPort = sshHostConfig['Port'] ? parseInt(sshHostConfig['Port'], 10) : (sshDest.port || 22);
+                const containerId = sshHostConfig['ContainerId'];
+                if (containerId) {
+                    const endpoint = formatContainerEndpoint(sshHostName, sshHostConfig['Port']);
+                    if (!parseContainerEndpoint(endpoint)) {
+                        throw new InvalidContainerEndpointError(containerId, endpoint);
+                    }
+                    if (getRemoteSettings().debug) {
+                        await confirmDebugEnvironment(
+                            (message, options, ...items) => vscode.window.showWarningMessage(message, options, ...items),
+                            containerId,
+                        );
+                    }
+                }
 
                 this.sshAgentSock = sshHostConfig['IdentityAgent'] || process.env['SSH_AUTH_SOCK'] || (isWindows ? '\\\\.\\pipe\\openssh-ssh-agent' : undefined);
                 this.sshAgentSock = this.sshAgentSock ? untildify(this.sshAgentSock) : undefined;
@@ -300,6 +321,15 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 return resolvedResult;
             } catch (e: unknown) {
                 this.logger.error(`Error resolving authority`, e);
+
+                if (e instanceof InvalidContainerEndpointError) {
+                    await vscode.window.showErrorMessage(e.message, { modal: true });
+                    throw vscode.RemoteAuthorityResolverError.NotAvailable(e.message);
+                }
+
+                if (e instanceof DebugEnvironmentPreparationCancelledError) {
+                    throw vscode.RemoteAuthorityResolverError.NotAvailable(e.message);
+                }
 
                 // Initial connection
                 if (context.resolveAttempt === 1) {

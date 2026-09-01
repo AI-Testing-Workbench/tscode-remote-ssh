@@ -5,6 +5,8 @@ import {
     AdminContainerListResponse,
     AdminContainerResponse,
     AdminCreateContainerRequest,
+    AdminCheckRequest,
+    AdminCheckResponse,
     ContainerIdsResponse,
     ContainerLimitRequest,
     ContainerLimitResponse,
@@ -77,6 +79,7 @@ export interface UserRestApi {
     createContainer(request: CreateContainerRequest): Promise<CreateContainerResponse>;
     getContainerIds(query: UserContainerQuery): Promise<ContainerIdsResponse>;
     getContainer(containerId: string): Promise<ContainerStatusResponse>;
+    checkAdmin(request: AdminCheckRequest): Promise<AdminCheckResponse>;
     startContainer(containerId: string): Promise<void>;
     stopContainer(containerId: string): Promise<void>;
     restartContainer(containerId: string): Promise<void>;
@@ -196,6 +199,7 @@ export class RestClient {
             createContainer: request => this.requestJson<CreateContainerResponse>('POST', '/user/containers', { jsonBody: request }),
             getContainerIds: query => this.requestJson<ContainerIdsResponse>('GET', '/user/containers', { query }),
             getContainer: containerId => this.requestJson<ContainerStatusResponse>('GET', this.containerPath('/user/containers', containerId)),
+            checkAdmin: request => this.requestJson<AdminCheckResponse>('POST', '/user/check', { jsonBody: request }),
             startContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'start')),
             stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'stop')),
             restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'restart')),
@@ -323,7 +327,7 @@ export class RestClient {
             throw new RestClientError(
                 'http',
                 apiError?.code ?? REST_ERROR_CODES.HTTP,
-                apiError?.message ?? `后端 REST API 请求失败（HTTP ${response.statusCode}）`,
+                apiError?.message ?? `后端 REST API 请求失败 (HTTP ${response.statusCode})`,
                 response.statusCode,
             );
         }
@@ -335,7 +339,7 @@ export class RestClient {
             throw new RestClientError(
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
-                '后端 REST API 返回了无效 JSON',
+                '后端 REST API 返回了无效的 JSON',
                 response.statusCode,
             );
         }

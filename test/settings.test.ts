@@ -12,12 +12,14 @@ describe('remote settings', () => {
         vscode.setConfigurationValue('testagnet.remote', 'skipKnownHostsCheck', false);
         vscode.setConfigurationValue('testagnet.remote', 'historyLimit', 12);
         vscode.setConfigurationValue('testagnet.remote', 'statusSyncInterval', 2.5);
+        vscode.setConfigurationValue('testagnet.remote', 'debug', true);
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: 'https://api.example.test/',
             skipKnownHostsCheck: false,
             historyLimit: 12,
             statusSyncInterval: 2.5,
+            debug: true,
         });
     });
 
@@ -26,12 +28,14 @@ describe('remote settings', () => {
         vscode.setConfigurationValue('testagnet.remote', 'skipKnownHostsCheck', 'false');
         vscode.setConfigurationValue('testagnet.remote', 'historyLimit', 1.5);
         vscode.setConfigurationValue('testagnet.remote', 'statusSyncInterval', 0);
+        vscode.setConfigurationValue('testagnet.remote', 'debug', 'true');
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: '',
             skipKnownHostsCheck: true,
             historyLimit: 5,
             statusSyncInterval: 5,
+            debug: false,
         });
     });
 });

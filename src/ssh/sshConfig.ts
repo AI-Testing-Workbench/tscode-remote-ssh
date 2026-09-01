@@ -2,10 +2,10 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 import SSHConfig, { Directive, Line, Section } from 'ssh-config';
-import * as vscode from 'vscode';
 import { exists as fileExists, normalizeToSlash, untildify } from '../common/files';
 import { isWindows } from '../common/platform';
 import { glob } from 'glob';
+import { getConfiguredContainerConfigPath } from '../containerConfig';
 
 // Only a few directives might return an array
 // https://github.com/cyjake/ssh-config/blob/master/src/ssh-config.ts#L10
@@ -24,8 +24,7 @@ const systemSSHConfig = isWindows ? path.resolve(process.env.ALLUSERSPROFILE || 
 const defaultSSHConfigPath = path.resolve(os.homedir(), '.ssh/config');
 
 export function getSSHConfigPath() {
-    const sshConfigPath = vscode.workspace.getConfiguration('testagnet.remote').get<string>('configFile');
-    return sshConfigPath ? untildify(sshConfigPath) : defaultSSHConfigPath;
+    return getConfiguredContainerConfigPath();
 }
 
 function isDirective(line: Line): line is Directive {
@@ -71,13 +70,13 @@ function normalizeSSHConfig(config: SSHConfig) {
     return config;
 }
 
-async function resolveInclude(line: Section, userConfig: boolean): Promise<SSHConfig[]> {
+async function resolveInclude(line: Section, userConfig: boolean, sourceFilePath: string): Promise<SSHConfig[]> {
     const values = (line.value as string).split(',').map(s => s.trim());
     const configs: SSHConfig[] = [];
     for (const value of values) {
         const includePaths = await glob(normalizeToSlash(untildify(value)), {
             absolute: true,
-            cwd: normalizeToSlash(path.dirname(userConfig ? defaultSSHConfigPath : systemSSHConfig))
+            cwd: normalizeToSlash(path.dirname(sourceFilePath))
         });
         for (const p of includePaths) {
             configs.push(await parseSSHConfigFromFile(p, userConfig));
@@ -97,7 +96,7 @@ async function parseSSHConfigFromFile(filePath: string, userConfig: boolean) {
     for (let i = 0; i < config.length; i++) {
         const line = config[i];
         if (isIncludeDirective(line)) {
-            includedConfigs.push([i, await resolveInclude(line, userConfig)]);
+                    includedConfigs.push([i, await resolveInclude(line, userConfig, filePath)]);
         } else if (isHostSection(line)) {
             // ssh config has no block terminator, so an `Include` written after a
             // `Host` block is parsed as a child of that block. ssh reads the file
@@ -107,7 +106,7 @@ async function parseSSHConfigFromFile(filePath: string, userConfig: boolean) {
             for (let j = line.config.length - 1; j >= 0; j--) {
                 const child = line.config[j];
                 if (isIncludeDirective(child)) {
-                    hoisted.unshift(...await resolveInclude(child, userConfig));
+                    hoisted.unshift(...await resolveInclude(child, userConfig, filePath));
                     line.config.splice(j, 1);
                 }
             }
@@ -129,7 +128,12 @@ async function parseSSHConfigFromFile(filePath: string, userConfig: boolean) {
 export default class SSHConfiguration {
 
     static async loadFromFS(): Promise<SSHConfiguration> {
-        const config = await parseSSHConfigFromFile(getSSHConfigPath(), true);
+        const userConfigPath = getSSHConfigPath();
+        const config = new SSHConfig();
+        if (userConfigPath !== defaultSSHConfigPath) {
+            config.push(...await parseSSHConfigFromFile(defaultSSHConfigPath, true));
+        }
+        config.push(...await parseSSHConfigFromFile(userConfigPath, true));
         config.push(...await parseSSHConfigFromFile(systemSSHConfig, false));
 
         return new SSHConfiguration(config);

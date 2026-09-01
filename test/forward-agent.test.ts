@@ -101,6 +101,7 @@ it('forwards the agent through a socket that stays alive', async () => {
     '/bin/vscodium/app/product.json': PRODUCT_JSON,
     '/data/vscodium/extensions/open-remote-ssh/src/scripts/server-setup.sh': SERVER_SETUP,
   });
+  vscode.setConfigurationValue('testagnet.remote', 'configFile', '/etc/ssh/ssh_config');
 
   vscode.window.setPassword(PASSWORD);
 
