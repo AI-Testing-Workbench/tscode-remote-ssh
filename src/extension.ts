@@ -10,10 +10,11 @@ import { ContainerConfig } from './containerConfig';
 import { ContainerSync } from './containerSync';
 import { SidebarSyncState } from './sidebarView';
 import { UserIdProvider } from './user';
+import { createPublicUserContainerApi, type TestAgentRemoteApi } from './api/publicApi';
 
 let activeContainerSync: ContainerSync | undefined;
 
-export async function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<TestAgentRemoteApi> {
     const logger = new Log('TestAgent - Remote');
     context.subscriptions.push(logger);
     initializeCloudMode({
@@ -21,9 +22,11 @@ export async function activate(context: vscode.ExtensionContext) {
     });
 
     const sidebarSyncState = new SidebarSyncState();
+    const userIdProvider = new UserIdProvider();
+    const publicApi = createPublicUserContainerApi({ userIdProvider });
     const containerSync = new ContainerSync({
         config: new ContainerConfig(),
-        userIdProvider: new UserIdProvider(),
+        userIdProvider,
         userApiFactory: baseUrl => new RestClient(baseUrl).user,
         onSync: result => sidebarSyncState.update(result),
         onInvalidEndpoint: ({ containerId, endpoint }) => {
@@ -56,6 +59,8 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openConfigFile', () => openSSHConfigFile()));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.showLog', () => logger.show()));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.refreshContainers', () => containerSync.refresh()));
+
+    return publicApi;
 }
 
 export function deactivate() {

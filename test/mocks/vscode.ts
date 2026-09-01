@@ -7,6 +7,7 @@ let $password: string = '';
 
 const commands = {
     executeCommand: vi.fn(),
+    registerCommand: vi.fn(() => ({ dispose: vi.fn() })),
 };
 
 const authentication = {
@@ -98,6 +99,7 @@ const window = {
 
         return task(mockProgressReporter, {} as vscode.CancellationToken) as Promise<unknown>;
     },
+    createTreeView: vi.fn(() => ({ dispose: vi.fn() })),
 };
 
 const Uri = {
@@ -114,7 +116,8 @@ const workspace = {
         }),
         update: vi.fn(() => Promise.resolve())
     })),
-    registerResourceLabelFormatter: vi.fn()
+    registerResourceLabelFormatter: vi.fn(),
+    registerRemoteAuthorityResolver: vi.fn(() => ({ dispose: vi.fn() })),
 };
 
 export {
