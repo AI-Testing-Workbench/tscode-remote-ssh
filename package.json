@@ -177,6 +177,11 @@
 				"category": "TestAgent Cloud"
 			},
 			{
+				"command": "openremotessh.openConfigFile",
+				"title": "打开 SSH 配置文件",
+				"category": "TestAgent Cloud"
+			},
+			{
 				"command": "openremotessh.showLog",
 				"title": "显示日志",
 				"category": "TestAgent Cloud"
