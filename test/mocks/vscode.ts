@@ -9,6 +9,10 @@ const commands = {
     executeCommand: vi.fn(),
 };
 
+const authentication = {
+    getSession: vi.fn(),
+};
+
 const configurationValues = new Map<string, unknown>();
 
 function setConfigurationValue(section: string, key: string, value: unknown) {
@@ -112,6 +116,7 @@ const workspace = {
 };
 
 export {
+    authentication,
     commands,
     env,
     ExtensionContext,

@@ -95,6 +95,32 @@
 		"configuration": {
 			"title": "TestAgent Remote",
 			"properties": {
+				"testagnet.remote.backendApiUrl": {
+					"type": "string",
+					"description": "后端服务的 API 地址。",
+					"default": "",
+					"scope": "application"
+				},
+				"testagnet.remote.skipKnownHostsCheck": {
+					"type": "boolean",
+					"description": "是否在 SSH 配置中为新增主机声明跳过指纹验证。",
+					"default": true,
+					"scope": "application"
+				},
+				"testagnet.remote.historyLimit": {
+					"type": "integer",
+					"description": "指定过期主机的保留个数。",
+					"default": 5,
+					"minimum": 0,
+					"scope": "application"
+				},
+				"testagnet.remote.statusSyncInterval": {
+					"type": "number",
+					"description": "指定主机状态的同步时间 (秒)。",
+					"default": 5,
+					"minimum": 1,
+					"scope": "application"
+				},
 				"testagnet.remote.configFile": {
 					"type": "string",
 					"description": "自定义 SSH 配置文件的绝对路径。",

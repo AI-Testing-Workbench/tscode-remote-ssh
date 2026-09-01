@@ -4,10 +4,14 @@ import { RemoteSSHResolver, REMOTE_SSH_AUTHORITY } from './authResolver';
 import { openSSHConfigFile, promptOpenRemoteSSHWindow } from './commands';
 import { HostTreeDataProvider } from './hostTreeView';
 import { getRemoteWorkspaceLocationData, RemoteLocationHistory } from './remoteLocationHistory';
+import { initializeCloudMode } from './cloudMode';
 
 export async function activate(context: vscode.ExtensionContext) {
     const logger = new Log('TestAgent - Remote');
     context.subscriptions.push(logger);
+    initializeCloudMode({
+        onFileCheckError: error => logger.error('检查云端模式标记文件失败，按非云端模式处理', error),
+    });
 
     const remoteSSHResolver = new RemoteSSHResolver(context, logger);
     context.subscriptions.push(vscode.workspace.registerRemoteAuthorityResolver(REMOTE_SSH_AUTHORITY, remoteSSHResolver));

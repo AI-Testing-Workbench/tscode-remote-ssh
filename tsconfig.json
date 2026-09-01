@@ -46,6 +46,7 @@
 	"exclude": [
 		".vscode-test",
 		"node_modules",
+		"work",
 		"test",
 		"vitest.config.ts"
 	]
