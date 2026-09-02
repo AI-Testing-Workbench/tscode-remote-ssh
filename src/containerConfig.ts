@@ -9,7 +9,9 @@ export const CONTAINER_ID_DIRECTIVE = 'ContainerId';
 export const EXPIRES_AT_DIRECTIVE = 'ExpiresAt';
 export const IGNORE_UNKNOWN_VALUE = 'ContainerId,ExpiresAt';
 export const SKIP_KNOWN_HOSTS_DIRECTIVE = 'StrictHostKeyChecking';
+export const USER_KNOWN_HOSTS_FILE_DIRECTIVE = 'UserKnownHostsFile';
 export const USER_DIRECTIVE = 'User';
+export const NULL_KNOWN_HOSTS_FILE = '/dev/null';
 const DIRECTORY_CONFIG_FILE = 'config';
 
 export interface ContainerConfigEntry {
@@ -308,13 +310,21 @@ export class ContainerConfig {
     }
 
     private ensureSkipKnownHostsCheck(section: Section): boolean {
-        return setDirective(
+        let changed = setDirective(
             section.config,
             isSkipKnownHostsDirective,
             SKIP_KNOWN_HOSTS_DIRECTIVE,
             'no',
             true,
         );
+        changed = setDirective(
+            section.config,
+            isUserKnownHostsFileDirective,
+            USER_KNOWN_HOSTS_FILE_DIRECTIVE,
+            NULL_KNOWN_HOSTS_FILE,
+            true,
+        ) || changed;
+        return changed;
     }
 
     private async atomicWrite(content: string): Promise<void> {
@@ -367,7 +377,12 @@ function createContainerSection(
         section.config.push(createDirective('ExpiresAt', entry.expiresAt, '\t'));
     }
     if (skipKnownHostsCheck) {
-        section.config.splice(0, 0, createDirective(SKIP_KNOWN_HOSTS_DIRECTIVE, 'no', '\t'));
+        section.config.splice(
+            0,
+            0,
+            createDirective(SKIP_KNOWN_HOSTS_DIRECTIVE, 'no', '\t'),
+            createDirective(USER_KNOWN_HOSTS_FILE_DIRECTIVE, NULL_KNOWN_HOSTS_FILE, '\t'),
+        );
     }
     return section;
 }
@@ -495,6 +510,10 @@ function isHostNameDirective(line: Directive): boolean {
 
 function isUserDirective(line: Directive): boolean {
     return /^user$/i.test(line.param);
+}
+
+function isUserKnownHostsFileDirective(line: Directive): boolean {
+    return /^userknownhostsfile$/i.test(line.param);
 }
 
 function isPortDirective(line: Directive): boolean {

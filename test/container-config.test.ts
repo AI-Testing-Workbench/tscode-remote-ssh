@@ -8,6 +8,8 @@ import {
     ContainerConfig,
     getContainerConfigEntries,
     IGNORE_UNKNOWN_VALUE,
+    NULL_KNOWN_HOSTS_FILE,
+    USER_KNOWN_HOSTS_FILE_DIRECTIVE,
 } from '../src/containerConfig';
 
 const temporaryDirectories: string[] = [];
@@ -43,6 +45,7 @@ describe('ContainerConfig', () => {
         expect(text).toContain(`${CONTAINER_ID_DIRECTIVE} container-1`);
         expect(text).toContain(`IgnoreUnknown ${IGNORE_UNKNOWN_VALUE}`);
         expect(text).toContain('StrictHostKeyChecking no');
+        expect(text).toContain(`${USER_KNOWN_HOSTS_FILE_DIRECTIVE} ${NULL_KNOWN_HOSTS_FILE}`);
         expect(text.indexOf('IgnoreUnknown')).toBeLessThan(text.indexOf('ContainerId'));
         expect(text.indexOf('StrictHostKeyChecking')).toBeLessThan(text.indexOf('ContainerId'));
         expect(store.list(SSHConfig.parse(text))).toEqual([{
@@ -149,10 +152,17 @@ describe('ContainerConfig', () => {
         const document = await store.read();
         store.upsertContainer(document.config, { containerId: 'container-6', host: '10.0.0.6' }, { skipKnownHostsCheck: false });
         expect(SSHConfig.stringify(document.config)).not.toContain('StrictHostKeyChecking');
+        expect(SSHConfig.stringify(document.config)).not.toContain(USER_KNOWN_HOSTS_FILE_DIRECTIVE);
 
-        const existing = SSHConfig.parse('Host 10.0.0.7\n\tStrictHostKeyChecking yes\n\tContainerId container-7\n');
+        const existing = SSHConfig.parse('Host 10.0.0.7\n\tStrictHostKeyChecking yes\n\tUserKnownHostsFile ~/.ssh/known_hosts\n\tContainerId container-7\n');
         expect(store.setSkipKnownHostsCheck(existing, false)).toBe(false);
         expect(SSHConfig.stringify(existing)).toContain('StrictHostKeyChecking yes');
+        expect(SSHConfig.stringify(existing)).toContain('UserKnownHostsFile ~/.ssh/known_hosts');
+
+        const enabled = SSHConfig.parse('Host 10.0.0.8\n\tContainerId container-8\n');
+        expect(store.setSkipKnownHostsCheck(enabled, true)).toBe(true);
+        expect(SSHConfig.stringify(enabled)).toContain('StrictHostKeyChecking no');
+        expect(SSHConfig.stringify(enabled)).toContain(`${USER_KNOWN_HOSTS_FILE_DIRECTIVE} ${NULL_KNOWN_HOSTS_FILE}`);
     });
 });
 

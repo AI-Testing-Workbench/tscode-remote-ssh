@@ -71,6 +71,7 @@ describe('ContainerSync', () => {
         expect(text).toContain('User root');
         expect(text).not.toContain('container-2');
         expect(text).toContain('StrictHostKeyChecking no');
+        expect(text).toContain('UserKnownHostsFile /dev/null');
     });
 
     it('writes the current SSH username when the username setting is blank', async () => {
