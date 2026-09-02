@@ -249,7 +249,7 @@ export class RestClient {
             throw new RestClientError(
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
-                '后端 REST API 返回空响应',
+                '后端 TestAgent Cloud 管理服务返回空响应',
             );
         }
         return response as T;
@@ -304,7 +304,7 @@ export class RestClient {
             throw new RestClientError(
                 'network',
                 REST_ERROR_CODES.NETWORK,
-                '后端 REST API 网络请求失败',
+                '后端 TestAgent Cloud 管理服务请求失败',
                 undefined,
                 error,
             );
@@ -327,7 +327,7 @@ export class RestClient {
             throw new RestClientError(
                 'http',
                 apiError?.code ?? REST_ERROR_CODES.HTTP,
-                apiError?.message ?? `后端 REST API 请求失败 (HTTP ${response.statusCode})`,
+                apiError?.message ?? `后端 TestAgent Cloud 管理服务请求失败 (HTTP ${response.statusCode})`,
                 response.statusCode,
             );
         }
@@ -339,7 +339,7 @@ export class RestClient {
             throw new RestClientError(
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
-                '后端 REST API 返回了无效的 JSON',
+                '后端 TestAgent Cloud 管理服务返回了无效的 JSON',
                 response.statusCode,
             );
         }
@@ -351,7 +351,7 @@ export class RestClient {
             throw new RestClientError(
                 'configuration',
                 REST_ERROR_CODES.API_URL_MISSING,
-                '未配置后端 REST API 地址',
+                '未配置后端 TestAgent Cloud 管理服务的 API 地址',
             );
         }
 
@@ -370,7 +370,7 @@ export class RestClient {
             throw new RestClientError(
                 'configuration',
                 REST_ERROR_CODES.INVALID_API_URL,
-                '后端 REST API 地址无效',
+                '后端 TestAgent Cloud 管理服务的 API 地址无效',
                 undefined,
                 error,
             );

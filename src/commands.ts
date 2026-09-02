@@ -39,7 +39,7 @@ async function promptForHost(): Promise<string | undefined> {
 
     return new Promise<string | undefined>(resolve => {
         const quickPick = vscode.window.createQuickPick();
-        quickPick.title = '连接到 TestAgent Cloud';
+        quickPick.title = '连接到 TestAgent Cloud 服务';
         quickPick.placeholder = '选择已配置的连接，或者输入 [user@]hostname[:port]';
         quickPick.items = hostItems;
 

@@ -1,4 +1,6 @@
+import * as fsSync from 'node:fs';
 import * as os from 'node:os';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -12,6 +14,7 @@ import * as vscode from './mocks/vscode';
 
 const environmentVariable = 'TESTAGENT_CONFIG_PATH_ROOT';
 let originalEnvironmentValue: string | undefined;
+const temporaryDirectories: string[] = [];
 
 describe('SSH config path setting', () => {
     beforeEach(() => {
@@ -19,19 +22,39 @@ describe('SSH config path setting', () => {
         originalEnvironmentValue = process.env[environmentVariable];
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         if (originalEnvironmentValue === undefined) {
             delete process.env[environmentVariable];
         } else {
             process.env[environmentVariable] = originalEnvironmentValue;
         }
+        while (temporaryDirectories.length) {
+            const directory = temporaryDirectories.pop();
+            if (directory) {
+                await fs.rm(directory, { recursive: true, force: true });
+            }
+        }
     });
 
     it('uses the dedicated default when configFile is not overridden', () => {
-        expect(getConfiguredContainerConfigPath()).toBe(
-            path.resolve(os.homedir(), '.local', 'share', 'testagent'),
-        );
+        const defaultPath = path.resolve(os.homedir(), '.local', 'share', 'testagent');
+        const expectedPath = fsSync.existsSync(defaultPath) && fsSync.statSync(defaultPath).isDirectory()
+            ? path.join(defaultPath, 'config')
+            : defaultPath;
+        expect(getConfiguredContainerConfigPath()).toBe(expectedPath);
         expect(DEFAULT_CONTAINER_CONFIG_SETTING).toBe('~/.local/share/testagent');
+    });
+
+    it('uses a config file inside an existing configFile directory', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-config-directory-'));
+        temporaryDirectories.push(directory);
+        vscode.setConfigurationValue('testagnet.remote', 'configFile', directory);
+
+        const expectedPath = path.join(directory, 'config');
+        expect(getConfiguredContainerConfigPath()).toBe(expectedPath);
+        const store = new ContainerConfig();
+        await expect(store.read()).resolves.toMatchObject({ originalText: '' });
+        expect(store.filePath).toBe(expectedPath);
     });
 
     it('expands tilde, Unix variables, braced variables, and Windows variables', () => {

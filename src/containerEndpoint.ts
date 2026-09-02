@@ -16,14 +16,14 @@ export class InvalidContainerEndpointError extends Error {
         public readonly containerId: string,
         public readonly endpoint: string | null | undefined,
     ) {
-        super(`容器 "${containerId}" 的 endpoint 无效，必须是 IP:端口格式`);
+        super(`服务 "${containerId}" 的 endpoint 无效，必须是 IP:Port`);
         this.name = 'InvalidContainerEndpointError';
     }
 }
 
 export class DebugEnvironmentPreparationCancelledError extends Error {
     constructor(public readonly containerId: string) {
-        super(`已取消容器 "${containerId}" 的调试环境确认`);
+        super(`已取消服务 "${containerId}" 的调试确认`);
         this.name = 'DebugEnvironmentPreparationCancelledError';
     }
 }

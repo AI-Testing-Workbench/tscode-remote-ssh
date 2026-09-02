@@ -79,6 +79,8 @@ const window = {
     })),
     showErrorMessage: vi.fn(),
     showWarningMessage: vi.fn(),
+    showInformationMessage: vi.fn(),
+    showQuickPick: vi.fn(),
     setPassword: (password: string) => {
         $password = password;
     },
@@ -100,6 +102,7 @@ const window = {
         return task(mockProgressReporter, {} as vscode.CancellationToken) as Promise<unknown>;
     },
     createTreeView: vi.fn(() => ({ dispose: vi.fn() })),
+    registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
 };
 
 const Uri = {

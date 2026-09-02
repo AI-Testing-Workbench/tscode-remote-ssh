@@ -51,7 +51,7 @@ interface RemoteStatusResult {
 
 const API_URL_ERROR: ContainerSyncError = {
     code: 'api_url_missing',
-    message: '未配置后端 REST API 地址',
+    message: '未配置后端 TestAgent Cloud 管理服务的 API 地址',
 };
 
 const USER_ID_ERROR: ContainerSyncError = {
@@ -61,7 +61,7 @@ const USER_ID_ERROR: ContainerSyncError = {
 
 const DISPOSED_ERROR: ContainerSyncError = {
     code: 'sync_disposed',
-    message: '容器同步已停止',
+    message: '服务同步已停止',
 };
 
 export function getHostFromEndpoint(endpoint: string | null | undefined): string | undefined {
@@ -191,7 +191,7 @@ export class ContainerSync {
         try {
             document = await this.config.read();
         } catch (error) {
-            return this.resultWithError(toSyncError(error, 'config_error', '读取容器 SSH 配置失败'));
+            return this.resultWithError(toSyncError(error, 'config_error', '读取服务配置失败'));
         }
 
         const localEntries = this.config.list(document.config);
@@ -201,7 +201,7 @@ export class ContainerSync {
                 ? this.userApiFactory(settings.backendApiUrl)
                 : this.userApi ?? throwMissingUserApi();
         } catch (error) {
-            return this.resultWithError(toSyncError(error, 'api_error', '容器同步 API 未配置'));
+            return this.resultWithError(toSyncError(error, 'api_error', '服务同步 API 未配置'));
         }
 
         let containerIdsResponse: ContainerIdsResponse;
@@ -209,9 +209,9 @@ export class ContainerSync {
             containerIdsResponse = await userApi.getContainerIds({ user_id: userId });
         } catch (error) {
             return {
-                containers: this.localOnlyStates(localEntries, toSyncError(error, 'sync_failed', '获取容器清单失败')),
+                containers: this.localOnlyStates(localEntries, toSyncError(error, 'sync_failed', '获取服务清单失败')),
                 changed: false,
-                error: toSyncError(error, 'sync_failed', '获取容器清单失败'),
+                error: toSyncError(error, 'sync_failed', '获取服务清单失败'),
             };
         }
         if (this.disposed) {
@@ -246,7 +246,7 @@ export class ContainerSync {
         try {
             expirationTimestamp = this.now().toISOString();
         } catch (error) {
-            return this.resultWithError(toSyncError(error, 'clock_error', '无法生成容器历史时间'));
+            return this.resultWithError(toSyncError(error, 'clock_error', '无法生成服务历史时间'));
         }
         for (const localEntry of localEntries) {
             if (!remoteIds.includes(localEntry.containerId) && !localEntry.expiresAt) {
@@ -266,7 +266,7 @@ export class ContainerSync {
                 return {
                     containers: [],
                     changed: false,
-                    error: toSyncError(error, 'config_error', '写入容器 SSH 配置失败'),
+                    error: toSyncError(error, 'config_error', '写入服务配置失败'),
                 };
             }
         }
@@ -290,13 +290,13 @@ export class ContainerSync {
                     this.reportInvalidEndpoint(containerId, response.endpoint);
                     return [containerId, {
                         response,
-                        error: { code: 'invalid_endpoint', message: '容器 endpoint 必须是 IP:端口格式' },
+                        error: { code: 'invalid_endpoint', message: '服务 endpoint 必须是 IP:Port' },
                     }] as const;
                 }
                 this.clearInvalidEndpointNotifications(containerId);
                 return [containerId, { response, parsedEndpoint }] as const;
             } catch (error) {
-                return [containerId, { error: toSyncError(error, 'status_failed', '获取容器状态失败') }] as const;
+                return [containerId, { error: toSyncError(error, 'status_failed', '获取服务状态失败') }] as const;
             }
         }));
         return new Map(results);
@@ -338,7 +338,7 @@ export class ContainerSync {
             const hostName = entry?.hostName ?? assignment?.hostName ?? remoteStatus?.parsedEndpoint?.host;
             const port = entry?.port ?? assignment?.port ?? remoteStatus?.parsedEndpoint?.port;
             const endpointError = !entry && response && !hostName
-                ? { code: 'endpoint_missing', message: '容器状态未返回可用 endpoint' }
+                ? { code: 'endpoint_missing', message: '服务状态未返回可用 endpoint' }
                 : undefined;
             return {
                 containerId,

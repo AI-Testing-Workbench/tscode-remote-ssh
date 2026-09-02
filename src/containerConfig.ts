@@ -4,11 +4,12 @@ import * as vscode from 'vscode';
 import SSHConfig, { Directive, Line, Section } from 'ssh-config';
 import { expandPath } from './common/files';
 
-export const DEFAULT_CONTAINER_CONFIG_SETTING = '~/.local/share/testagent';
+export const DEFAULT_CONTAINER_CONFIG_SETTING = '~/.local/share/testagent/config';
 export const CONTAINER_ID_DIRECTIVE = 'ContainerId';
 export const EXPIRES_AT_DIRECTIVE = 'ExpiresAt';
 export const IGNORE_UNKNOWN_VALUE = 'ContainerId,ExpiresAt';
 export const SKIP_KNOWN_HOSTS_DIRECTIVE = 'StrictHostKeyChecking';
+const DIRECTORY_CONFIG_FILE = 'config';
 
 export interface ContainerConfigEntry {
     containerId: string;
@@ -38,9 +39,9 @@ export interface UpsertContainerOptions {
 export function getConfiguredContainerConfigPath(): string {
     const configuredPath = vscode.workspace.getConfiguration('testagnet.remote').get<unknown>('configFile');
     if (typeof configuredPath === 'string' && configuredPath.trim()) {
-        return path.resolve(expandPath(configuredPath.trim()));
+        return resolveConfiguredPath(configuredPath.trim());
     }
-    return path.resolve(expandPath(DEFAULT_CONTAINER_CONFIG_SETTING));
+    return resolveConfiguredPath(DEFAULT_CONTAINER_CONFIG_SETTING);
 }
 
 export function getContainerConfigEntries(config: SSHConfig): ContainerConfigEntry[] {
@@ -447,6 +448,18 @@ function getErrorCode(error: unknown): string | undefined {
         return error.code;
     }
     return undefined;
+}
+
+function resolveConfiguredPath(configuredPath: string): string {
+    const resolvedPath = path.resolve(expandPath(configuredPath));
+    try {
+        if (fs.statSync(resolvedPath).isDirectory()) {
+            return path.join(resolvedPath, DIRECTORY_CONFIG_FILE);
+        }
+    } catch {
+        // A missing path is the normal case; ContainerConfig creates its parent/file later.
+    }
+    return resolvedPath;
 }
 
 function parsePort(value: string | undefined): number | undefined {

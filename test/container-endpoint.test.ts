@@ -51,7 +51,7 @@ describe('container endpoint', () => {
 
         await expect(confirmDebugEnvironment(prompt, 'container-1')).resolves.toBeUndefined();
         expect(prompt).toHaveBeenCalledWith(
-            '调试模式：请先准备开发者环境，然后确认继续连接容器 "container-1"。',
+            '当前处于调试模式，\n请完成容器环境准备后继续。',
             { modal: true },
             DEBUG_ENVIRONMENT_CONFIRMATION,
             '取消',

@@ -58,6 +58,14 @@ vi.mock('../src/sidebarView', () => ({
         public dispose(): void {
         }
     },
+    SidebarViewProvider: class {
+        public createContainerFromPrompt(): Promise<void> {
+            return Promise.resolve();
+        }
+
+        public dispose(): void {
+        }
+    },
 }));
 
 import { activate, deactivate } from '../src/extension';

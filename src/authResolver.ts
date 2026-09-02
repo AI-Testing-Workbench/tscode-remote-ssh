@@ -312,7 +312,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                         label: '${path}',
                         separator: '/',
                         tildify: true,
-                        workspaceSuffix: '位于 TestAgent Cloud 中'
+                        workspaceSuffix: 'TestAgent Cloud 服务'
                     }
                 });
 

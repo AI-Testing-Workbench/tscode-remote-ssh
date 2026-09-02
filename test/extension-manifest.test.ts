@@ -6,6 +6,9 @@ type ExtensionManifest = {
     contributes: {
         commands: Array<{ command: string }>;
         menus: Record<string, Array<{ command: string }>>;
+        views: {
+            remote: Array<{ id: string; type?: string }>;
+        };
         configuration: {
             properties: Record<string, {
                 type: string;
@@ -59,5 +62,21 @@ describe('extension manifest', () => {
 
         expect(commandIds).toContain('openremotessh.refreshContainers');
         expect(manifest.activationEvents).toContain('onCommand:openremotessh.refreshContainers');
+    });
+
+    it('declares a webview sidebar and the disconnected create command', () => {
+        expect(manifest.contributes.views.remote).toContainEqual({
+            id: 'sshHosts',
+            name: 'TestAgent Cloud',
+            group: 'targets@1',
+            type: 'webview',
+            remoteName: 'ssh-remote',
+        });
+        expect(manifest.contributes.commands.map(({ command }) => command)).toContain('openremotessh.createContainer');
+        expect(manifest.activationEvents).toContain('onCommand:openremotessh.createContainer');
+        expect(manifest.contributes.menus['statusBar/remoteIndicator']).toContainEqual(expect.objectContaining({
+            command: 'openremotessh.createContainer',
+            when: 'remoteConnectionState == disconnected',
+        }));
     });
 });

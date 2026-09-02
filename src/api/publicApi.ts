@@ -94,14 +94,7 @@ export function createPublicUserContainerApi(
                 throw new PublicApiError(
                     'request',
                     PUBLIC_API_ERROR_CODES.USER_ID_MISMATCH,
-                    '公开 API 的 user_id 不能为空',
-                );
-            }
-            if (requestedUserId.trim() !== normalizedUserId) {
-                throw new PublicApiError(
-                    'request',
-                    PUBLIC_API_ERROR_CODES.USER_ID_MISMATCH,
-                    '公开 API 的 user_id 必须与当前用户 ID一致',
+                    '容器创建 API 的 user_id 不能为空',
                 );
             }
         }
