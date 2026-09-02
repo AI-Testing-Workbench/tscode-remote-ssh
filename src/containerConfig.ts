@@ -9,6 +9,7 @@ export const CONTAINER_ID_DIRECTIVE = 'ContainerId';
 export const EXPIRES_AT_DIRECTIVE = 'ExpiresAt';
 export const IGNORE_UNKNOWN_VALUE = 'ContainerId,ExpiresAt';
 export const SKIP_KNOWN_HOSTS_DIRECTIVE = 'StrictHostKeyChecking';
+export const USER_DIRECTIVE = 'User';
 const DIRECTORY_CONFIG_FILE = 'config';
 
 export interface ContainerConfigEntry {
@@ -34,6 +35,7 @@ export interface ContainerConfigFileSystem {
 
 export interface UpsertContainerOptions {
     skipKnownHostsCheck?: boolean;
+    userName?: string;
 }
 
 export function getConfiguredContainerConfigPath(): string {
@@ -137,7 +139,12 @@ export class ContainerConfig {
             if (!entry.host.trim()) {
                 throw new Error('Host cannot be empty for a new container');
             }
-            const newSection = createContainerSection(config, entry, options.skipKnownHostsCheck === true);
+            const newSection = createContainerSection(
+                config,
+                entry,
+                options.skipKnownHostsCheck === true,
+                options.userName,
+            );
             config.push(newSection);
             this.ensureIgnoreUnknown(newSection);
             return true;
@@ -146,6 +153,15 @@ export class ContainerConfig {
         let changed = this.ensureIgnoreUnknown(section);
         if (options.skipKnownHostsCheck === true) {
             changed = this.ensureSkipKnownHostsCheck(section) || changed;
+        }
+        if (options.userName?.trim()) {
+            changed = setDirective(
+                section.config,
+                isUserDirective,
+                USER_DIRECTIVE,
+                options.userName.trim(),
+                true,
+            ) || changed;
         }
         if (entry.host.trim() && getHostValue(section) !== entry.host) {
             section.value = entry.host;
@@ -171,6 +187,52 @@ export class ContainerConfig {
             changed = removeDirectives(section.config, isExpiresAtDirective) || changed;
         } else {
             changed = setDirective(section.config, isExpiresAtDirective, EXPIRES_AT_DIRECTIVE, entry.expiresAt) || changed;
+        }
+        return changed;
+    }
+
+    public setUserName(config: SSHConfig, userName: string): boolean {
+        const normalizedUserName = userName.trim();
+        if (!normalizedUserName) {
+            return false;
+        }
+
+        let changed = false;
+        for (const line of config) {
+            if (isHostSection(line) && getDirectiveValue(line.config, isContainerIdDirective)) {
+                changed = setDirective(
+                    line.config,
+                    isUserDirective,
+                    USER_DIRECTIVE,
+                    normalizedUserName,
+                    true,
+                ) || changed;
+            }
+        }
+        return changed;
+    }
+
+    public ensureUserName(config: SSHConfig, userName: string): boolean {
+        const normalizedUserName = userName.trim();
+        if (!normalizedUserName) {
+            return false;
+        }
+
+        let changed = false;
+        for (const line of config) {
+            if (!isHostSection(line) || !getDirectiveValue(line.config, isContainerIdDirective)) {
+                continue;
+            }
+            const userDirective = findDirective(line.config, isUserDirective);
+            if (!userDirective || !directiveValue(userDirective).trim()) {
+                changed = setDirective(
+                    line.config,
+                    isUserDirective,
+                    USER_DIRECTIVE,
+                    normalizedUserName,
+                    true,
+                ) || changed;
+            }
         }
         return changed;
     }
@@ -278,6 +340,7 @@ function createContainerSection(
     config: SSHConfig,
     entry: ContainerConfigEntry,
     skipKnownHostsCheck: boolean,
+    userName?: string,
 ): Section {
     const section: Section = {
         type: SSHConfig.DIRECTIVE,
@@ -292,6 +355,9 @@ function createContainerSection(
 
     if (entry.hostName?.trim()) {
         section.config.push(createDirective('HostName', entry.hostName, '\t'));
+    }
+    if (userName?.trim()) {
+        section.config.push(createDirective(USER_DIRECTIVE, userName.trim(), '\t'));
     }
     if (entry.port !== undefined) {
         section.config.push(createDirective('Port', String(entry.port), '\t'));
@@ -425,6 +491,10 @@ function isContainerIdDirective(line: Directive): boolean {
 
 function isHostNameDirective(line: Directive): boolean {
     return /^hostname$/i.test(line.param);
+}
+
+function isUserDirective(line: Directive): boolean {
+    return /^user$/i.test(line.param);
 }
 
 function isPortDirective(line: Directive): boolean {

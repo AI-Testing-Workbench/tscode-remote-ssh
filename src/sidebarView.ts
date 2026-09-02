@@ -10,7 +10,7 @@ import {
     type SyncedContainer,
 } from './containerSync';
 import { parseContainerEndpoint } from './containerEndpoint';
-import { getRemoteSettings, type RemoteSettings } from './settings';
+import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } from './settings';
 import { UserIdProvider } from './user';
 import { type PublicUserContainerApi } from './api/publicApi';
 import { type UserRestApi } from './api/restClient';
@@ -455,6 +455,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const settings = this.getSettings();
+        const userName = getEffectiveRemoteUserName(settings.userName);
         const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
         if (!endpoint) {
             this.showError(`TestAgent Cloud 服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
@@ -474,7 +475,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             host,
             hostName: endpoint.host,
             port: endpoint.port,
-        }, { skipKnownHostsCheck: settings.skipKnownHostsCheck });
+        }, {
+            skipKnownHostsCheck: settings.skipKnownHostsCheck,
+            userName,
+        });
         await this.config.write(document);
         await this.sync.refresh();
     }

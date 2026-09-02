@@ -38,6 +38,7 @@ describe('extension manifest', () => {
 
         expect(properties).toMatchObject({
             'testagnet.remote.backendApiUrl': { type: 'string', default: '' },
+            'testagnet.remote.userName': { type: 'string', default: 'root' },
             'testagnet.remote.skipKnownHostsCheck': { type: 'boolean', default: true },
             'testagnet.remote.historyLimit': { type: 'integer', default: 5 },
             'testagnet.remote.statusSyncInterval': { type: 'number', default: 5 },
@@ -47,6 +48,7 @@ describe('extension manifest', () => {
 
         for (const key of [
             'testagnet.remote.backendApiUrl',
+            'testagnet.remote.userName',
             'testagnet.remote.skipKnownHostsCheck',
             'testagnet.remote.historyLimit',
             'testagnet.remote.statusSyncInterval',

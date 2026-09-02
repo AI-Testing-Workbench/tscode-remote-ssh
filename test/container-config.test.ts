@@ -32,12 +32,13 @@ describe('ContainerConfig', () => {
             host: 'alice/repo',
             hostName: '10.0.0.1',
             port: 22,
-        }, { skipKnownHostsCheck: true })).toBe(true);
+        }, { skipKnownHostsCheck: true, userName: 'root' })).toBe(true);
         expect(await store.write(document)).toBe(true);
 
         const text = await fs.readFile(store.filePath, 'utf8');
         expect(text).toContain('Host alice/repo');
         expect(text).toContain('HostName 10.0.0.1');
+        expect(text).toContain('User root');
         expect(text).toContain('Port 22');
         expect(text).toContain(`${CONTAINER_ID_DIRECTIVE} container-1`);
         expect(text).toContain(`IgnoreUnknown ${IGNORE_UNKNOWN_VALUE}`);

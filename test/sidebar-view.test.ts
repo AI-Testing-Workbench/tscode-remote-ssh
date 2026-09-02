@@ -212,7 +212,7 @@ describe('SidebarViewProvider', () => {
             host: 'alice/repo',
             hostName: '10.0.0.5',
             port: 2222,
-        }, { skipKnownHostsCheck: true });
+        }, { skipKnownHostsCheck: true, userName: 'root' });
         expect(config.write).toHaveBeenCalledOnce();
         expect(sync.refresh).toHaveBeenCalledOnce();
     });
@@ -373,6 +373,7 @@ function createConfig(): ContainerConfig {
 function settings(backendApiUrl: string) {
     return {
         backendApiUrl,
+        userName: 'root',
         skipKnownHostsCheck: true,
         historyLimit: 5,
         statusSyncInterval: 5,

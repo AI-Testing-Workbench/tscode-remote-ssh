@@ -186,6 +186,12 @@
 					"default": 5,
 					"minimum": 1,
 					"scope": "application"
+				},
+				"testagnet.remote.userName": {
+					"type": "string",
+					"description": "TestAgent Cloud 服务登录用户名。",
+					"default": "root",
+					"scope": "application"
 				}
 			}
 		},

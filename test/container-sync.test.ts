@@ -68,8 +68,25 @@ describe('ContainerSync', () => {
         const text = await fs.readFile(store.filePath, 'utf8');
         expect(text).toContain('Host alice/repo');
         expect(text).toContain('HostName 10.0.0.1');
+        expect(text).toContain('User root');
         expect(text).not.toContain('container-2');
         expect(text).toContain('StrictHostKeyChecking no');
+    });
+
+    it('writes the current SSH username when the username setting is blank', async () => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, { containerId: 'legacy', host: 'legacy-host' });
+        await store.write(document);
+
+        const sync = createSync(store, {
+            getContainerIds: vi.fn(async () => ({ container_ids: [] })),
+            getContainer: vi.fn(),
+        }, { userName: '' });
+
+        await sync.sync();
+
+        expect(await fs.readFile(store.filePath, 'utf8')).toContain(`User ${os.userInfo().username}`);
     });
 
     it('marks missing containers with ExpiresAt and removes it when they return', async () => {
@@ -133,6 +150,7 @@ describe('ContainerSync', () => {
             userApi,
             getSettings: () => ({
                 backendApiUrl: 'http://api.example.test',
+                userName: 'root',
                 skipKnownHostsCheck: false,
                 historyLimit: 2,
                 statusSyncInterval: 5,
@@ -151,6 +169,7 @@ describe('ContainerSync', () => {
             userApi,
             getSettings: () => ({
                 backendApiUrl: 'http://api.example.test',
+                userName: 'root',
                 skipKnownHostsCheck: false,
                 historyLimit: 0,
                 statusSyncInterval: 5,
@@ -220,7 +239,7 @@ describe('ContainerSync', () => {
             config: store,
             userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
             userApi,
-            getSettings: () => ({ backendApiUrl: '', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false }),
+            getSettings: () => ({ userName: 'root', backendApiUrl: '', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false }),
         });
         expect((await emptyUrl.sync()).error?.code).toBe('api_url_missing');
         expect(getContainerIds).not.toHaveBeenCalled();
@@ -229,7 +248,7 @@ describe('ContainerSync', () => {
             config: store,
             userIdProvider: { getCurrentUserId: vi.fn(async () => '') },
             userApi,
-            getSettings: () => ({ backendApiUrl: 'http://api.example.test', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false }),
+            getSettings: () => ({ userName: 'root', backendApiUrl: 'http://api.example.test', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false }),
         });
         expect((await emptyUser.sync()).error?.code).toBe('user_id_missing');
         expect(getContainerIds).not.toHaveBeenCalled();
@@ -280,6 +299,7 @@ describe('ContainerSync', () => {
             } as unknown as UserRestApi,
             getSettings: () => ({
                 backendApiUrl: 'http://api.example.test',
+                userName: 'root',
                 skipKnownHostsCheck: true,
                 historyLimit: 5,
                 statusSyncInterval: 5,
@@ -397,6 +417,7 @@ describe('ContainerSync', () => {
             } as unknown as UserRestApi,
             getSettings: () => ({
                 backendApiUrl: 'http://api.example.test',
+                userName: 'root',
                 skipKnownHostsCheck: false,
                 historyLimit: 5,
                 statusSyncInterval: 5,
@@ -481,6 +502,7 @@ function createSync(
         userApi: api as UserRestApi,
         getSettings: () => ({
             backendApiUrl: 'http://api.example.test',
+            userName: 'root',
             skipKnownHostsCheck: true,
             historyLimit: 5,
             statusSyncInterval: 5,

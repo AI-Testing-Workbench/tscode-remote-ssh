@@ -132,6 +132,7 @@ function createUserApi(): UserRestApi {
 function settings(backendApiUrl: string) {
     return {
         backendApiUrl,
+        userName: 'root',
         skipKnownHostsCheck: true,
         historyLimit: 5,
         statusSyncInterval: 5,

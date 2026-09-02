@@ -6,7 +6,7 @@ import {
     parseContainerEndpoint,
     ParsedContainerEndpoint,
 } from './containerEndpoint';
-import { getRemoteSettings, RemoteSettings } from './settings';
+import { getEffectiveRemoteUserName, getRemoteSettings, RemoteSettings } from './settings';
 import { UserIdProvider } from './user';
 
 export interface ContainerSyncError {
@@ -224,7 +224,12 @@ export class ContainerSync {
             return this.disposedResult();
         }
 
-        let changed = this.config.setSkipKnownHostsCheck(document.config, settings.skipKnownHostsCheck);
+        const configuredUserName = settings.userName.trim();
+        const userName = configuredUserName || getEffectiveRemoteUserName(settings.userName);
+        let changed = configuredUserName
+            ? this.config.setUserName(document.config, configuredUserName)
+            : this.config.ensureUserName(document.config, userName);
+        changed = this.config.setSkipKnownHostsCheck(document.config, settings.skipKnownHostsCheck) || changed;
         const localById = indexEntries(localEntries);
         const hostAssignments = this.assignHostNames(remoteIds, remoteStatuses, localEntries);
 
@@ -238,7 +243,10 @@ export class ContainerSync {
                     host: assignment?.host ?? localEntry?.host ?? DEFAULT_CONTAINER_HOST_NAME,
                     ...(assignment?.hostName ? { hostName: assignment.hostName } : {}),
                     ...(assignment?.port !== undefined ? { port: assignment.port } : {}),
-                }, { skipKnownHostsCheck: settings.skipKnownHostsCheck }) || changed;
+                }, {
+                    skipKnownHostsCheck: settings.skipKnownHostsCheck,
+                    ...(!localEntry ? { userName } : {}),
+                }) || changed;
             }
         }
 
