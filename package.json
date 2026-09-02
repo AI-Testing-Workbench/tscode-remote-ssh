@@ -1,6 +1,6 @@
 {
 	"name": "tscode-remote-ssh",
-	"displayName": "TestAgent Remote",
+	"displayName": "TSCode Remote",
 	"description": "连接至 TestAgent Cloud 服务",
 	"version": "1.0.0",
 	"publisher": "test-tech",
