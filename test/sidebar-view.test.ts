@@ -95,6 +95,24 @@ describe('SidebarViewProvider', () => {
         expect(userApiFactory).not.toHaveBeenCalled();
     });
 
+    it('rechecks cloud mode when the sidebar becomes visible again', async () => {
+        let cloudMode = false;
+        const view = createWebviewView();
+        const getCloudMode = vi.fn(() => cloudMode);
+        const provider = createProvider({ view, getCloudMode });
+
+        await provider.resolveWebviewView(view as never);
+        expect(view.webview.html).not.toContain('你现在处于 TestAgent Cloud 服务中');
+
+        cloudMode = true;
+        view.fireVisibility(true);
+        await flushMessages();
+
+        expect(getCloudMode).toHaveBeenCalledTimes(2);
+        expect(view.webview.html).toContain('你现在处于 TestAgent Cloud 服务中');
+        expect(view.webview.html).not.toContain('data-action="refresh"');
+    });
+
     it('renders a centered error without normal controls when configuration is invalid', async () => {
         const view = createWebviewView();
         const userIdProvider = { getCurrentUserId: vi.fn(async () => 'user-1') };
@@ -291,6 +309,7 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
         userApiFactory: options.userApiFactory ?? vi.fn(() => userApi),
         getSettings: settingsValue,
         cloudMode: options.cloudMode,
+        getCloudMode: options.getCloudMode,
         isDisconnected: options.isDisconnected,
         onOpenConfig: options.onOpenConfig,
         onOpenAdmin: options.onOpenAdmin,
@@ -311,6 +330,7 @@ interface ProviderTestOptions {
     userApiFactory: (baseUrl: string) => UserRestApi;
     getSettings: () => ReturnType<typeof settings>;
     cloudMode: boolean;
+    getCloudMode: () => boolean;
     isDisconnected: () => boolean;
     onOpenConfig: () => void | Promise<void>;
     onOpenAdmin: () => void | Promise<void>;
@@ -384,14 +404,24 @@ function settings(backendApiUrl: string) {
 function createWebviewView() {
     const receiveMessage = createEvent<unknown>();
     const dispose = createEvent<void>();
+    const visibility = createEvent<void>();
+    let visible = true;
     const view = {
+        get visible() {
+            return visible;
+        },
         webview: {
             options: {},
             html: '',
             onDidReceiveMessage: receiveMessage.event,
         },
         onDidDispose: dispose.event,
+        onDidChangeVisibility: visibility.event,
         fireMessage: (message: unknown) => receiveMessage.fire(message),
+        fireVisibility: (nextVisible: boolean) => {
+            visible = nextVisible;
+            visibility.fire(undefined);
+        },
         dispose: () => dispose.fire(undefined),
     };
     return view;

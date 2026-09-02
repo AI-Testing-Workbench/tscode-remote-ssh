@@ -35,6 +35,11 @@ export function initializeCloudMode(options: CloudModeOptions = {}): boolean {
     return cachedCloudMode;
 }
 
+export function refreshCloudMode(options: CloudModeOptions = {}): boolean {
+    cachedCloudMode = detectCloudMode(options);
+    return cachedCloudMode;
+}
+
 export function isCloudMode(options?: CloudModeOptions): boolean {
     if (cachedCloudMode === undefined) {
         cachedCloudMode = detectCloudMode(options);

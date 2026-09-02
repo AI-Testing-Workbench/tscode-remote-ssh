@@ -3,7 +3,7 @@ import { Log } from './common/logger';
 import { RemoteSSHResolver, REMOTE_SSH_AUTHORITY } from './authResolver';
 import { openRemoteSSHWindow, openSSHConfigFile, promptOpenRemoteSSHWindow } from './commands';
 import { getRemoteWorkspaceLocationData, RemoteLocationHistory } from './remoteLocationHistory';
-import { initializeCloudMode } from './cloudMode';
+import { initializeCloudMode, refreshCloudMode, type CloudModeOptions } from './cloudMode';
 import { RestClient } from './api/restClient';
 import { ContainerConfig } from './containerConfig';
 import { ContainerSync } from './containerSync';
@@ -19,9 +19,10 @@ let activeSidebarSyncState: SidebarSyncState | undefined;
 export async function activate(context: vscode.ExtensionContext): Promise<TestAgentRemoteApi> {
     const logger = new Log('TestAgent - Remote');
     context.subscriptions.push(logger);
-    const cloudMode = initializeCloudMode({
+    const cloudModeOptions: CloudModeOptions = {
         onFileCheckError: error => logger.error('检查云端模式标记文件失败，按非云端模式处理', error),
-    });
+    };
+    const cloudMode = initializeCloudMode(cloudModeOptions);
 
     const sidebarSyncState = new SidebarSyncState();
     const userIdProvider = new UserIdProvider();
@@ -49,6 +50,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         userIdProvider,
         userApiFactory,
         cloudMode,
+        getCloudMode: () => refreshCloudMode(cloudModeOptions),
         onOpenConfig: async () => {
             await openSSHConfigFile();
         },

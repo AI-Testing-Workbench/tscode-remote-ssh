@@ -5,6 +5,7 @@ import {
     detectCloudMode,
     initializeCloudMode,
     isCloudMode,
+    refreshCloudMode,
     resetCloudModeCache,
 } from '../src/cloudMode';
 
@@ -55,5 +56,18 @@ describe('cloud mode', () => {
         expect(initializeCloudMode(options)).toBe(true);
         expect(isCloudMode({ environment: {}, fileExists: () => false })).toBe(true);
         expect(fileExists).toHaveBeenCalledOnce();
+    });
+
+    it('refreshes the cached value when the sidebar is opened again', () => {
+        let markerExists = true;
+        const options = {
+            environment: {},
+            fileExists: () => markerExists,
+        };
+
+        expect(initializeCloudMode(options)).toBe(true);
+        markerExists = false;
+        expect(refreshCloudMode(options)).toBe(false);
+        expect(isCloudMode()).toBe(false);
     });
 });

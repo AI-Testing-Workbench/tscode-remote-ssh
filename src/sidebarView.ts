@@ -69,6 +69,7 @@ export interface SidebarViewOptions {
     userApiFactory: (baseUrl: string) => UserRestApi;
     getSettings?: () => RemoteSettings;
     cloudMode?: boolean;
+    getCloudMode?: () => boolean;
     isDisconnected?: () => boolean;
     onOpenConfig?: () => void | Promise<void>;
     onOpenAdmin?: () => void | Promise<void>;
@@ -89,7 +90,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
     private readonly userApiFactory: (baseUrl: string) => UserRestApi;
     private readonly getSettings: () => RemoteSettings;
-    private readonly cloudMode: boolean;
+    private readonly getCloudMode: () => boolean;
+    private cloudMode: boolean;
     private readonly isDisconnected: () => boolean;
     private readonly onOpenConfig: (() => void | Promise<void>) | undefined;
     private readonly onOpenAdmin: (() => void | Promise<void>) | undefined;
@@ -105,6 +107,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private webviewView: vscode.WebviewView | undefined;
     private messageSubscription: vscode.Disposable | undefined;
     private viewDisposeSubscription: vscode.Disposable | undefined;
+    private viewVisibilitySubscription: vscode.Disposable | undefined;
     private adminCheckInFlight: Promise<void> | undefined;
     private createInFlight: Promise<void> | undefined;
     private pageError: ContainerSyncError | undefined;
@@ -121,6 +124,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.userApiFactory = options.userApiFactory;
         this.getSettings = options.getSettings ?? getRemoteSettings;
         this.cloudMode = options.cloudMode === true;
+        this.getCloudMode = options.getCloudMode ?? (() => this.cloudMode);
         this.isDisconnected = options.isDisconnected ?? (() => !vscode.env.remoteName);
         this.onOpenConfig = options.onOpenConfig;
         this.onOpenAdmin = options.onOpenAdmin;
@@ -138,10 +142,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
         this.messageSubscription?.dispose();
         this.viewDisposeSubscription?.dispose();
+        this.viewVisibilitySubscription?.dispose();
         this.webviewView = webviewView;
         this.pageReady = false;
         this.pageError = undefined;
         this.adminAllowed = false;
+        this.cloudMode = this.getCloudMode();
 
         webviewView.webview.options = {
             enableScripts: true,
@@ -157,8 +163,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             }
             this.webviewView = undefined;
             this.messageSubscription?.dispose();
+            this.viewVisibilitySubscription?.dispose();
             this.messageSubscription = undefined;
             this.viewDisposeSubscription = undefined;
+            this.viewVisibilitySubscription = undefined;
+        });
+        this.viewVisibilitySubscription = webviewView.onDidChangeVisibility?.(() => {
+            if (webviewView.visible) {
+                void this.refreshForVisibleView(webviewView);
+            }
         });
 
         this.render();
@@ -188,9 +201,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.stateSubscription.dispose();
         this.messageSubscription?.dispose();
         this.viewDisposeSubscription?.dispose();
+        this.viewVisibilitySubscription?.dispose();
         this.messageSubscription = undefined;
         this.viewDisposeSubscription = undefined;
+        this.viewVisibilitySubscription = undefined;
         this.webviewView = undefined;
+    }
+
+    private async refreshForVisibleView(webviewView: vscode.WebviewView): Promise<void> {
+        if (this.disposed || this.webviewView !== webviewView) {
+            return;
+        }
+
+        this.cloudMode = this.getCloudMode();
+        this.pageReady = false;
+        this.pageError = undefined;
+        this.adminAllowed = false;
+        this.render();
+        await this.preparePage();
     }
 
     private async preparePage(): Promise<void> {
