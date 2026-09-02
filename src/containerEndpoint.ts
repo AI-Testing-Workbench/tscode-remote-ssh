@@ -36,6 +36,25 @@ export type DebugEnvironmentPrompt = (
     ...items: string[]
 ) => Thenable<string | undefined>;
 
+export function createDebugEnvironmentConfirmer(
+    prompt: DebugEnvironmentPrompt,
+): (containerId: string) => Promise<void> {
+    const confirmations = new Map<string, Promise<void>>();
+    return containerId => {
+        const existingConfirmation = confirmations.get(containerId);
+        if (existingConfirmation) {
+            return existingConfirmation;
+        }
+
+        const confirmation = confirmDebugEnvironment(prompt, containerId).catch(error => {
+            confirmations.delete(containerId);
+            throw error;
+        });
+        confirmations.set(containerId, confirmation);
+        return confirmation;
+    };
+}
+
 export async function confirmDebugEnvironment(
     prompt: DebugEnvironmentPrompt,
     containerId: string,

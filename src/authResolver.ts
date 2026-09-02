@@ -17,7 +17,7 @@ import { disposeAll } from './common/disposable';
 import { installCodeServer, ServerInstallError } from './serverSetup';
 import { isWindows } from './common/platform';
 import {
-    confirmDebugEnvironment,
+    createDebugEnvironmentConfirmer,
     DebugEnvironmentPreparationCancelledError,
     formatContainerEndpoint,
     InvalidContainerEndpointError,
@@ -113,11 +113,15 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
     private tunnels: TunnelInfo[] = [];
 
     private labelFormatterDisposable: vscode.Disposable | undefined;
+    private readonly confirmDebugEnvironmentOnce: (containerId: string) => Promise<void>;
 
     constructor(
         readonly context: vscode.ExtensionContext,
         readonly logger: Log
     ) {
+        this.confirmDebugEnvironmentOnce = createDebugEnvironmentConfirmer(
+            (message, options, ...items) => vscode.window.showWarningMessage(message, options, ...items),
+        );
     }
 
     resolve(authority: string, context: vscode.RemoteAuthorityResolverContext): Thenable<vscode.ResolverResult> {
@@ -158,10 +162,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                         throw new InvalidContainerEndpointError(containerId, endpoint);
                     }
                     if (getRemoteSettings().debug) {
-                        await confirmDebugEnvironment(
-                            (message, options, ...items) => vscode.window.showWarningMessage(message, options, ...items),
-                            containerId,
-                        );
+                        await this.confirmDebugEnvironmentOnce(containerId);
                     }
                 }
 

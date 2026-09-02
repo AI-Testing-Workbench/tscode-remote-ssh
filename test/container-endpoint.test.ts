@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     confirmDebugEnvironment,
+    createDebugEnvironmentConfirmer,
     DEBUG_ENVIRONMENT_CONFIRMATION,
     DebugEnvironmentPreparationCancelledError,
     formatContainerEndpoint,
@@ -60,5 +61,27 @@ describe('container endpoint', () => {
         const cancelPrompt = vi.fn(async () => '取消');
         await expect(confirmDebugEnvironment(cancelPrompt, 'container-2'))
             .rejects.toBeInstanceOf(DebugEnvironmentPreparationCancelledError);
+    });
+
+    it('shares a debug confirmation across repeated resolver calls', async () => {
+        const prompt = vi.fn(async () => DEBUG_ENVIRONMENT_CONFIRMATION);
+        const confirmOnce = createDebugEnvironmentConfirmer(prompt);
+
+        await Promise.all([confirmOnce('container-1'), confirmOnce('container-1')]);
+        await confirmOnce('container-1');
+        await confirmOnce('container-2');
+
+        expect(prompt).toHaveBeenCalledTimes(2);
+    });
+
+    it('allows a debug confirmation retry after cancellation', async () => {
+        const prompt = vi.fn()
+            .mockResolvedValueOnce('取消')
+            .mockResolvedValueOnce(DEBUG_ENVIRONMENT_CONFIRMATION);
+        const confirmOnce = createDebugEnvironmentConfirmer(prompt);
+
+        await expect(confirmOnce('container-1')).rejects.toBeInstanceOf(DebugEnvironmentPreparationCancelledError);
+        await expect(confirmOnce('container-1')).resolves.toBeUndefined();
+        expect(prompt).toHaveBeenCalledTimes(2);
     });
 });
