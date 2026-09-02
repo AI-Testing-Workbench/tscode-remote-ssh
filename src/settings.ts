@@ -10,6 +10,7 @@ export const REMOTE_SETTING_DEFAULTS = {
     historyLimit: 5,
     statusSyncInterval: 5,
     debug: false,
+    disableClientValidation: true,
 } as const;
 
 export interface RemoteSettings {
@@ -19,6 +20,7 @@ export interface RemoteSettings {
     historyLimit: number;
     statusSyncInterval: number;
     debug: boolean;
+    disableClientValidation: boolean;
 }
 
 export function getRemoteSettings(
@@ -30,6 +32,7 @@ export function getRemoteSettings(
     const historyLimit = configuration.get<unknown>('historyLimit', REMOTE_SETTING_DEFAULTS.historyLimit);
     const statusSyncInterval = configuration.get<unknown>('statusSyncInterval', REMOTE_SETTING_DEFAULTS.statusSyncInterval);
     const debug = configuration.get<unknown>('debug', REMOTE_SETTING_DEFAULTS.debug);
+    const disableClientValidation = configuration.get<unknown>('disableClientValidation', REMOTE_SETTING_DEFAULTS.disableClientValidation);
 
     return {
         backendApiUrl: typeof backendApiUrl === 'string'
@@ -48,6 +51,9 @@ export function getRemoteSettings(
             ? statusSyncInterval
             : REMOTE_SETTING_DEFAULTS.statusSyncInterval,
         debug: typeof debug === 'boolean' ? debug : REMOTE_SETTING_DEFAULTS.debug,
+        disableClientValidation: typeof disableClientValidation === 'boolean'
+            ? disableClientValidation
+            : REMOTE_SETTING_DEFAULTS.disableClientValidation,
     };
 }
 

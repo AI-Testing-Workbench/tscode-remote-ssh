@@ -14,6 +14,7 @@ describe('remote settings', () => {
         vscode.setConfigurationValue('testagnet.remote', 'historyLimit', 12);
         vscode.setConfigurationValue('testagnet.remote', 'statusSyncInterval', 2.5);
         vscode.setConfigurationValue('testagnet.remote', 'debug', true);
+        vscode.setConfigurationValue('testagnet.remote', 'disableClientValidation', false);
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: 'https://api.example.test/',
@@ -22,6 +23,7 @@ describe('remote settings', () => {
             historyLimit: 12,
             statusSyncInterval: 2.5,
             debug: true,
+            disableClientValidation: false,
         });
     });
 
@@ -32,6 +34,7 @@ describe('remote settings', () => {
         vscode.setConfigurationValue('testagnet.remote', 'historyLimit', 1.5);
         vscode.setConfigurationValue('testagnet.remote', 'statusSyncInterval', 0);
         vscode.setConfigurationValue('testagnet.remote', 'debug', 'true');
+        vscode.setConfigurationValue('testagnet.remote', 'disableClientValidation', 'false');
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: '',
@@ -40,6 +43,7 @@ describe('remote settings', () => {
             historyLimit: 5,
             statusSyncInterval: 5,
             debug: false,
+            disableClientValidation: true,
         });
     });
 

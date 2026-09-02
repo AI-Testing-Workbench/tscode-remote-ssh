@@ -15,6 +15,7 @@ $SERVER_LOGFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.log"
 $SERVER_PIDFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.pid"
 $SERVER_TOKENFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.token"
 $SERVER_CONNECTION_TOKEN=
+$SERVER_VALIDATION_FLAG="%%SERVER_VALIDATION_FLAG%%"
 
 $LISTENING_ON=
 $OS_RELEASE_ID=
@@ -68,7 +69,7 @@ else {
   $SERVER_CONNECTION_TOKEN="%%SERVER_CONNECTION_TOKEN%%"
   [System.IO.File]::WriteAllLines($SERVER_TOKENFILE, $SERVER_CONNECTION_TOKEN)
 
-  $SCRIPT_ARGUMENTS="--start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms *> '$SERVER_LOGFILE'"
+  $SCRIPT_ARGUMENTS="--start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_VALIDATION_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms *> '$SERVER_LOGFILE'"
 
   $START_ARGUMENTS = @{
     FilePath = "powershell.exe"

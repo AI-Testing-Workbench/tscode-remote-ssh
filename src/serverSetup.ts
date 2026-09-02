@@ -4,6 +4,7 @@ import * as path from 'path';
 import { Log } from './common/logger';
 import { DISTRO_COMMIT, getVSCodeServerConfig } from './serverConfig';
 import SSHConnection from './ssh/sshConnection';
+import { getRemoteSettings } from './settings';
 import { sanitizeExtensionIds } from './utils/sanitize-extension-ids';
 
 /**
@@ -26,6 +27,7 @@ export type ServerInstallOptions = {
     useSocketPath: boolean;
     serverApplicationName: string;
     serverDataFolderName: string;
+    disableClientValidation: boolean;
 };
 
 export type ServerInstallResult = {
@@ -87,6 +89,7 @@ export async function installCodeServer(
     const scriptId = crypto.randomBytes(12).toString('hex');
 
     const vscodeServerConfig = await getVSCodeServerConfig();
+    const { disableClientValidation } = getRemoteSettings();
 
     const installOptions: ServerInstallOptions = {
         id: scriptId,
@@ -95,6 +98,7 @@ export async function installCodeServer(
         useSocketPath,
         serverApplicationName: vscodeServerConfig.serverApplicationName,
         serverDataFolderName: vscodeServerConfig.serverDataFolderName,
+        disableClientValidation,
     };
 
     let commandOutput: { stdout: string; stderr: string };
@@ -215,7 +219,7 @@ function parseServerInstallOutput(str: string, scriptId: string): { [k: string]:
     return resultMap;
 }
 
-function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName }: ServerInstallOptions, extensionPath: string): string {
+function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, disableClientValidation }: ServerInstallOptions, extensionPath: string): string {
     const extensions = extensionIds.map(extId => '--install-extension ' + extId).join(' ');
     const serverDataDir = `$HOME/${serverDataFolderName}`;
     const listenFlag = useSocketPath
@@ -229,13 +233,14 @@ function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPa
         SERVER_INITIAL_EXTENSIONS: extensions,
         SERVER_LISTEN_FLAG: listenFlag,
         SERVER_DATA_DIR: serverDataDir,
+        SERVER_VALIDATION_FLAG: disableClientValidation ? '--disable-client-validation' : '',
         SCRIPT_ID: id,
         ENV_VAR_LINES: envVarLines,
         SERVER_CONNECTION_TOKEN: crypto.randomUUID(),
     }, extensionPath);
 }
 
-function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName }: ServerInstallOptions, extensionPath: string): string {
+function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, disableClientValidation }: ServerInstallOptions, extensionPath: string): string {
     const extensions = extensionIds.map(extId => '--install-extension ' + extId).join(' ');
     const serverDataDir = `$(Resolve-Path ~)\\${serverDataFolderName}`;
     const listenFlag = useSocketPath
@@ -249,6 +254,7 @@ function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSo
         SERVER_INITIAL_EXTENSIONS: extensions,
         SERVER_LISTEN_FLAG: listenFlag,
         SERVER_DATA_DIR: serverDataDir,
+        SERVER_VALIDATION_FLAG: disableClientValidation ? '--disable-client-validation' : '',
         SCRIPT_ID: id,
         ENV_VAR_LINES: envVarLines,
         SERVER_CONNECTION_TOKEN: crypto.randomUUID(),

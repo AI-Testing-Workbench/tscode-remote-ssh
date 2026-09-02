@@ -137,5 +137,6 @@ function settings(backendApiUrl: string) {
         historyLimit: 5,
         statusSyncInterval: 5,
         debug: false,
+        disableClientValidation: true,
     };
 }

@@ -156,6 +156,7 @@ describe('ContainerSync', () => {
                 historyLimit: 2,
                 statusSyncInterval: 5,
                 debug: false,
+                disableClientValidation: true,
             }),
             now: () => new Date('2026-09-01T00:00:00.000Z'),
         });
@@ -175,6 +176,7 @@ describe('ContainerSync', () => {
                 historyLimit: 0,
                 statusSyncInterval: 5,
                 debug: false,
+                disableClientValidation: true,
             }),
             now: () => new Date('2026-09-01T00:00:00.000Z'),
         });
@@ -240,7 +242,7 @@ describe('ContainerSync', () => {
             config: store,
             userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
             userApi,
-            getSettings: () => ({ userName: 'root', backendApiUrl: '', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false }),
+            getSettings: () => ({ userName: 'root', backendApiUrl: '', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false, disableClientValidation: true }),
         });
         expect((await emptyUrl.sync()).error?.code).toBe('api_url_missing');
         expect(getContainerIds).not.toHaveBeenCalled();
@@ -249,7 +251,7 @@ describe('ContainerSync', () => {
             config: store,
             userIdProvider: { getCurrentUserId: vi.fn(async () => '') },
             userApi,
-            getSettings: () => ({ userName: 'root', backendApiUrl: 'http://api.example.test', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false }),
+            getSettings: () => ({ userName: 'root', backendApiUrl: 'http://api.example.test', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false, disableClientValidation: true }),
         });
         expect((await emptyUser.sync()).error?.code).toBe('user_id_missing');
         expect(getContainerIds).not.toHaveBeenCalled();
@@ -305,6 +307,7 @@ describe('ContainerSync', () => {
                 historyLimit: 5,
                 statusSyncInterval: 5,
                 debug: false,
+                disableClientValidation: true,
             }),
             onInvalidEndpoint,
         });
@@ -423,6 +426,7 @@ describe('ContainerSync', () => {
                 historyLimit: 5,
                 statusSyncInterval: 5,
                 debug: false,
+                disableClientValidation: true,
             }),
             onSync,
         });
@@ -508,6 +512,7 @@ function createSync(
             historyLimit: 5,
             statusSyncInterval: 5,
             debug: false,
+            disableClientValidation: true,
             ...settings,
         }),
         now: () => new Date('2026-09-01T00:00:00.000Z'),

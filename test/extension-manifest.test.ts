@@ -43,6 +43,7 @@ describe('extension manifest', () => {
             'testagnet.remote.historyLimit': { type: 'integer', default: 5 },
             'testagnet.remote.statusSyncInterval': { type: 'number', default: 5 },
             'testagnet.remote.debug': { type: 'boolean', default: false },
+            'testagnet.remote.disableClientValidation': { type: 'boolean', default: true },
             'testagnet.remote.configFile': { type: 'string', default: '~/.local/share/testagent' },
         });
 
@@ -53,6 +54,7 @@ describe('extension manifest', () => {
             'testagnet.remote.historyLimit',
             'testagnet.remote.statusSyncInterval',
             'testagnet.remote.debug',
+            'testagnet.remote.disableClientValidation',
             'testagnet.remote.configFile',
         ]) {
             expect(properties[key].description).toBeTruthy();
