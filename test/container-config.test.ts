@@ -46,6 +46,15 @@ describe('ContainerConfig', () => {
         expect(text).toContain(`IgnoreUnknown ${IGNORE_UNKNOWN_VALUE}`);
         expect(text).toContain('StrictHostKeyChecking no');
         expect(text).toContain(`${USER_KNOWN_HOSTS_FILE_DIRECTIVE} ${NULL_KNOWN_HOSTS_FILE}`);
+        expect(getServiceFields(text)).toEqual([
+            'HostName 10.0.0.1',
+            'User root',
+            'Port 22',
+            'StrictHostKeyChecking no',
+            'UserKnownHostsFile /dev/null',
+            'IgnoreUnknown ContainerId,ExpiresAt',
+            'ContainerId container-1',
+        ]);
         expect(text.indexOf('IgnoreUnknown')).toBeLessThan(text.indexOf('ContainerId'));
         expect(text.indexOf('StrictHostKeyChecking')).toBeLessThan(text.indexOf('ContainerId'));
         expect(store.list(SSHConfig.parse(text))).toEqual([{
@@ -147,6 +156,44 @@ describe('ContainerConfig', () => {
         expect(document.config.some(line => line.type === SSHConfig.DIRECTIVE && 'config' in line && line.value === 'ordinary')).toBe(true);
     });
 
+    it('normalizes known service fields in an existing block', async () => {
+        const store = await createStore();
+        const initial = [
+            'Host test/test',
+            '\tContainerId container-order',
+            '\tExpiresAt 2026-09-02T00:47:16.734Z',
+            '\tUserKnownHostsFile /dev/null',
+            '\tStrictHostKeyChecking no',
+            '\tPort 59194',
+            '\tUser root',
+            '\tHostName 127.0.0.1',
+            '\tIgnoreUnknown ContainerId,ExpiresAt',
+            '',
+        ].join('\n');
+        await fs.writeFile(store.filePath, initial, 'utf8');
+
+        const document = await store.read();
+        expect(store.upsertContainer(document.config, {
+            containerId: 'container-order',
+            host: 'test/test',
+            hostName: '127.0.0.1',
+            port: 59194,
+            expiresAt: '2026-09-02T00:47:16.734Z',
+        }, { skipKnownHostsCheck: true, userName: 'root' })).toBe(true);
+        expect(await store.write(document)).toBe(true);
+
+        expect(getServiceFields(await fs.readFile(store.filePath, 'utf8'))).toEqual([
+            'HostName 127.0.0.1',
+            'User root',
+            'Port 59194',
+            'StrictHostKeyChecking no',
+            'UserKnownHostsFile /dev/null',
+            'IgnoreUnknown ContainerId,ExpiresAt',
+            'ContainerId container-order',
+            'ExpiresAt 2026-09-02T00:47:16.734Z',
+        ]);
+    });
+
     it('does not add or remove known-host settings when disabled', async () => {
         const store = await createStore();
         const document = await store.read();
@@ -172,4 +219,11 @@ async function createStore(): Promise<ContainerConfig> {
     const filePath = path.join(directory, 'nested', 'testagent');
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     return new ContainerConfig(filePath);
+}
+
+function getServiceFields(text: string): string[] {
+    return text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('Host '));
 }

@@ -112,6 +112,7 @@ export class ContainerConfig {
     }
 
     public async write(document: ContainerConfigDocument): Promise<boolean> {
+        normalizeContainerSections(document.config);
         const nextText = SSHConfig.stringify(document.config);
         if (nextText === document.originalText) {
             return false;
@@ -149,6 +150,7 @@ export class ContainerConfig {
             );
             config.push(newSection);
             this.ensureIgnoreUnknown(newSection);
+            normalizeContainerSection(newSection);
             return true;
         }
 
@@ -190,6 +192,7 @@ export class ContainerConfig {
         } else {
             changed = setDirective(section.config, isExpiresAtDirective, EXPIRES_AT_DIRECTIVE, entry.expiresAt) || changed;
         }
+        changed = normalizeContainerSection(section) || changed;
         return changed;
     }
 
@@ -211,6 +214,7 @@ export class ContainerConfig {
                 ) || changed;
             }
         }
+        changed = normalizeContainerSections(config) || changed;
         return changed;
     }
 
@@ -236,6 +240,7 @@ export class ContainerConfig {
                 ) || changed;
             }
         }
+        changed = normalizeContainerSections(config) || changed;
         return changed;
     }
 
@@ -244,8 +249,10 @@ export class ContainerConfig {
         if (!section) {
             return false;
         }
-        const changed = this.ensureIgnoreUnknown(section);
-        return setDirective(section.config, isExpiresAtDirective, EXPIRES_AT_DIRECTIVE, expiresAt) || changed;
+        let changed = this.ensureIgnoreUnknown(section);
+        changed = setDirective(section.config, isExpiresAtDirective, EXPIRES_AT_DIRECTIVE, expiresAt) || changed;
+        changed = normalizeContainerSection(section) || changed;
+        return changed;
     }
 
     public removeExpiresAt(config: SSHConfig, containerId: string): boolean {
@@ -253,8 +260,10 @@ export class ContainerConfig {
         if (!section) {
             return false;
         }
-        const changed = this.ensureIgnoreUnknown(section);
-        return removeDirectives(section.config, isExpiresAtDirective) || changed;
+        let changed = this.ensureIgnoreUnknown(section);
+        changed = removeDirectives(section.config, isExpiresAtDirective) || changed;
+        changed = normalizeContainerSection(section) || changed;
+        return changed;
     }
 
     public removeContainer(config: SSHConfig, containerId: string): boolean {
@@ -280,6 +289,7 @@ export class ContainerConfig {
                 changed = this.ensureSkipKnownHostsCheck(line) || changed;
             }
         }
+        changed = normalizeContainerSections(config) || changed;
         return changed;
     }
 
@@ -385,6 +395,48 @@ function createContainerSection(
         );
     }
     return section;
+}
+
+function normalizeContainerSections(config: SSHConfig): boolean {
+    let changed = false;
+    for (const line of config) {
+        if (isHostSection(line) && getDirectiveValue(line.config, isContainerIdDirective)) {
+            changed = normalizeContainerSection(line) || changed;
+        }
+    }
+    return changed;
+}
+
+function normalizeContainerSection(section: Section): boolean {
+    const knownIndexes: number[] = [];
+    const knownDirectives: Directive[] = [];
+    for (let index = 0; index < section.config.length; index += 1) {
+        const line = section.config[index];
+        if (isDirective(line) && isOrderedContainerDirective(line)) {
+            knownIndexes.push(index);
+            knownDirectives.push(line);
+        }
+    }
+
+    const orderedDirectives: Directive[] = [];
+    for (const predicate of ORDERED_CONTAINER_DIRECTIVES) {
+        for (const directive of knownDirectives) {
+            if (predicate(directive)) {
+                orderedDirectives.push(directive);
+            }
+        }
+    }
+
+    let changed = false;
+    for (let index = 0; index < knownIndexes.length; index += 1) {
+        const targetIndex = knownIndexes[index];
+        const directive = orderedDirectives[index];
+        if (section.config[targetIndex] !== directive) {
+            section.config[targetIndex] = directive;
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 function createDirective(param: string, value: string, before: string): Directive {
@@ -530,6 +582,21 @@ function isIgnoreUnknownDirective(line: Directive): boolean {
 
 function isSkipKnownHostsDirective(line: Directive): boolean {
     return /^stricthostkeychecking$/i.test(line.param);
+}
+
+const ORDERED_CONTAINER_DIRECTIVES: Array<(line: Directive) => boolean> = [
+    isHostNameDirective,
+    isUserDirective,
+    isPortDirective,
+    isSkipKnownHostsDirective,
+    isUserKnownHostsFileDirective,
+    isIgnoreUnknownDirective,
+    isContainerIdDirective,
+    isExpiresAtDirective,
+];
+
+function isOrderedContainerDirective(line: Directive): boolean {
+    return ORDERED_CONTAINER_DIRECTIVES.some(predicate => predicate(line));
 }
 
 function getErrorCode(error: unknown): string | undefined {
