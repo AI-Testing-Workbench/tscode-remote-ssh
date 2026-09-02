@@ -126,7 +126,7 @@ export class ContainerSync {
         }
 
         this.inFlight = this.performSync()
-            .catch(error => this.resultWithError(toSyncError(error, 'sync_failed', '容器同步失败')))
+            .catch(error => this.resultWithError(toSyncError(error, 'sync_failed', 'TestAgent Cloud 服务同步失败')))
             .then(result => {
                 if (!this.disposed) {
                     try {
@@ -201,7 +201,7 @@ export class ContainerSync {
                 ? this.userApiFactory(settings.backendApiUrl)
                 : this.userApi ?? throwMissingUserApi();
         } catch (error) {
-            return this.resultWithError(toSyncError(error, 'api_error', '服务同步 API 未配置'));
+            return this.resultWithError(toSyncError(error, 'api_error', 'TestAgent Cloud 服务同步 API 未配置'));
         }
 
         let containerIdsResponse: ContainerIdsResponse;
@@ -290,7 +290,7 @@ export class ContainerSync {
                     this.reportInvalidEndpoint(containerId, response.endpoint);
                     return [containerId, {
                         response,
-                        error: { code: 'invalid_endpoint', message: '服务 endpoint 必须是 IP:Port' },
+                        error: { code: 'invalid_endpoint', message: 'TestAgent Cloud 服务 endpoint 必须是 IP:Port' },
                     }] as const;
                 }
                 this.clearInvalidEndpointNotifications(containerId);
@@ -338,7 +338,7 @@ export class ContainerSync {
             const hostName = entry?.hostName ?? assignment?.hostName ?? remoteStatus?.parsedEndpoint?.host;
             const port = entry?.port ?? assignment?.port ?? remoteStatus?.parsedEndpoint?.port;
             const endpointError = !entry && response && !hostName
-                ? { code: 'endpoint_missing', message: '服务状态未返回可用 endpoint' }
+                ? { code: 'endpoint_missing', message: 'TestAgent Cloud 服务状态未返回可用 endpoint' }
                 : undefined;
             return {
                 containerId,

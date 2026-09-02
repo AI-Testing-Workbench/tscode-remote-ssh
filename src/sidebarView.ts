@@ -213,7 +213,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         try {
             settings = this.getSettings();
         } catch (error) {
-            this.pageError = toSidebarError(error, 'settings_error', '读取 TestAgent Cloud 设置失败');
+            this.pageError = toSidebarError(error, 'settings_error', '读取 TestAgent Cloud 服务设置失败');
             this.render();
             return;
         }
@@ -457,7 +457,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         const settings = this.getSettings();
         const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
         if (!endpoint) {
-            this.showError(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+            this.showError(`TestAgent Cloud 服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
             return;
         }
 
@@ -499,7 +499,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             ? error
             : error instanceof Error && error.message
                 ? error.message
-                : 'TestAgent Cloud 操作失败';
+                : 'TestAgent Cloud 服务操作失败';
         void vscode.window.showErrorMessage(message, { modal: true });
     }
 }
@@ -509,18 +509,18 @@ function renderSidebarHtml(containers: SyncedContainer[], showAdmin: boolean, di
         ? containers.map(renderContainerCard).join('')
         : '<div class="empty-state">当前没有可用的 TestAgent Cloud 服务</div>';
     const adminButton = showAdmin ? '<button data-action="openAdmin">管理员页面</button>' : '';
-    const createButton = disconnected ? '<button data-action="create">创建容器</button>' : '';
+    const createButton = disconnected ? '<button data-action="create">创建 TestAgent Cloud 服务</button>' : '';
     return renderDocument(`
         <main class="sidebar">
             <header class="toolbar">
                 <div class="toolbar-actions">
-                    <button data-action="refresh" title="刷新容器状态">刷新</button>
+                    <button data-action="refresh" title="刷新 TestAgent Cloud 服务状态">刷新</button>
                     ${adminButton}
                     ${createButton}
                     <button data-action="openConfig">打开 config</button>
                 </div>
             </header>
-            <section class="container-list" aria-label="容器列表">${cards}</section>
+            <section class="container-list" aria-label="TestAgent Cloud 服务列表">${cards}</section>
         </main>
     `);
 }
@@ -539,7 +539,7 @@ function renderContainerCard(container: SyncedContainer): string {
         ? `<div class="card-error">${escapeHtml(container.error.message)}</div>`
         : '';
     const history = container.expiresAt
-        ? `<div class="history-warning">容器已在云端删除 <button class="history-remove" data-action="removeHistory" data-container-id="${containerId}" title="删除本地配置">X</button></div>`
+        ? `<div class="history-warning">TestAgent Cloud 服务已在云端删除 <button class="history-remove" data-action="removeHistory" data-container-id="${containerId}" title="删除本地配置">X</button></div>`
         : '';
     return `
         <article class="container-card" data-container-id="${containerId}">
@@ -565,7 +565,7 @@ function renderContainerCard(container: SyncedContainer): string {
 function renderCloudHtml(): string {
     return renderDocument(`
         <main class="cloud-card">
-            <p>你现在处于云端</p>
+            <p>你现在处于 TestAgent Cloud 服务中</p>
             <button data-action="disconnect">断开远程连接</button>
         </main>
     `);
@@ -576,7 +576,7 @@ function renderErrorHtml(message: string): string {
 }
 
 function renderLoadingHtml(): string {
-    return renderDocument('<main class="loading"><p>正在加载 TestAgent Cloud...</p></main>');
+    return renderDocument('<main class="loading"><p>正在加载 TestAgent Cloud 服务...</p></main>');
 }
 
 function renderDocument(body: string): string {
@@ -677,7 +677,7 @@ function getStatusClass(container: SyncedContainer): string {
 
 function getStatusLabel(container: SyncedContainer): string {
     if (!container.remote || container.status === 'missing') {
-        return '云端已删除';
+        return 'TestAgent Cloud 服务已在云端删除';
     }
     switch (container.status.toLowerCase()) {
         case 'running':

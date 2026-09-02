@@ -94,7 +94,7 @@ export function createPublicUserContainerApi(
                 throw new PublicApiError(
                     'request',
                     PUBLIC_API_ERROR_CODES.USER_ID_MISMATCH,
-                    '容器创建 API 的 user_id 不能为空',
+                    'TestAgent Cloud 服务创建 API 的 user_id 不能为空',
                 );
             }
         }
@@ -110,13 +110,13 @@ export function createPublicUserContainerApi(
 
     return {
         createContainer: async request => {
-            assertObject(request, '创建容器请求必须是对象');
+            assertObject(request, '创建 TestAgent Cloud 服务请求必须是对象');
             const { userId, userApi } = await prepareUserRequest(request.user_id);
             return userApi.createContainer({ ...request, user_id: userId });
         },
         getContainerIds: async query => {
             const normalizedQuery = query ?? {};
-            assertObject(normalizedQuery, '容器查询参数必须是对象');
+            assertObject(normalizedQuery, 'TestAgent Cloud 服务查询参数必须是对象');
             const { userId, userApi } = await prepareUserRequest(normalizedQuery.user_id);
             return userApi.getContainerIds({ ...normalizedQuery, user_id: userId });
         },

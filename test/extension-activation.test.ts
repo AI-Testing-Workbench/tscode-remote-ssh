@@ -100,7 +100,7 @@ describe('extension activation API', () => {
 
         await expect(exports.getContainerIds()).rejects.toMatchObject({
             code: 'api_url_missing',
-            message: '未配置后端 REST API 地址',
+            message: '未配置后端 TestAgent Cloud 服务的 API 地址',
         });
 
         deactivate();

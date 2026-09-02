@@ -123,7 +123,7 @@ describe('RestClient', () => {
         await expect(emptyUrlClient.user.getContainer('id')).rejects.toMatchObject({
             kind: 'configuration',
             code: REST_ERROR_CODES.API_URL_MISSING,
-            message: '未配置后端 REST API 地址',
+            message: '未配置后端 TestAgent Cloud 服务的 API 地址',
         });
         expect(emptyUrlTransport.transport).not.toHaveBeenCalled();
 

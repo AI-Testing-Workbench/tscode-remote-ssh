@@ -60,7 +60,7 @@ describe('ContainerSync', () => {
                 remote: true,
                 error: {
                     code: 'invalid_endpoint',
-                    message: '容器 endpoint 必须是 IP:端口格式',
+                    message: 'TestAgent Cloud 服务 endpoint 必须是 IP:Port',
                 },
             },
         ]);
@@ -168,7 +168,7 @@ describe('ContainerSync', () => {
             getContainerIds: vi.fn(async () => ({ container_ids: ['missing-status', 'healthy'] })),
             getContainer: vi.fn(async (containerId: string) => {
                 if (containerId === 'missing-status') {
-                    throw new RestClientError('http', 'container_not_found', '容器不存在', 404);
+                    throw new RestClientError('http', 'container_not_found', 'TestAgent Cloud 服务不存在', 404);
                 }
                 return {
                     container_id: containerId,
@@ -194,7 +194,7 @@ describe('ContainerSync', () => {
                 remote: true,
                 error: {
                     code: 'container_not_found',
-                    message: '容器不存在',
+                    message: 'TestAgent Cloud 服务不存在',
                 },
             },
             {

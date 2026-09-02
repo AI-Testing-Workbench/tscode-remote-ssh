@@ -61,6 +61,11 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('status-dot missing');
         expect(view.webview.html).toContain('data-action="connect"');
         expect(view.webview.html).toContain('post(\'connect\'');
+        expect(view.webview.html).toContain('创建 TestAgent Cloud 服务');
+        expect(view.webview.html).toContain('刷新 TestAgent Cloud 服务状态');
+        expect(view.webview.html).toContain('TestAgent Cloud 服务列表');
+        expect(view.webview.html).toContain('TestAgent Cloud 服务已在云端删除');
+        expect(view.webview.html).not.toContain('创建容器');
         expect(view.webview.html).toContain('script-src \'nonce-');
         expect(view.webview.html).not.toContain('data-action="openAdmin"');
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
@@ -77,7 +82,7 @@ describe('SidebarViewProvider', () => {
 
         await provider.resolveWebviewView(view as never);
 
-        expect(view.webview.html).toContain('你现在处于云端');
+        expect(view.webview.html).toContain('你现在处于 TestAgent Cloud 服务中');
         expect(view.webview.html).toContain('data-action="disconnect"');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(view.webview.html).not.toContain('data-action="openConfig"');
@@ -224,7 +229,7 @@ describe('SidebarViewProvider', () => {
         await provider.createContainerFromPrompt();
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            '容器 "created-2" 的 endpoint 无效，应为 IP:端口格式：example.com:22',
+            'TestAgent Cloud 服务 "created-2" 的 endpoint 无效，应为 IP:Port 格式：example.com:22',
             { modal: true },
         );
         expect(config.read).not.toHaveBeenCalled();
