@@ -623,7 +623,7 @@ function renderDocument(body: string): string {
         .status-label { margin-left: auto; color: var(--vscode-descriptionForeground); font-size: .85em; white-space: nowrap; }
         .status-dot { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; background: var(--vscode-charts-yellow); }
         .status-dot.running { background: var(--vscode-testing-iconPassed, #3fb950); }
-        .status-dot.stopped { background: var(--vscode-testing-iconFailed, #f14c4c); }
+        .status-dot.stopped, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
         .status-dot.missing { background: var(--vscode-descriptionForeground); }
         .container-meta { margin: 7px 0; color: var(--vscode-descriptionForeground); font-size: .86em; overflow-wrap: anywhere; }
         .card-error { margin: 7px 0; color: var(--vscode-errorForeground); overflow-wrap: anywhere; }
@@ -660,11 +660,11 @@ ${body}
 }
 
 function getStatusClass(container: SyncedContainer): string {
+    if (container.error) {
+        return 'error';
+    }
     if (!container.remote || container.status === 'missing') {
         return 'missing';
-    }
-    if (container.error) {
-        return 'unknown';
     }
     if (container.status.toLowerCase() === 'running') {
         return 'running';

@@ -40,6 +40,10 @@ describe('SidebarViewProvider', () => {
                 syncedContainer('running-1', 'running', true),
                 syncedContainer('stopped-1', 'stopped', true),
                 syncedContainer('pending-1', 'pending', true),
+                syncedContainer('error-1', 'unknown', true, undefined, {
+                    code: 'status_failed',
+                    message: 'TestAgent Cloud 服务状态查询失败',
+                }),
                 syncedContainer('missing-1', 'missing', false, '2026-09-01T00:00:00.000Z'),
             ],
             changed: false,
@@ -58,7 +62,9 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('status-dot running');
         expect(view.webview.html).toContain('status-dot stopped');
         expect(view.webview.html).toContain('status-dot unknown');
+        expect(view.webview.html).toContain('status-dot error');
         expect(view.webview.html).toContain('status-dot missing');
+        expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
         expect(view.webview.html).toContain('post(\'connect\'');
         expect(view.webview.html).toContain('创建 TestAgent Cloud 服务');
@@ -258,6 +264,7 @@ function syncedContainer(
     status: string,
     remote: boolean,
     expiresAt?: string,
+    error?: SyncedContainer['error'],
 ): SyncedContainer {
     return {
         containerId,
@@ -267,6 +274,7 @@ function syncedContainer(
         remote,
         ...(remote ? { endpoint: '10.0.0.1:22' } : {}),
         ...(expiresAt ? { expiresAt } : {}),
+        ...(error ? { error } : {}),
     };
 }
 
