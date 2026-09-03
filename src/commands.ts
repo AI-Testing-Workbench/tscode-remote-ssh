@@ -28,6 +28,7 @@ async function promptForHost(): Promise<string | undefined> {
         const config = new ContainerConfig();
         const document = await config.read();
         configuredHosts = [...new Set(config.list(document.config)
+            .filter(entry => !entry.expiresAt)
             .map(entry => entry.host.trim())
             .filter(Boolean))];
     } catch {

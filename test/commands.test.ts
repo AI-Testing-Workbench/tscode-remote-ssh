@@ -61,6 +61,11 @@ describe('openRemoteSSHWindow', () => {
             '\tHostName 10.0.0.1',
             '\tContainerId service-1',
             '',
+            'Host "Expired TestAgent Cloud Service"',
+            '\tHostName 10.0.0.2',
+            '\tContainerId expired-service',
+            '\tExpiresAt 2026-09-01T00:00:00.000Z',
+            '',
             'Host ordinary-ssh-host',
             '\tHostName ordinary.example.test',
             '',
@@ -68,11 +73,19 @@ describe('openRemoteSSHWindow', () => {
         vscode.setConfigurationValue('testagnet.remote', 'configFile', configPath);
         const configured = new ContainerConfig(configPath);
         const document = await configured.read();
-        expect(configured.list(document.config)).toEqual([{
-            containerId: 'service-1',
-            host: 'TestAgent Cloud Service',
-            hostName: '10.0.0.1',
-        }]);
+        expect(configured.list(document.config)).toEqual([
+            {
+                containerId: 'service-1',
+                host: 'TestAgent Cloud Service',
+                hostName: '10.0.0.1',
+            },
+            {
+                containerId: 'expired-service',
+                host: 'Expired TestAgent Cloud Service',
+                hostName: '10.0.0.2',
+                expiresAt: '2026-09-01T00:00:00.000Z',
+            },
+        ]);
         expect(new ContainerConfig().filePath).toBe(configPath);
 
         let hideListener: (() => void) | undefined;

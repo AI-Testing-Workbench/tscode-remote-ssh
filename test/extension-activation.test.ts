@@ -11,6 +11,7 @@ vi.mock('../src/authResolver', () => ({
 
 vi.mock('../src/cloudMode', () => ({
     initializeCloudMode: vi.fn(),
+    refreshCloudMode: vi.fn(() => false),
 }));
 
 vi.mock('../src/commands', () => ({
@@ -102,6 +103,8 @@ describe('extension activation API', () => {
             code: 'api_url_missing',
             message: '未配置后端 TestAgent Cloud 管理服务的 API 地址',
         });
+        const outputChannel = vscode.window.createOutputChannel.mock.results[0]?.value;
+        expect(outputChannel.appendLine).not.toHaveBeenCalledWith(expect.stringContaining('获取云端状态'));
 
         deactivate();
     });

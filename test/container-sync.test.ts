@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ContainerConfig } from '../src/containerConfig';
-import { ContainerSync, getHostFromEndpoint } from '../src/containerSync';
+import { ContainerSync, getHostFromEndpoint, getUniqueHostName } from '../src/containerSync';
 import { RestClientError, UserRestApi } from '../src/api/restClient';
 
 const temporaryDirectories: string[] = [];
@@ -282,6 +282,37 @@ describe('ContainerSync', () => {
         expect(text).toContain('Host "alice/repo (1)"\n');
         expect(text).toContain('Host "TestAgent Cloud 服务"\n');
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(3);
+    });
+
+    it('repairs duplicate Host aliases already present in the config', async () => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, { containerId: 'one', host: 'alice/repo' });
+        store.upsertContainer(document.config, { containerId: 'two', host: 'alice/repo' });
+        await store.write(document);
+
+        const sync = createSync(store, {
+            getContainerIds: vi.fn(async () => ({ container_ids: ['one', 'two'] })),
+            getContainer: vi.fn(async (containerId: string) => ({
+                container_id: containerId,
+                status: 'running',
+                endpoint: containerId === 'one' ? '10.0.0.1:22' : '10.0.0.2:22',
+                gitee_user: 'alice',
+                gitee_repository: 'repo',
+            })),
+        });
+
+        const result = await sync.sync();
+
+        expect(result.containers.map(container => container.host)).toEqual([
+            'alice/repo',
+            'alice/repo (1)',
+        ]);
+        expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(2);
+    });
+
+    it('adds a suffix when an existing Host differs only by case or whitespace', () => {
+        expect(getUniqueHostName('alice/repo', new Set([' Alice/Repo ']))).toBe('alice/repo (1)');
     });
 
     it('notifies once and skips new config entries for invalid endpoints', async () => {

@@ -308,7 +308,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 this.labelFormatterDisposable?.dispose();
                 this.labelFormatterDisposable = vscode.workspace.registerResourceLabelFormatter({
                     scheme: 'vscode-remote',
-                    authority: `${REMOTE_SSH_AUTHORITY}+*`,
+                    authority,
                     formatting: {
                         label: '${path}',
                         separator: '/',

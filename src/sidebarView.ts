@@ -71,7 +71,7 @@ export interface SidebarViewOptions {
     userApiFactory: (baseUrl: string) => UserRestApi;
     getSettings?: () => RemoteSettings;
     cloudMode?: boolean;
-    getCloudMode?: () => boolean;
+    getCloudMode?: () => boolean | Thenable<boolean>;
     isDisconnected?: () => boolean;
     onOpenConfig?: () => void | Promise<void>;
     onOpenAdmin?: () => void | Promise<void>;
@@ -92,7 +92,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
     private readonly userApiFactory: (baseUrl: string) => UserRestApi;
     private readonly getSettings: () => RemoteSettings;
-    private readonly getCloudMode: () => boolean;
+    private readonly getCloudMode: () => boolean | Thenable<boolean>;
     private cloudMode: boolean;
     private readonly isDisconnected: () => boolean;
     private readonly onOpenConfig: (() => void | Promise<void>) | undefined;
@@ -137,7 +137,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.stateSubscription = this.state.subscribe(() => this.render());
     }
 
-    public resolveWebviewView(webviewView: vscode.WebviewView): Thenable<void> {
+    public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
         if (this.disposed) {
             return Promise.resolve();
         }
@@ -149,7 +149,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.pageReady = false;
         this.pageError = undefined;
         this.adminAllowed = false;
-        this.cloudMode = this.getCloudMode();
+        this.cloudMode = await this.getCloudMode();
+        if (this.disposed || this.webviewView !== webviewView) {
+            return;
+        }
 
         webviewView.webview.options = {
             enableScripts: true,
@@ -215,7 +218,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
 
-        this.cloudMode = this.getCloudMode();
+        this.cloudMode = await this.getCloudMode();
+        if (this.disposed || this.webviewView !== webviewView) {
+            return;
+        }
         this.pageReady = false;
         this.pageError = undefined;
         this.adminAllowed = false;
@@ -825,7 +831,7 @@ function renderDocument(body: string): string {
         button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
         button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
         .icon { width: 18px; height: 18px; flex: 0 0 18px; }
-        .sidebar { width: 100%; max-width: 520px; margin: 0 auto; }
+        .sidebar { width: 100%; max-width: none; margin: 0; }
         .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
         .page-title { min-width: 0; margin: 0; overflow: hidden; color: var(--on-surface); font-size: 17px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
         .section-kicker { display: block; color: var(--on-surface-variant); font-size: 10px; font-weight: 700; letter-spacing: .14em; line-height: 1.2; }
@@ -864,11 +870,12 @@ function renderDocument(body: string): string {
         .empty-state { display: flex; align-items: center; flex-direction: column; gap: 5px; padding: 38px 18px; border: 1px dashed var(--outline); border-radius: 12px; color: var(--on-surface-variant); }
         .empty-state .icon { width: 30px; height: 30px; margin-bottom: 7px; color: var(--primary); }
         .empty-state strong { color: var(--on-surface); font-size: 14px; }
-        .cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border-radius: 16px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
-        .cloud-icon { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 12px; color: var(--primary); background: var(--surface-container-high); }
+        .cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border: 2px solid var(--warning); border-radius: 16px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
+        .cloud-icon { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 12px; color: var(--warning); background: var(--surface-container-high); }
         .cloud-icon .icon { width: 34px; height: 34px; }
         .cloud-card h1 { max-width: 270px; font-size: 18px; }
-        .cloud-card p { margin: 0 0 8px; color: var(--on-surface-variant); }
+        .cloud-card p { margin: 0 0 8px; color: var(--warning); font-weight: 600; text-align: center; }
+        .cloud-card .action-button { width: 100%; max-width: 160px; max-height: 28px; padding: 0 12px; }
         .error-page { min-height: calc(100vh - 40px); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; color: var(--error); text-align: center; }
         .error-page > .icon { width: 32px; height: 32px; }
         .error-page p { max-width: 100%; margin: 0; overflow-wrap: anywhere; }

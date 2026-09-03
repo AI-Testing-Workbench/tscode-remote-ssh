@@ -81,13 +81,15 @@ export function getContainerHostName(
 
 export function getUniqueHostName(baseName: string, usedNames: Set<string>): string {
     const normalizedBaseName = baseName.trim() || DEFAULT_CONTAINER_HOST_NAME;
+    const normalizedUsedNames = new Set(Array.from(usedNames, normalizeHostName));
     let candidate = normalizedBaseName;
     let suffix = 1;
-    while (usedNames.has(candidate)) {
+    while (normalizedUsedNames.has(normalizeHostName(candidate))) {
         candidate = `${normalizedBaseName} (${suffix})`;
         suffix += 1;
     }
     usedNames.add(candidate);
+    normalizedUsedNames.add(normalizeHostName(candidate));
     return candidate;
 }
 
@@ -496,6 +498,10 @@ function compareExpiration(left: ContainerConfigEntry, right: ContainerConfigEnt
     const normalizedLeft = Number.isNaN(leftTime) ? Number.NEGATIVE_INFINITY : leftTime;
     const normalizedRight = Number.isNaN(rightTime) ? Number.NEGATIVE_INFINITY : rightTime;
     return normalizedLeft - normalizedRight;
+}
+
+function normalizeHostName(hostName: string): string {
+    return hostName.trim().toLocaleLowerCase();
 }
 
 function getSyncIntervalMs(seconds: number): number {

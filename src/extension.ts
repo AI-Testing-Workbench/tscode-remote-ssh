@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
-import { Log } from './common/logger';
-import { RemoteSSHResolver, REMOTE_SSH_AUTHORITY } from './authResolver';
-import { openRemoteSSHWindow, openSSHConfigFile, promptOpenRemoteSSHWindow } from './commands';
-import { getRemoteWorkspaceLocationData, RemoteLocationHistory } from './remoteLocationHistory';
-import { initializeCloudMode, refreshCloudMode, type CloudModeOptions } from './cloudMode';
-import { RestClient } from './api/restClient';
-import { ContainerConfig } from './containerConfig';
-import { ContainerSync } from './containerSync';
-import { SidebarSyncState, SidebarViewProvider } from './sidebarView';
-import { UserIdProvider } from './user';
-import { createPublicUserContainerApi, type TestAgentRemoteApi } from './api/publicApi';
+import {Log} from './common/logger';
+import {REMOTE_SSH_AUTHORITY, RemoteSSHResolver} from './authResolver';
+import {openRemoteSSHWindow, openSSHConfigFile, promptOpenRemoteSSHWindow} from './commands';
+import {getRemoteWorkspaceLocationData, RemoteLocationHistory} from './remoteLocationHistory';
+import {type CloudModeOptions, initializeCloudMode, refreshCloudMode} from './cloudMode';
+import {RestClient} from './api/restClient';
+import {ContainerConfig} from './containerConfig';
+import {ContainerSync} from './containerSync';
+import {SidebarSyncState, SidebarViewProvider} from './sidebarView';
+import {UserIdProvider} from './user';
+import {createPublicUserContainerApi, type TestAgentRemoteApi} from './api/publicApi';
 import SSHDestination from './ssh/sshDestination';
 
 let activeContainerSync: ContainerSync | undefined;
@@ -22,12 +22,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const cloudModeOptions: CloudModeOptions = {
         onFileCheckError: error => logger.error('检查云端模式标记文件失败，按非云端模式处理', error),
     };
-    const cloudMode = initializeCloudMode(cloudModeOptions);
+    initializeCloudMode(cloudModeOptions);
 
     const sidebarSyncState = new SidebarSyncState();
     const userIdProvider = new UserIdProvider();
     const publicApi = createPublicUserContainerApi({ userIdProvider });
     const config = new ContainerConfig();
+    const getCloudMode = async (): Promise<boolean> => {
+        const localCloudMode = refreshCloudMode(cloudModeOptions);
+        if (localCloudMode) {
+            return true;
+        }
+
+        const remoteHost = getCurrentRemoteHost();
+        if (!remoteHost) {
+            return false;
+        }
+
+        try {
+            const document = await config.read();
+            return config.list(document.config).some(entry =>
+                !entry.expiresAt && entry.host.toLowerCase() === remoteHost.toLowerCase());
+        } catch (error) {
+            logger.error('读取当前远程服务配置失败，按非云端模式处理', error);
+            return false;
+        }
+    };
+    const cloudMode = await getCloudMode();
     const userApiFactory = (baseUrl: string) => new RestClient(baseUrl).user;
     const containerSync = new ContainerSync({
         config,
@@ -50,7 +71,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         userIdProvider,
         userApiFactory,
         cloudMode,
-        getCloudMode: () => refreshCloudMode(cloudModeOptions),
+        getCloudMode,
         onOpenConfig: async () => {
             await openSSHConfigFile();
         },
@@ -94,6 +115,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.createContainer', () => sidebarView.createContainerFromPrompt()));
 
     return publicApi;
+}
+
+function getCurrentRemoteHost(): string | undefined {
+    const remoteAuthority = vscode.env.remoteAuthority;
+    const prefix = `${REMOTE_SSH_AUTHORITY}+`;
+    if (!remoteAuthority?.startsWith(prefix)) {
+        return undefined;
+    }
+    return SSHDestination.parseEncoded(remoteAuthority.slice(prefix.length)).hostname;
 }
 
 export function deactivate() {
