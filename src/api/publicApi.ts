@@ -67,7 +67,10 @@ export function createPublicUserContainerApi(
 
     const getUserApi = (): UserRestApi => userApiFactory(getSettings().backendApiUrl);
 
-    const prepareUserRequest = async (requestedUserId: unknown): Promise<{ userId: string; userApi: UserRestApi }> => {
+    const prepareUserRequest = async (
+        requestedUserId: unknown,
+        emptyUserIdMessage = 'user_id 不能为空',
+    ): Promise<{ userId: string; userApi: UserRestApi }> => {
         let currentUserId: unknown;
         try {
             currentUserId = await userIdProvider.getCurrentUserId();
@@ -94,7 +97,14 @@ export function createPublicUserContainerApi(
                 throw new PublicApiError(
                     'request',
                     PUBLIC_API_ERROR_CODES.USER_ID_MISMATCH,
-                    'TestAgent Cloud 服务创建 API 的 user_id 不能为空',
+                    emptyUserIdMessage,
+                );
+            }
+            if (requestedUserId.trim() !== normalizedUserId) {
+                throw new PublicApiError(
+                    'request',
+                    PUBLIC_API_ERROR_CODES.USER_ID_MISMATCH,
+                    'user_id 必须与当前用户 ID一致',
                 );
             }
         }
@@ -110,14 +120,20 @@ export function createPublicUserContainerApi(
 
     return {
         createContainer: async request => {
-            assertObject(request, '创建 TestAgent Cloud 服务请求必须是对象');
-            const { userId, userApi } = await prepareUserRequest(request.user_id);
+            assertObject(request, '请求必须是对象');
+            const { userId, userApi } = await prepareUserRequest(
+                request.user_id,
+                'user_id 不能为空',
+            );
             return userApi.createContainer({ ...request, user_id: userId });
         },
         getContainerIds: async query => {
             const normalizedQuery = query ?? {};
-            assertObject(normalizedQuery, 'TestAgent Cloud 服务查询参数必须是对象');
-            const { userId, userApi } = await prepareUserRequest(normalizedQuery.user_id);
+            assertObject(normalizedQuery, '查询参数必须是对象');
+            const { userId, userApi } = await prepareUserRequest(
+                normalizedQuery.user_id,
+                'user_id 不能为空',
+            );
             return userApi.getContainerIds({ ...normalizedQuery, user_id: userId });
         },
         getContainer: async containerId => {

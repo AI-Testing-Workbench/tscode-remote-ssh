@@ -11,6 +11,7 @@ import {
 } from './containerSync';
 import { parseContainerEndpoint } from './containerEndpoint';
 import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } from './settings';
+import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
 import { type PublicUserContainerApi } from './api/publicApi';
 import { type UserRestApi } from './api/restClient';
@@ -328,7 +329,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.webviewView.webview.html = renderSidebarHtml(
             result.containers,
             this.adminAllowed,
-            this.safeIsDisconnected(),
         );
     }
 
@@ -446,21 +446,33 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (giteeUser === undefined) {
             return;
         }
-        const giteeRepository = await this.showInputBox({
-            title,
-            prompt: '码云仓库名',
-            placeHolder: '',
-        });
-        if (giteeRepository === undefined) {
-            return;
-        }
-        const giteeBranch = await this.showInputBox({
-            title,
-            prompt: '码云分支 (可选)',
-            placeHolder: '留空表示使用码云仓库的默认分支',
-        });
-        if (giteeBranch === undefined) {
-            return;
+        const normalizedGiteeUser = giteeUser.trim();
+        let normalizedGiteeRepository = '';
+        let normalizedGiteeBranch = '';
+        if (normalizedGiteeUser) {
+            const giteeRepository = await this.showInputBox({
+                title,
+                prompt: '码云仓库名',
+                placeHolder: '',
+            });
+            if (giteeRepository === undefined) {
+                return;
+            }
+            normalizedGiteeRepository = giteeRepository.trim();
+            if (!normalizedGiteeRepository) {
+                this.showError('码云仓库名不能为空');
+                return;
+            }
+
+            const giteeBranch = await this.showInputBox({
+                title,
+                prompt: '码云分支 (可选)',
+                placeHolder: 'master',
+            });
+            if (giteeBranch === undefined) {
+                return;
+            }
+            normalizedGiteeBranch = giteeBranch.trim();
         }
         const authorization = await this.showQuickPick(['授权使用 TestAgent 码云通用账户'], {
             title,
@@ -472,9 +484,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const created = await this.publicApi.createContainer({
-            ...(giteeUser.trim() ? { gitee_user: giteeUser.trim() } : {}),
-            ...(giteeRepository.trim() ? { gitee_repository: giteeRepository.trim() } : {}),
-            ...(giteeBranch.trim() ? { gitee_branch: giteeBranch.trim() } : {}),
+            ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
+            ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
+            ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
             authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
         });
         if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
@@ -495,7 +507,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             .filter(entry => entry.containerId !== created.container_id);
         const usedNames = new Set(existingEntries.map(entry => entry.host).filter(Boolean));
         const host = getUniqueHostName(
-            getContainerHostName(giteeUser, giteeRepository),
+            getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
             usedNames,
         );
         this.config.upsertContainer(document.config, {
@@ -536,25 +548,53 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 }
 
-function renderSidebarHtml(containers: SyncedContainer[], showAdmin: boolean, disconnected: boolean): string {
+type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'delete' | 'disconnect' | 'refresh' | 'restart' | 'service' | 'warning';
+
+const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
+    admin: '<path d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 3.5v3M17 5h3"/>',
+    close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    config: '<path d="M3.5 7.5h6l1.5 2h9.5v8.75a1.25 1.25 0 0 1-1.25 1.25H4.75a1.25 1.25 0 0 1-1.25-1.25Z"/><path d="M3.5 7.5V6.25A1.25 1.25 0 0 1 4.75 5h4l1.5 2"/>',
+    connect: '<path d="M8.5 15.5 15.5 8.5"/><path d="M6.25 12.75 4.5 14.5a3.18 3.18 0 0 0 4.5 4.5l1.75-1.75"/><path d="m13.25 6.75 1.75-1.75a3.18 3.18 0 0 1 4.5 4.5l-1.75 1.75"/>',
+    cloud: '<path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/>',
+    delete: '<path d="M5 7h14M9 7V5h6v2M7 7l.8 12h8.4L17 7M10 10.5v5M14 10.5v5"/>',
+    disconnect: '<path d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H9M13 15l4-4-4-4M17 11H9"/>',
+    refresh: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3M19 20v-4h-4"/>',
+    restart: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3"/><path d="M19 16v4h-4"/>',
+    service: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h5M8 16h3"/>',
+    warning: '<path d="m12 4 8 15H4Z"/><path d="M12 9v4M12 16h.01"/>',
+};
+
+function renderIcon(icon: SidebarIcon): string {
+    return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SIDEBAR_ICONS[icon]}</svg>`;
+}
+
+function renderSidebarHtml(containers: SyncedContainer[], showAdmin: boolean): string {
     const cards = containers.length
         ? containers.map(renderContainerCard).join('')
-        : '<div class="empty-state">当前没有可用的 TestAgent Cloud 服务</div>';
-    const adminButton = showAdmin ? '<button data-action="openAdmin">管理员页面</button>' : '';
-    const createButton = disconnected ? '<button data-action="create">创建 TestAgent Cloud 服务</button>' : '';
+        : `<div class="empty-state">
+                ${renderIcon('cloud')}
+                <strong>还没有 TestAgent Cloud 服务</strong>
+                <span>请使用 测小智TestAgent 插件进行创建</span>
+            </div>`;
+    const adminButton = showAdmin ? renderToolbarButton('openAdmin', '管理员页面', 'admin') : '';
+    const configButton = showAdmin ? renderToolbarButton('openConfig', '打开配置文件', 'config') : '';
     return renderDocument(`
         <main class="sidebar">
-            <header class="toolbar">
-                <div class="toolbar-actions">
-                    <button data-action="refresh" title="刷新 TestAgent Cloud 服务状态">刷新</button>
+            <header class="app-bar">
+                <h1 class="page-title">TestAgent Cloud 服务管理面板</h1>
+                <div class="toolbar-actions" role="toolbar">
                     ${adminButton}
-                    ${createButton}
-                    <button data-action="openConfig">打开 config</button>
+                    ${configButton}
+                    ${renderToolbarButton('refresh', '刷新页面', 'refresh')}
                 </div>
             </header>
-            <section class="container-list" aria-label="TestAgent Cloud 服务列表">${cards}</section>
+            <section class="container-list">${cards}</section>
         </main>
     `);
+}
+
+function renderToolbarButton(action: string, label: string, icon: SidebarIcon): string {
+    return `<button class="icon-button" data-action="${action}" title="${escapeHtml(label)}">${renderIcon(icon)}</button>`;
 }
 
 function renderContainerCard(container: SyncedContainer): string {
@@ -562,7 +602,6 @@ function renderContainerCard(container: SyncedContainer): string {
     const statusLabel = getStatusLabel(container);
     const containerId = escapeHtml(container.containerId);
     const host = escapeHtml(container.host || '未配置 Host');
-    const endpoint = container.endpoint ? `<span class="endpoint">${escapeHtml(container.endpoint)}</span>` : '';
     const canOperate = container.remote;
     const canConnect = canOperate && !container.error && !!container.host;
     const disabledOperation = canOperate ? '' : ' disabled';
@@ -570,24 +609,29 @@ function renderContainerCard(container: SyncedContainer): string {
     const error = container.error
         ? `<div class="card-error">${escapeHtml(container.error.message)}</div>`
         : '';
-    const history = container.expiresAt
-        ? `<div class="history-warning">TestAgent Cloud 服务已在云端删除 <button class="history-remove" data-action="removeHistory" data-container-id="${containerId}" title="删除本地配置">X</button></div>`
+    const history = !container.remote && container.expiresAt
+        ? `<div class="history-warning">
+                <span>${renderIcon('warning')}此服务已过期并被资源回收，请手动删除此本地条目</span>
+                <button class="history-remove" data-action="removeHistory" data-container-id="${containerId}" title="从本地条目中删除">${renderIcon('close')}</button>
+            </div>`
         : '';
     return `
         <article class="container-card" data-container-id="${containerId}">
-            <div class="container-heading">
-                <span class="status-dot ${statusClass}" aria-label="${escapeHtml(statusLabel)}"></span>
-                <strong>${host}</strong>
-                <span class="status-label">${escapeHtml(statusLabel)}</span>
+            <div class="service-heading" data-container-id="${containerId}">
+                <div class="service-title-row">
+                    <span class="service-glyph" aria-hidden="true">${renderIcon('service')}</span>
+                    <strong class="service-name">${host}</strong>
+                </div>
+                <div class="service-status">
+                    <span class="status-dot ${statusClass}"></span>
+                    <span class="status-label">${escapeHtml(statusLabel)}</span>
+                </div>
             </div>
-            ${endpoint ? `<div class="container-meta">${endpoint}</div>` : ''}
             ${error}
-            <div class="card-actions secondary-actions">
-                <button data-action="restart" data-container-id="${containerId}"${disabledOperation}>重启</button>
-                <button data-action="delete" data-container-id="${containerId}"${disabledOperation}>删除</button>
-            </div>
-            <div class="card-actions primary-actions">
-                <button data-action="connect" data-container-id="${containerId}"${disabledConnect}>连接</button>
+            <div class="card-actions">
+                <button class="action-button action-primary" data-action="connect" data-container-id="${containerId}"${disabledConnect}>${renderIcon('connect')}连接</button>
+                <button class="action-button" data-action="restart" data-container-id="${containerId}"${disabledOperation}>${renderIcon('restart')}重启</button>
+                <button class="action-button" data-action="delete" data-container-id="${containerId}"${disabledOperation}>${renderIcon('delete')}销毁</button>
             </div>
             ${history}
         </article>
@@ -597,18 +641,20 @@ function renderContainerCard(container: SyncedContainer): string {
 function renderCloudHtml(): string {
     return renderDocument(`
         <main class="cloud-card">
-            <p>你现在处于 TestAgent Cloud 服务中</p>
-            <button data-action="disconnect">断开远程连接</button>
+            <div class="cloud-icon" aria-hidden="true">${renderIcon('cloud')}</div>
+            <h1>当前已连接至 TestAgent Cloud 服务中</h1>
+            <p>所有改动均只在 TestAgent Cloud 服务内生效！</p>
+            <button class="action-button action-primary" data-action="disconnect">${renderIcon('disconnect')}断开连接</button>
         </main>
     `);
 }
 
 function renderErrorHtml(message: string): string {
-    return renderDocument(`<main class="error-page"><p>${escapeHtml(message)}</p></main>`);
+    return renderDocument(`<main class="error-page">${renderIcon('warning')}<span class="section-kicker">请连接支持团队处理</span><p>${escapeHtml(message)}</p></main>`);
 }
 
 function renderLoadingHtml(): string {
-    return renderDocument('<main class="loading"><p>正在加载 TestAgent Cloud 服务...</p></main>');
+    return renderDocument('<main class="loading"><span class="loading-indicator"></span><p>正在加载 TestAgent Cloud 服务...</p></main>');
 }
 
 function renderDocument(body: string): string {
@@ -622,71 +668,123 @@ function renderDocument(body: string): string {
     <style>
         :root {
             color-scheme: light dark;
-            --vscode-foreground: #cccccc;
-            --vscode-sideBar-background: #181818;
-            --vscode-font-family: sans-serif;
+            --vscode-foreground: #d6d6dd;
+            --vscode-sideBar-background: #17171c;
+            --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             --vscode-font-size: 13px;
-            --vscode-button-border: transparent;
             --vscode-button-foreground: #ffffff;
-            --vscode-button-background: #0e639c;
-            --vscode-button-hoverBackground: #1177bb;
-            --vscode-panel-border: #3f3f46;
-            --vscode-sideBarSectionHeader-background: #252526;
-            --vscode-focusBorder: #007fd4;
-            --vscode-descriptionForeground: #9d9d9d;
-            --vscode-charts-yellow: #cca700;
-            --vscode-testing-iconPassed: #73c991;
-            --vscode-testing-iconFailed: #f14c4c;
-            --vscode-editorWarning-foreground: #cca700;
-            --vscode-errorForeground: #f48771;
+            --vscode-textLink-foreground: #8ab4f8;
+            --vscode-panel-border: #3a3a45;
+            --vscode-sideBarSectionHeader-background: #24242d;
+            --vscode-focusBorder: #8ab4f8;
+            --vscode-descriptionForeground: #a7a7b0;
+            --vscode-charts-yellow: #e5c07b;
+            --vscode-testing-iconPassed: #81c995;
+            --vscode-testing-iconFailed: #f28b82;
+            --vscode-editorWarning-foreground: #e5c07b;
+            --vscode-errorForeground: #f28b82;
+            --surface: var(--vscode-sideBar-background, #fdf8ff);
+            --surface-container: var(--vscode-sideBarSectionHeader-background, #f5eff7);
+            --surface-container-high: var(--vscode-sideBarSectionHeader-background, #ece6ee);
+            --on-surface: var(--vscode-foreground, #211a20);
+            --on-surface-variant: var(--vscode-descriptionForeground, #4b454d);
+            --primary: var(--vscode-textLink-foreground, #6750a4);
+            --on-primary: var(--vscode-button-foreground, #ffffff);
+            --outline: var(--vscode-panel-border, #79747e);
+            --error: var(--vscode-errorForeground, #ba1a1a);
+            --warning: var(--vscode-editorWarning-foreground, #8b6914);
         }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 10px; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); font: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-        button { border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; padding: 4px 9px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
-        button:hover { background: var(--vscode-button-hoverBackground); }
-        button:disabled { opacity: .5; cursor: not-allowed; }
-        .toolbar { margin-bottom: 10px; }
-        .toolbar-actions, .card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-        .container-list { display: flex; flex-direction: column; gap: 8px; }
-        .container-card { padding: 10px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-sideBarSectionHeader-background); }
+        body {
+            margin: 0;
+            padding: 16px 14px 24px;
+            color: var(--on-surface);
+            background: var(--surface);
+            font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif), sans-serif;
+            font-size: var(--vscode-font-size);
+            line-height: 1.45;
+        }
+        button {
+            min-height: 34px;
+            border: 1px solid transparent;
+            border-radius: 17px;
+            padding: 0 14px;
+            color: var(--on-surface);
+            background: var(--surface-container-high);
+            font: inherit;
+            cursor: pointer;
+            transition: background .16s ease, border-color .16s ease, transform .16s ease;
+        }
+        button:hover { border-color: var(--outline); background: var(--surface-container); }
+        button:active { transform: translateY(1px); }
+        button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+        button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+        .icon { width: 18px; height: 18px; flex: 0 0 18px; }
+        .sidebar { width: 100%; max-width: 520px; margin: 0 auto; }
+        .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+        .page-title { min-width: 0; margin: 0; overflow: hidden; color: var(--on-surface); font-size: 17px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+        .section-kicker { display: block; color: var(--on-surface-variant); font-size: 10px; font-weight: 700; letter-spacing: .14em; line-height: 1.2; }
+        .toolbar-actions { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; padding: 2px; border: 1px solid var(--outline); border-radius: 19px; background: var(--surface-container); }
+        .icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
+        .icon-button:hover { border: 0; color: var(--on-surface); background: var(--surface-container-high); }
+        .container-list { display: flex; flex-direction: column; gap: 12px; }
+        .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 20px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); }
         .container-card:hover { border-color: var(--vscode-focusBorder); }
-        .container-heading { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 1.08em; }
-        .container-heading strong { overflow-wrap: anywhere; }
-        .status-label { margin-left: auto; color: var(--vscode-descriptionForeground); font-size: .85em; white-space: nowrap; }
-        .status-dot { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; background: var(--vscode-charts-yellow); }
+        .service-heading { min-width: 0; }
+        .service-title-row { display: flex; align-items: center; min-width: 0; gap: 9px; }
+        .service-glyph { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 28px; border-radius: 10px; color: var(--primary); background: var(--surface-container-high); }
+        .service-glyph .icon { width: 16px; height: 16px; }
+        .service-name { min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
+        .service-status { display: flex; align-items: center; gap: 7px; margin: 7px 0 0 37px; color: var(--on-surface-variant); font-size: 12px; }
+        .status-label { white-space: nowrap; }
+        .status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--vscode-charts-yellow); }
         .status-dot.running { background: var(--vscode-testing-iconPassed, #3fb950); }
         .status-dot.stopped, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
         .status-dot.missing { background: var(--vscode-descriptionForeground); }
-        .container-meta { margin: 7px 0; color: var(--vscode-descriptionForeground); font-size: .86em; overflow-wrap: anywhere; }
-        .card-error { margin: 7px 0; color: var(--vscode-errorForeground); overflow-wrap: anywhere; }
-        .secondary-actions { margin-top: 8px; }
-        .primary-actions { margin-top: 7px; }
-        .primary-actions button { width: 100%; }
-        .history-warning { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow)); font-size: .88em; }
-        .history-remove { min-width: 24px; padding: 2px 6px; color: var(--vscode-errorForeground); background: transparent; }
-        .empty-state, .loading, .cloud-card, .error-page { color: var(--vscode-descriptionForeground); text-align: center; }
-        .cloud-card, .error-page { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
-        .error-page { color: var(--vscode-errorForeground); overflow-wrap: anywhere; }
-        .error-page p { max-width: 100%; }
+        .card-error { margin: 13px 0 0; padding: 9px 11px; border-radius: 12px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; }
+        .card-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+        .action-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+        .action-button .icon { width: 16px; height: 16px; }
+        .action-primary { border-color: transparent; color: var(--on-primary); background: var(--primary); }
+        .action-primary:hover { border-color: transparent; color: var(--on-primary); background: var(--primary); opacity: .9; }
+        .history-warning { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; padding: 8px 10px; border-radius: 13px; color: var(--warning); background: var(--surface-container-high); font-size: 12px; }
+        .history-warning > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
+        .history-warning .icon { width: 15px; height: 15px; }
+        .history-remove { width: 26px; min-height: 26px; display: grid; place-items: center; flex: 0 0 26px; padding: 0; border: 0; border-radius: 50%; color: var(--error); background: transparent; }
+        .history-remove:hover { border: 0; color: var(--error); background: var(--surface-container-high); }
+        .history-remove .icon { width: 15px; height: 15px; }
+        .empty-state, .loading, .cloud-card { text-align: center; }
+        .empty-state { display: flex; align-items: center; flex-direction: column; gap: 5px; padding: 38px 18px; border: 1px dashed var(--outline); border-radius: 20px; color: var(--on-surface-variant); }
+        .empty-state .icon { width: 30px; height: 30px; margin-bottom: 7px; color: var(--primary); }
+        .empty-state strong { color: var(--on-surface); font-size: 14px; }
+        .cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border-radius: 28px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
+        .cloud-icon { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 22px; color: var(--primary); background: var(--surface-container-high); }
+        .cloud-icon .icon { width: 34px; height: 34px; }
+        .cloud-card h1 { max-width: 270px; font-size: 18px; }
+        .cloud-card p { margin: 0 0 8px; color: var(--on-surface-variant); }
+        .error-page { min-height: calc(100vh - 40px); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; color: var(--error); text-align: center; }
+        .error-page > .icon { width: 32px; height: 32px; }
+        .error-page p { max-width: 100%; margin: 0; overflow-wrap: anywhere; }
+        .loading { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--on-surface-variant); }
+        .loading-indicator { width: 24px; height: 24px; border: 3px solid var(--surface-container-high); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 360px) {
+            body { padding: 12px 10px 20px; }
+            .app-bar { gap: 7px; margin-bottom: 12px; }
+            .page-title { font-size: 15px; }
+            .toolbar-actions { gap: 0; }
+            .icon-button { width: 30px; height: 30px; min-height: 30px; }
+            .container-card { padding: 14px; }
+            .action-button { flex: 1 1 90px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+        }
     </style>
 </head>
 <body>
 ${body}
-<script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    const post = (command, containerId) => vscode.postMessage({ command, containerId });
-    document.addEventListener('click', event => {
-        const target = event.target instanceof Element ? event.target.closest('[data-action]') : null;
-        if (!target || target.hasAttribute('disabled')) return;
-        post(target.dataset.action, target.dataset.containerId);
-    });
-    document.addEventListener('dblclick', event => {
-        const target = event.target instanceof Element ? event.target : null;
-        const card = target?.closest('.container-card');
-        if (!card || target?.closest('button')) return;
-        post('connect', card.dataset.containerId);
-    });
-</script>
+<script nonce="${nonce}">${WEBVIEW_SCRIPT}</script>
 </body>
 </html>`;
 }
@@ -709,7 +807,7 @@ function getStatusClass(container: SyncedContainer): string {
 
 function getStatusLabel(container: SyncedContainer): string {
     if (!container.remote || container.status === 'missing') {
-        return 'TestAgent Cloud 服务已在云端删除';
+        return '已过期';
     }
     switch (container.status.toLowerCase()) {
         case 'running':
@@ -717,7 +815,7 @@ function getStatusLabel(container: SyncedContainer): string {
         case 'stopped':
             return '已停止';
         default:
-            return container.status || '未知状态';
+            return container.status || '未知';
     }
 }
 

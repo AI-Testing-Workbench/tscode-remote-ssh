@@ -62,8 +62,7 @@ export async function confirmDebugEnvironment(
     const result = await prompt(
         `当前处于调试模式，\n请完成容器环境准备后继续。`,
         { modal: true },
-        DEBUG_ENVIRONMENT_CONFIRMATION,
-        '取消',
+        DEBUG_ENVIRONMENT_CONFIRMATION
     );
     if (result !== DEBUG_ENVIRONMENT_CONFIRMATION) {
         throw new DebugEnvironmentPreparationCancelledError(containerId);

@@ -1,9 +1,11 @@
+import { Script } from 'node:vm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContainerConfig } from '../src/containerConfig';
 import { ContainerSyncResult, SyncedContainer } from '../src/containerSync';
 import { PublicUserContainerApi } from '../src/api/publicApi';
 import { UserRestApi } from '../src/api/restClient';
 import { SidebarSyncState, SidebarViewProvider } from '../src/sidebarView';
+import { WEBVIEW_SCRIPT } from '../src/webviewScript';
 import * as vscode from './mocks/vscode';
 
 describe('SidebarSyncState', () => {
@@ -67,11 +69,30 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
         expect(view.webview.html).toContain('post(\'connect\'');
-        expect(view.webview.html).toContain('创建 TestAgent Cloud 服务');
-        expect(view.webview.html).toContain('刷新 TestAgent Cloud 服务状态');
+        expect(view.webview.html).toContain('data-action="openConfig"');
+        expect(view.webview.html).toContain('data-action="refresh"');
+        expect(view.webview.html).toContain('<h1 class="page-title">TestAgent Cloud 服务</h1>');
+        expect(view.webview.html).not.toContain('REMOTE WORKSPACE');
+        expect(view.webview.html).not.toContain('YOUR SERVICES');
+        expect(view.webview.html).not.toContain('>TC<');
         expect(view.webview.html).toContain('TestAgent Cloud 服务列表');
         expect(view.webview.html).toContain('TestAgent Cloud 服务已在云端删除');
-        expect(view.webview.html).not.toContain('创建容器');
+        expect(view.webview.html).not.toContain('data-action="create"');
+        expect(view.webview.html).not.toContain('10.0.0.1:22');
+        expect(view.webview.html).toContain('service-status');
+        expect(view.webview.html).toContain('justify-content: center');
+        expect(view.webview.html).toContain('.app-bar { display: flex; align-items: center;');
+        expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px;');
+        expect(view.webview.html).toContain('border: 1px solid var(--outline)');
+        expect(view.webview.html).toContain('font-family: var(--vscode-font-family,');
+        expect(view.webview.html).not.toContain('--vscode-editorWidget-background');
+        expect(view.webview.html).not.toContain('color-mix(');
+        expect(view.webview.html).not.toContain('filter: brightness(');
+        expect(view.webview.html).toContain('global acquireVsCodeApi, document');
+        expect(view.webview.html).not.toContain('MouseEvent');
+        expect(view.webview.html).not.toContain('Element');
+        expect(view.webview.html).not.toContain('.closest(');
+        expect(view.webview.html).not.toContain('.dataset');
         expect(view.webview.html).toContain('script-src \'nonce-');
         expect(view.webview.html).not.toContain('data-action="openAdmin"');
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
@@ -126,6 +147,14 @@ describe('SidebarViewProvider', () => {
 
         expect(view.webview.html).toContain('未配置后端 TestAgent Cloud 服务的 API 地址');
         expect(view.webview.html).toContain('error-page');
+        const errorStyle = view.webview.html.match(/\.error-page \{[^}]+\}/)?.[0] ?? '';
+        expect(errorStyle).toContain('min-height: calc(100vh - 40px)');
+        expect(errorStyle).toContain('align-items: center');
+        expect(errorStyle).toContain('justify-content: center');
+        expect(errorStyle).not.toContain('border-radius');
+        expect(errorStyle).not.toContain('background');
+        expect(errorStyle).not.toContain('box-shadow');
+        expect(view.webview.html).not.toContain('.cloud-card, .error-page {');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(userIdProvider.getCurrentUserId).not.toHaveBeenCalled();
     });
@@ -172,6 +201,8 @@ describe('SidebarViewProvider', () => {
         await flushMessages();
 
         expect(view.webview.html).toContain('data-action="openAdmin"');
+        expect(view.webview.html.indexOf('data-action="openAdmin"')).toBeLessThan(view.webview.html.indexOf('data-action="openConfig"'));
+        expect(view.webview.html.indexOf('data-action="openConfig"')).toBeLessThan(view.webview.html.indexOf('data-action="refresh"'));
         view.fireMessage({ command: 'openAdmin' });
         await flushMessages();
         expect(onOpenAdmin).toHaveBeenCalledOnce();
@@ -198,6 +229,24 @@ describe('SidebarViewProvider', () => {
         expect(publicApi.deleteContainer).not.toHaveBeenCalled();
     });
 
+    it('shows the deletion banner only for a service missing from the cloud', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [
+                syncedContainer('active-with-expiration', 'running', true, '2026-09-02T00:00:00.000Z'),
+                syncedContainer('deleted-in-cloud', 'missing', false, '2026-09-02T00:00:00.000Z'),
+            ],
+            changed: false,
+        });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+
+        await provider.resolveWebviewView(view as never);
+
+        expect(view.webview.html.match(/<div class="history-warning"/g)).toHaveLength(1);
+        expect(view.webview.html).toContain('data-container-id="deleted-in-cloud"');
+    });
+
     it('creates a user container, validates its endpoint, and writes only user fields', async () => {
         const state = new SidebarSyncState();
         state.update({ containers: [], changed: false });
@@ -210,7 +259,7 @@ describe('SidebarViewProvider', () => {
         }));
         const values = ['alice', 'repo', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => ['授权通用账户']);
+        const showQuickPick = vi.fn(async () => ['授权使用 TestAgent 码云通用账户']);
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
         const provider = createProvider({ state, config, publicApi, sync, showInputBox, showQuickPick });
         const view = createWebviewView();
@@ -224,7 +273,7 @@ describe('SidebarViewProvider', () => {
             gitee_branch: 'main',
             authorize_general_account: true,
         });
-        expect(showQuickPick).toHaveBeenCalledWith(['授权通用账户'], expect.objectContaining({ canPickMany: true }));
+        expect(showQuickPick).toHaveBeenCalledWith(['授权使用 TestAgent 码云通用账户'], expect.objectContaining({ canPickMany: true }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
             host: 'alice/repo',
@@ -233,6 +282,47 @@ describe('SidebarViewProvider', () => {
         }, { skipKnownHostsCheck: true, userName: 'root' });
         expect(config.write).toHaveBeenCalledOnce();
         expect(sync.refresh).toHaveBeenCalledOnce();
+    });
+
+    it('skips repository and branch prompts when the Gitee username is blank', async () => {
+        const config = createConfig();
+        const publicApi = createPublicApi();
+        publicApi.createContainer = vi.fn(async () => ({
+            container_id: 'created-without-gitee',
+            status: 'pending',
+            endpoint: '10.0.0.6:2222',
+        }));
+        const values = ['   '];
+        const showInputBox = vi.fn(async () => values.shift());
+        const showQuickPick = vi.fn(async () => []);
+        const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
+
+        await provider.createContainerFromPrompt();
+
+        expect(showInputBox).toHaveBeenCalledOnce();
+        expect(showQuickPick).toHaveBeenCalledOnce();
+        expect(publicApi.createContainer).toHaveBeenCalledWith({ authorize_general_account: false });
+        expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
+            containerId: 'created-without-gitee',
+            host: 'TestAgent Cloud 服务',
+            hostName: '10.0.0.6',
+            port: 2222,
+        }, { skipKnownHostsCheck: true, userName: 'root' });
+    });
+
+    it('requires a repository when the Gitee username is provided', async () => {
+        const publicApi = createPublicApi();
+        const values = ['alice', '   '];
+        const showInputBox = vi.fn(async () => values.shift());
+        const showQuickPick = vi.fn(async () => []);
+        const provider = createProvider({ publicApi, showInputBox, showQuickPick });
+
+        await provider.createContainerFromPrompt();
+
+        expect(showInputBox).toHaveBeenCalledTimes(2);
+        expect(showQuickPick).not.toHaveBeenCalled();
+        expect(publicApi.createContainer).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云仓库名不能为空', { modal: true });
     });
 
     it('does not write configuration when the create response has an invalid endpoint', async () => {
@@ -274,6 +364,15 @@ describe('SidebarViewProvider', () => {
 
         expect(showInputBox).not.toHaveBeenCalled();
         expect(publicApi.createContainer).not.toHaveBeenCalled();
+    });
+});
+
+describe('Webview script', () => {
+    it('is valid JavaScript without host-side DOM type annotations', () => {
+        expect(() => new Script(WEBVIEW_SCRIPT)).not.toThrow();
+        expect(WEBVIEW_SCRIPT).not.toContain('MouseEvent');
+        expect(WEBVIEW_SCRIPT).not.toContain('closest(');
+        expect(WEBVIEW_SCRIPT).toContain('querySelectorAll');
     });
 });
 

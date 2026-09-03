@@ -252,7 +252,7 @@
 					"label": "${path}",
 					"separator": "/",
 					"tildify": true,
-					"workspaceSuffix": "SSH"
+					"workspaceSuffix": "TestAgent Cloud 服务"
 				}
 			}
 		],
