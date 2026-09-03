@@ -71,15 +71,23 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('post(\'connect\'');
         expect(view.webview.html).toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
-        expect(view.webview.html).toContain('<h1 class="page-title">TestAgent Cloud 服务</h1>');
+        expect(view.webview.html).toContain('<h1 class="page-title">TestAgent Cloud 服务管理面板</h1>');
         expect(view.webview.html).not.toContain('REMOTE WORKSPACE');
         expect(view.webview.html).not.toContain('YOUR SERVICES');
         expect(view.webview.html).not.toContain('>TC<');
-        expect(view.webview.html).toContain('TestAgent Cloud 服务列表');
-        expect(view.webview.html).toContain('TestAgent Cloud 服务已在云端删除');
+        expect(view.webview.html).toContain('<section class="container-list">');
+        expect(view.webview.html).toContain('此服务已过期并被资源回收');
         expect(view.webview.html).not.toContain('data-action="create"');
         expect(view.webview.html).not.toContain('10.0.0.1:22');
         expect(view.webview.html).toContain('service-status');
+        expect(view.webview.html).not.toContain('service-glyph');
+        expect(view.webview.html).not.toContain('service-title-row');
+        expect(view.webview.html).toContain('border-radius: 10px');
+        expect(view.webview.html).toContain('border-radius: 12px');
+        expect(view.webview.html).toContain('.action-button { position: relative;');
+        expect(view.webview.html).toContain('button.is-loading');
+        expect(view.webview.html).toContain('animation: card-enter');
+        expect(view.webview.html).toContain('<div class="toast-region"');
         expect(view.webview.html).toContain('justify-content: center');
         expect(view.webview.html).toContain('.app-bar { display: flex; align-items: center;');
         expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px;');
@@ -90,7 +98,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('filter: brightness(');
         expect(view.webview.html).toContain('global acquireVsCodeApi, document');
         expect(view.webview.html).not.toContain('MouseEvent');
-        expect(view.webview.html).not.toContain('Element');
+        expect(view.webview.html).not.toContain('instanceof Element');
         expect(view.webview.html).not.toContain('.closest(');
         expect(view.webview.html).not.toContain('.dataset');
         expect(view.webview.html).toContain('script-src \'nonce-');
@@ -109,7 +117,7 @@ describe('SidebarViewProvider', () => {
 
         await provider.resolveWebviewView(view as never);
 
-        expect(view.webview.html).toContain('你现在处于 TestAgent Cloud 服务中');
+        expect(view.webview.html).toContain('当前已连接至 TestAgent Cloud 服务中');
         expect(view.webview.html).toContain('data-action="disconnect"');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(view.webview.html).not.toContain('data-action="openConfig"');
@@ -123,14 +131,14 @@ describe('SidebarViewProvider', () => {
         const provider = createProvider({ view, getCloudMode });
 
         await provider.resolveWebviewView(view as never);
-        expect(view.webview.html).not.toContain('你现在处于 TestAgent Cloud 服务中');
+        expect(view.webview.html).not.toContain('当前已连接至 TestAgent Cloud 服务中');
 
         cloudMode = true;
         view.fireVisibility(true);
         await flushMessages();
 
         expect(getCloudMode).toHaveBeenCalledTimes(2);
-        expect(view.webview.html).toContain('你现在处于 TestAgent Cloud 服务中');
+        expect(view.webview.html).toContain('当前已连接至 TestAgent Cloud 服务中');
         expect(view.webview.html).not.toContain('data-action="refresh"');
     });
 
@@ -145,7 +153,7 @@ describe('SidebarViewProvider', () => {
 
         await provider.resolveWebviewView(view as never);
 
-        expect(view.webview.html).toContain('未配置后端 TestAgent Cloud 服务的 API 地址');
+        expect(view.webview.html).toContain('未配置后端 TestAgent Cloud 管理服务的 API 地址');
         expect(view.webview.html).toContain('error-page');
         const errorStyle = view.webview.html.match(/\.error-page \{[^}]+\}/)?.[0] ?? '';
         expect(errorStyle).toContain('min-height: calc(100vh - 40px)');
@@ -187,6 +195,28 @@ describe('SidebarViewProvider', () => {
         expect(publicApi.deleteContainer).toHaveBeenCalledWith('container-1');
         expect(sync.refresh).toHaveBeenCalledTimes(2);
         expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('workbench.action.remote.close');
+    });
+
+    it('removes the local config entry after deleting a remote service', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('container-1', 'running', true)],
+            changed: false,
+        });
+        const config = createConfig();
+        const publicApi = createPublicApi();
+        const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
+        const provider = createProvider({ state, config, publicApi, sync });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'delete', containerId: 'container-1' });
+        await flushMessages();
+
+        expect(publicApi.deleteContainer).toHaveBeenCalledWith('container-1');
+        expect(config.removeContainer).toHaveBeenCalledWith(expect.anything(), 'container-1');
+        expect(config.write).toHaveBeenCalledOnce();
+        expect(sync.refresh).toHaveBeenCalledOnce();
     });
 
     it('shows the administrator entry only after /user/check grants access', async () => {
@@ -282,6 +312,11 @@ describe('SidebarViewProvider', () => {
         }, { skipKnownHostsCheck: true, userName: 'root' });
         expect(config.write).toHaveBeenCalledOnce();
         expect(sync.refresh).toHaveBeenCalledOnce();
+        expect(view.webview.postMessage).toHaveBeenCalledWith({
+            command: 'toast',
+            kind: 'success',
+            message: 'TestAgent Cloud 服务创建成功',
+        });
     });
 
     it('skips repository and branch prompts when the Gitee username is blank', async () => {
@@ -373,6 +408,9 @@ describe('Webview script', () => {
         expect(WEBVIEW_SCRIPT).not.toContain('MouseEvent');
         expect(WEBVIEW_SCRIPT).not.toContain('closest(');
         expect(WEBVIEW_SCRIPT).toContain('querySelectorAll');
+        expect(WEBVIEW_SCRIPT).toContain('startLoading');
+        expect(WEBVIEW_SCRIPT).toContain('operationComplete');
+        expect(WEBVIEW_SCRIPT).toContain('toast');
     });
 });
 
@@ -514,6 +552,7 @@ function createWebviewView() {
             options: {},
             html: '',
             onDidReceiveMessage: receiveMessage.event,
+            postMessage: vi.fn(async () => true),
         },
         onDidDispose: dispose.event,
         onDidChangeVisibility: visibility.event,

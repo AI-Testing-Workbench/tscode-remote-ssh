@@ -370,7 +370,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     await this.runContainerAction(containerId, id => this.publicApi.restartContainer(id));
                     return;
                 case 'delete':
-                    await this.runContainerAction(containerId, id => this.publicApi.deleteContainer(id));
+                    await this.deleteContainer(containerId);
                     return;
                 case 'removeHistory':
                     await this.removeHistory(containerId);
@@ -380,6 +380,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             }
         } catch (error) {
             this.showError(error);
+        } finally {
+            this.completeWebviewAction(message.command, containerId);
         }
     }
 
@@ -412,15 +414,32 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         await this.sync.refresh();
     }
 
+    private async deleteContainer(containerId: string | undefined): Promise<void> {
+        if (!containerId) {
+            throw new Error('缺少容器 ID');
+        }
+        const container = this.findContainer(containerId);
+        if (!container || !container.remote) {
+            throw new Error('服务已被删除，无法执行此操作');
+        }
+        await this.publicApi.deleteContainer(containerId);
+        await this.removeContainerFromConfig(containerId);
+        await this.sync.refresh();
+    }
+
     private async removeHistory(containerId: string | undefined): Promise<void> {
         if (!containerId) {
             throw new Error('缺少容器 ID');
         }
+        await this.removeContainerFromConfig(containerId);
+        await this.sync.refresh();
+    }
+
+    private async removeContainerFromConfig(containerId: string): Promise<void> {
         const document = await this.config.read();
         if (this.config.removeContainer(document.config, containerId)) {
             await this.config.write(document);
         }
-        await this.sync.refresh();
     }
 
     private async performCreateContainer(): Promise<void> {
@@ -521,6 +540,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         });
         await this.config.write(document);
         await this.sync.refresh();
+        this.showCreateSuccess();
     }
 
     private findContainer(containerId: string | undefined): SyncedContainer | undefined {
@@ -546,9 +566,37 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 : 'TestAgent Cloud 服务操作失败';
         void vscode.window.showErrorMessage(message, { modal: true });
     }
+
+    private showCreateSuccess(): void {
+        const message = 'TestAgent Cloud 服务创建成功';
+        if (!this.postWebviewMessage({ command: 'toast', kind: 'success', message })) {
+            void vscode.window.showInformationMessage(message);
+        }
+    }
+
+    private completeWebviewAction(action: string, containerId: string | undefined): void {
+        this.postWebviewMessage({
+            command: 'operationComplete',
+            action,
+            ...(containerId ? { containerId } : {}),
+        });
+    }
+
+    private postWebviewMessage(message: unknown): boolean {
+        const webview = this.webviewView?.webview;
+        if (!webview || typeof webview.postMessage !== 'function') {
+            return false;
+        }
+        try {
+            void webview.postMessage(message);
+            return true;
+        } catch {
+            return false;
+        }
+    }
 }
 
-type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'delete' | 'disconnect' | 'refresh' | 'restart' | 'service' | 'warning';
+type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'delete' | 'disconnect' | 'refresh' | 'restart' | 'warning';
 
 const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     admin: '<path d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 3.5v3M17 5h3"/>',
@@ -560,7 +608,6 @@ const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     disconnect: '<path d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H9M13 15l4-4-4-4M17 11H9"/>',
     refresh: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3M19 20v-4h-4"/>',
     restart: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3"/><path d="M19 16v4h-4"/>',
-    service: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h5M8 16h3"/>',
     warning: '<path d="m12 4 8 15H4Z"/><path d="M12 9v4M12 16h.01"/>',
 };
 
@@ -618,10 +665,7 @@ function renderContainerCard(container: SyncedContainer): string {
     return `
         <article class="container-card" data-container-id="${containerId}">
             <div class="service-heading" data-container-id="${containerId}">
-                <div class="service-title-row">
-                    <span class="service-glyph" aria-hidden="true">${renderIcon('service')}</span>
-                    <strong class="service-name">${host}</strong>
-                </div>
+                <strong class="service-name">${host}</strong>
                 <div class="service-status">
                     <span class="status-dot ${statusClass}"></span>
                     <span class="status-label">${escapeHtml(statusLabel)}</span>
@@ -707,7 +751,7 @@ function renderDocument(body: string): string {
         button {
             min-height: 34px;
             border: 1px solid transparent;
-            border-radius: 17px;
+            border-radius: 10px;
             padding: 0 14px;
             color: var(--on-surface);
             background: var(--surface-container-high);
@@ -724,41 +768,43 @@ function renderDocument(body: string): string {
         .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
         .page-title { min-width: 0; margin: 0; overflow: hidden; color: var(--on-surface); font-size: 17px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
         .section-kicker { display: block; color: var(--on-surface-variant); font-size: 10px; font-weight: 700; letter-spacing: .14em; line-height: 1.2; }
-        .toolbar-actions { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; padding: 2px; border: 1px solid var(--outline); border-radius: 19px; background: var(--surface-container); }
+        .toolbar-actions { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; padding: 2px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); }
         .icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
         .icon-button:hover { border: 0; color: var(--on-surface); background: var(--surface-container-high); }
         .container-list { display: flex; flex-direction: column; gap: 12px; }
-        .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 20px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); }
+        .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); animation: card-enter .2s ease both; }
         .container-card:hover { border-color: var(--vscode-focusBorder); }
         .service-heading { min-width: 0; }
-        .service-title-row { display: flex; align-items: center; min-width: 0; gap: 9px; }
-        .service-glyph { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 28px; border-radius: 10px; color: var(--primary); background: var(--surface-container-high); }
-        .service-glyph .icon { width: 16px; height: 16px; }
-        .service-name { min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
-        .service-status { display: flex; align-items: center; gap: 7px; margin: 7px 0 0 37px; color: var(--on-surface-variant); font-size: 12px; }
+        .service-name { display: block; min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
+        .service-status { display: flex; align-items: center; gap: 7px; margin: 7px 0 0; color: var(--on-surface-variant); font-size: 12px; }
         .status-label { white-space: nowrap; }
         .status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--vscode-charts-yellow); }
         .status-dot.running { background: var(--vscode-testing-iconPassed, #3fb950); }
         .status-dot.stopped, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
         .status-dot.missing { background: var(--vscode-descriptionForeground); }
-        .card-error { margin: 13px 0 0; padding: 9px 11px; border-radius: 12px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; }
+        .card-error { margin: 13px 0 0; padding: 9px 11px; border-radius: 8px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; }
         .card-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-        .action-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+        .action-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: var(--outline); }
         .action-button .icon { width: 16px; height: 16px; }
-        .action-primary { border-color: transparent; color: var(--on-primary); background: var(--primary); }
-        .action-primary:hover { border-color: transparent; color: var(--on-primary); background: var(--primary); opacity: .9; }
-        .history-warning { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; padding: 8px 10px; border-radius: 13px; color: var(--warning); background: var(--surface-container-high); font-size: 12px; }
+        .action-primary { border-color: var(--outline); color: var(--on-primary); background: var(--primary); }
+        .action-primary:hover { border-color: var(--outline); color: var(--on-primary); background: var(--primary); opacity: .9; }
+        button.is-loading { pointer-events: none; color: transparent; opacity: .8; }
+        button.is-loading .icon { visibility: hidden; }
+        button.is-loading::after { content: ''; position: absolute; width: 14px; height: 14px; border: 2px solid var(--on-surface); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+        button.action-primary.is-loading::after { border-color: var(--on-primary); border-top-color: transparent; }
+        button.icon-button.is-loading::after { border-color: var(--on-surface-variant); border-top-color: transparent; }
+        .history-warning { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; padding: 8px 10px; border-radius: 8px; color: var(--warning); background: var(--surface-container-high); font-size: 12px; }
         .history-warning > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
         .history-warning .icon { width: 15px; height: 15px; }
         .history-remove { width: 26px; min-height: 26px; display: grid; place-items: center; flex: 0 0 26px; padding: 0; border: 0; border-radius: 50%; color: var(--error); background: transparent; }
         .history-remove:hover { border: 0; color: var(--error); background: var(--surface-container-high); }
         .history-remove .icon { width: 15px; height: 15px; }
         .empty-state, .loading, .cloud-card { text-align: center; }
-        .empty-state { display: flex; align-items: center; flex-direction: column; gap: 5px; padding: 38px 18px; border: 1px dashed var(--outline); border-radius: 20px; color: var(--on-surface-variant); }
+        .empty-state { display: flex; align-items: center; flex-direction: column; gap: 5px; padding: 38px 18px; border: 1px dashed var(--outline); border-radius: 12px; color: var(--on-surface-variant); }
         .empty-state .icon { width: 30px; height: 30px; margin-bottom: 7px; color: var(--primary); }
         .empty-state strong { color: var(--on-surface); font-size: 14px; }
-        .cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border-radius: 28px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
-        .cloud-icon { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 22px; color: var(--primary); background: var(--surface-container-high); }
+        .cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border-radius: 16px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
+        .cloud-icon { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 12px; color: var(--primary); background: var(--surface-container-high); }
         .cloud-icon .icon { width: 34px; height: 34px; }
         .cloud-card h1 { max-width: 270px; font-size: 18px; }
         .cloud-card p { margin: 0 0 8px; color: var(--on-surface-variant); }
@@ -767,7 +813,14 @@ function renderDocument(body: string): string {
         .error-page p { max-width: 100%; margin: 0; overflow-wrap: anywhere; }
         .loading { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--on-surface-variant); }
         .loading-indicator { width: 24px; height: 24px; border: 3px solid var(--surface-container-high); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
+        .toast-region { position: fixed; right: 14px; bottom: 14px; z-index: 10; display: flex; align-items: flex-end; flex-direction: column; gap: 8px; pointer-events: none; }
+        .toast { max-width: calc(100vw - 28px); padding: 9px 12px; border: 1px solid var(--outline); border-radius: 8px; color: var(--on-surface); background: var(--surface-container-high); box-shadow: 0 4px 14px rgba(0, 0, 0, .2); font-size: 12px; animation: toast-enter .2s ease both; }
+        .toast-success { border-color: var(--vscode-testing-iconPassed, #3fb950); }
+        .toast.is-hiding { animation: toast-exit .18s ease both; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes card-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toast-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toast-exit { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(4px); } }
         @media (max-width: 360px) {
             body { padding: 12px 10px 20px; }
             .app-bar { gap: 7px; margin-bottom: 12px; }
@@ -784,6 +837,7 @@ function renderDocument(body: string): string {
 </head>
 <body>
 ${body}
+<div class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
 <script nonce="${nonce}">${WEBVIEW_SCRIPT}</script>
 </body>
 </html>`;
