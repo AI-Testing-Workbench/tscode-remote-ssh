@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { getRemoteAuthority } from './authResolver';
-import SSHConfiguration, { getSSHConfigPath } from './ssh/sshConfig';
+import { getSSHConfigPath } from './ssh/sshConfig';
 import { exists as fileExists } from './common/files';
 import SSHDestination from './ssh/sshDestination';
+import { ContainerConfig } from './containerConfig';
 
 export async function promptOpenRemoteSSHWindow(reuseWindow: boolean) {
     const host = await promptForHost();
@@ -17,14 +18,18 @@ export async function promptOpenRemoteSSHWindow(reuseWindow: boolean) {
 }
 
 /**
- * Lists the hosts from the SSH config while still accepting an arbitrary
- * [user@]hostname[:port]. Whatever is typed is offered as the first item, so
- * typing a host and pressing enter keeps working exactly as it did before.
+ * Lists only TestAgent Cloud services from the dedicated config while still
+ * accepting an arbitrary [user@]hostname[:port]. Whatever is typed is offered
+ * as the first item, so typing a host and pressing enter keeps working.
  */
 async function promptForHost(): Promise<string | undefined> {
     let configuredHosts: string[] = [];
     try {
-        configuredHosts = (await SSHConfiguration.loadFromFS()).getAllConfiguredHosts();
+        const config = new ContainerConfig();
+        const document = await config.read();
+        configuredHosts = [...new Set(config.list(document.config)
+            .map(entry => entry.host.trim())
+            .filter(Boolean))];
     } catch {
         // Ignore and fall back to the plain input box below.
     }
@@ -114,5 +119,5 @@ export async function openSSHConfigFile() {
     if (!await fileExists(sshConfigPath)) {
         await fs.promises.appendFile(sshConfigPath, '');
     }
-    vscode.commands.executeCommand('vscode.open', vscode.Uri.file(sshConfigPath));
+    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(sshConfigPath));
 }

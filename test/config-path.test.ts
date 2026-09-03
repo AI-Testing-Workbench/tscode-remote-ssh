@@ -42,7 +42,7 @@ describe('SSH config path setting', () => {
             ? path.join(defaultPath, 'config')
             : defaultPath;
         expect(getConfiguredContainerConfigPath()).toBe(expectedPath);
-        expect(DEFAULT_CONTAINER_CONFIG_SETTING).toBe('~/.local/share/testagent');
+        expect(DEFAULT_CONTAINER_CONFIG_SETTING).toBe('~/.local/share/testagent/config');
     });
 
     it('uses a config file inside an existing configFile directory', async () => {

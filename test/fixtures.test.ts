@@ -76,7 +76,7 @@ for (const file of files.value) {
         '--name',
         containerName,
         '--publish',
-        '2222:2222',
+        '2222',
         '--env',
         `USER_NAME=${server.username}`,
         '--env',
@@ -103,10 +103,19 @@ for (const file of files.value) {
       const fixtureFiles = { ...client.files };
       const sshConfig = client.files['/etc/ssh/ssh_config'];
       const includedSSHConfig = client.files['/etc/ssh/config.d/hosts'];
+      if (sshConfig) {
+        fixtureFiles['/etc/ssh/ssh_config'] = sshConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
+      }
+      if (includedSSHConfig) {
+        fixtureFiles['/etc/ssh/config.d/hosts'] = includedSSHConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
+      }
       if (client.hosts && sshConfig && includedSSHConfig) {
         const defaultSSHConfigPath = path.resolve(os.homedir(), '.ssh', 'config');
-        fixtureFiles[defaultSSHConfigPath] = sshConfig;
+        fixtureFiles[defaultSSHConfigPath] = sshConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
         fixtureFiles[path.join(path.dirname(defaultSSHConfigPath), 'config.d', 'hosts')] = includedSSHConfig;
+      }
+      for (const filePath of Object.keys(fixtureFiles)) {
+        fixtureFiles[filePath] = fixtureFiles[filePath].replace(/\b2222\b/g, String(hostPort));
       }
 
       vol.fromJSON({

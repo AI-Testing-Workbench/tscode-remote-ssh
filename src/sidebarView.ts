@@ -311,25 +311,35 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         if (this.cloudMode) {
-            this.webviewView.webview.html = renderCloudHtml();
+            this.setWebviewHtml(renderCloudHtml());
             return;
         }
 
         const result = this.state.getState();
         const error = this.pageError ?? result.error;
         if (error) {
-            this.webviewView.webview.html = renderErrorHtml(error.message);
+            this.setWebviewHtml(renderErrorHtml(error.message));
             return;
         }
         if (!this.pageReady) {
-            this.webviewView.webview.html = renderLoadingHtml();
+            this.setWebviewHtml(renderLoadingHtml());
             return;
         }
 
-        this.webviewView.webview.html = renderSidebarHtml(
+        this.setWebviewHtml(renderSidebarHtml(
             result.containers,
             this.adminAllowed,
-        );
+        ));
+    }
+
+    private setWebviewHtml(html: string): void {
+        if (!this.webviewView || this.disposed) {
+            return;
+        }
+        if (stripWebviewNonces(this.webviewView.webview.html) === stripWebviewNonces(html)) {
+            return;
+        }
+        this.webviewView.webview.html = html;
     }
 
     private async handleMessage(message: unknown): Promise<void> {
@@ -493,6 +503,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             }
             normalizedGiteeBranch = giteeBranch.trim();
         }
+        const giteeUrl = await this.showInputBox({
+            title,
+            prompt: '码云地址前缀',
+            placeHolder: 'https://github.com',
+        });
+        if (giteeUrl === undefined) {
+            return;
+        }
+        const normalizedGiteeUrl = giteeUrl.trim();
+        if (!normalizedGiteeUrl) {
+            this.showError('码云地址前缀不能为空');
+            return;
+        }
+        if (Boolean(normalizedGiteeUrl) !== Boolean(normalizedGiteeUser)) {
+            this.showError('Gitee 地址和码云用户名必须同时填写或同时留空');
+            return;
+        }
         const authorization = await this.showQuickPick(['授权使用 TestAgent 码云通用账户'], {
             title,
             placeHolder: '勾选以使用 TestAgent 码云通用账户执行 git 命令',
@@ -502,45 +529,55 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
 
-        const created = await this.publicApi.createContainer({
-            ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
-            ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
-            ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
-            authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
-        });
-        if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
-            this.showError('响应中缺少有效的 container_id');
-            return;
-        }
+        const createdSuccessfully = await vscode.window.withProgress({
+            title: '正在创建TestAgent Cloud 服务...',
+            location: vscode.ProgressLocation.Notification,
+            cancellable: false,
+        }, async () => {
+            const created = await this.publicApi.createContainer({
+                ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
+                ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
+                ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
+                ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
+                authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
+            });
+            if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
+                this.showError('响应中缺少有效的 container_id');
+                return false;
+            }
 
-        const settings = this.getSettings();
-        const userName = getEffectiveRemoteUserName(settings.userName);
-        const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
-        if (!endpoint) {
-            this.showError(`TestAgent Cloud 服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
-            return;
-        }
+            const settings = this.getSettings();
+            const userName = getEffectiveRemoteUserName(settings.userName);
+            const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
+            if (!endpoint) {
+                this.showError(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                return false;
+            }
 
-        const document = await this.config.read();
-        const existingEntries = this.config.list(document.config)
-            .filter(entry => entry.containerId !== created.container_id);
-        const usedNames = new Set(existingEntries.map(entry => entry.host).filter(Boolean));
-        const host = getUniqueHostName(
-            getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
-            usedNames,
-        );
-        this.config.upsertContainer(document.config, {
-            containerId: created.container_id,
-            host,
-            hostName: endpoint.host,
-            port: endpoint.port,
-        }, {
-            skipKnownHostsCheck: settings.skipKnownHostsCheck,
-            userName,
+            const document = await this.config.read();
+            const existingEntries = this.config.list(document.config)
+                .filter(entry => entry.containerId !== created.container_id);
+            const usedNames = new Set(existingEntries.map(entry => entry.host).filter(Boolean));
+            const host = getUniqueHostName(
+                getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
+                usedNames,
+            );
+            this.config.upsertContainer(document.config, {
+                containerId: created.container_id,
+                host,
+                hostName: endpoint.host,
+                port: endpoint.port,
+            }, {
+                skipKnownHostsCheck: settings.skipKnownHostsCheck,
+                userName,
+            });
+            await this.config.write(document);
+            await this.sync.refresh();
+            return true;
         });
-        await this.config.write(document);
-        await this.sync.refresh();
-        this.showCreateSuccess();
+        if (createdSuccessfully) {
+            this.showCreateSuccess();
+        }
     }
 
     private findContainer(containerId: string | undefined): SyncedContainer | undefined {
@@ -568,10 +605,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private showCreateSuccess(): void {
-        const message = 'TestAgent Cloud 服务创建成功';
-        if (!this.postWebviewMessage({ command: 'toast', kind: 'success', message })) {
-            void vscode.window.showInformationMessage(message);
-        }
+        void vscode.window.showInformationMessage('TestAgent Cloud 服务创建成功');
     }
 
     private completeWebviewAction(action: string, containerId: string | undefined): void {
@@ -772,7 +806,7 @@ function renderDocument(body: string): string {
         .icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
         .icon-button:hover { border: 0; color: var(--on-surface); background: var(--surface-container-high); }
         .container-list { display: flex; flex-direction: column; gap: 12px; }
-        .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); animation: card-enter .2s ease both; }
+        .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); }
         .container-card:hover { border-color: var(--vscode-focusBorder); }
         .service-heading { min-width: 0; }
         .service-name { display: block; min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
@@ -813,14 +847,7 @@ function renderDocument(body: string): string {
         .error-page p { max-width: 100%; margin: 0; overflow-wrap: anywhere; }
         .loading { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--on-surface-variant); }
         .loading-indicator { width: 24px; height: 24px; border: 3px solid var(--surface-container-high); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
-        .toast-region { position: fixed; right: 14px; bottom: 14px; z-index: 10; display: flex; align-items: flex-end; flex-direction: column; gap: 8px; pointer-events: none; }
-        .toast { max-width: calc(100vw - 28px); padding: 9px 12px; border: 1px solid var(--outline); border-radius: 8px; color: var(--on-surface); background: var(--surface-container-high); box-shadow: 0 4px 14px rgba(0, 0, 0, .2); font-size: 12px; animation: toast-enter .2s ease both; }
-        .toast-success { border-color: var(--vscode-testing-iconPassed, #3fb950); }
-        .toast.is-hiding { animation: toast-exit .18s ease both; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes card-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes toast-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes toast-exit { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(4px); } }
         @media (max-width: 360px) {
             body { padding: 12px 10px 20px; }
             .app-bar { gap: 7px; margin-bottom: 12px; }
@@ -837,10 +864,15 @@ function renderDocument(body: string): string {
 </head>
 <body>
 ${body}
-<div class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
 <script nonce="${nonce}">${WEBVIEW_SCRIPT}</script>
 </body>
 </html>`;
+}
+
+function stripWebviewNonces(html: string): string {
+    return html
+        .replace(/nonce="[^"]*"/g, 'nonce=""')
+        .replace(/nonce-[^']*/g, 'nonce-');
 }
 
 function getStatusClass(container: SyncedContainer): string {

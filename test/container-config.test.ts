@@ -194,6 +194,25 @@ describe('ContainerConfig', () => {
         ]);
     });
 
+    it('quotes service hosts containing spaces when normalizing an existing block', async () => {
+        const store = await createStore();
+        const initial = [
+            'Host TestAgent Cloud Service',
+            '\tContainerId container-spaced-host',
+            '',
+        ].join('\n');
+        await fs.writeFile(store.filePath, initial, 'utf8');
+
+        const document = await store.read();
+        expect(store.list(document.config)).toEqual([{
+            containerId: 'container-spaced-host',
+            host: 'TestAgent Cloud Service',
+        }]);
+        expect(await store.write(document)).toBe(true);
+
+        expect(await fs.readFile(store.filePath, 'utf8')).toContain('Host "TestAgent Cloud Service"');
+    });
+
     it('does not add or remove known-host settings when disabled', async () => {
         const store = await createStore();
         const document = await store.read();

@@ -23,18 +23,6 @@ document.querySelectorAll('.service-heading').forEach(serviceHeading => {
         post('connect', serviceHeading.getAttribute('data-container-id'));
     });
 });
-const showToast = (message, kind) => {
-    const toastRegion = document.querySelector('.toast-region');
-    if (!toastRegion) return;
-    const toast = document.createElement('div');
-    toast.className = 'toast toast-' + (kind === 'success' ? 'success' : 'info');
-    toast.textContent = message;
-    toastRegion.appendChild(toast);
-    setTimeout(() => {
-        toast.classList.add('is-hiding');
-        setTimeout(() => toast.remove(), 180);
-    }, 3200);
-};
 window.addEventListener('message', event => {
     const message = event.data;
     if (!message || typeof message !== 'object') return;
@@ -48,9 +36,6 @@ window.addEventListener('message', event => {
             actionButton.removeAttribute('aria-busy');
         });
         return;
-    }
-    if (message.command === 'toast' && typeof message.message === 'string') {
-        showToast(message.message, typeof message.kind === 'string' ? message.kind : 'info');
     }
 });
 `;

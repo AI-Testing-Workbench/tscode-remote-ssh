@@ -407,7 +407,31 @@ function normalizeContainerSections(config: SSHConfig): boolean {
     return changed;
 }
 
+function normalizeContainerHost(section: Section): boolean {
+    const host = getHostValue(section).trim();
+    if (!host) {
+        return false;
+    }
+
+    let changed = false;
+    const shouldQuote = /\s/.test(host);
+    if (Array.isArray(section.value) && shouldQuote) {
+        section.value = host;
+        changed = true;
+    }
+
+    if (shouldQuote && section.quoted !== true) {
+        section.quoted = true;
+        changed = true;
+    } else if (!shouldQuote && section.quoted === true) {
+        section.quoted = false;
+        changed = true;
+    }
+    return changed;
+}
+
 function normalizeContainerSection(section: Section): boolean {
+    let changed = normalizeContainerHost(section);
     const knownIndexes: number[] = [];
     const knownDirectives: Directive[] = [];
     for (let index = 0; index < section.config.length; index += 1) {
@@ -427,7 +451,6 @@ function normalizeContainerSection(section: Section): boolean {
         }
     }
 
-    let changed = false;
     for (let index = 0; index < knownIndexes.length; index += 1) {
         const targetIndex = knownIndexes[index];
         const directive = orderedDirectives[index];
@@ -527,7 +550,7 @@ function getHostValue(section: Section): string {
     if (typeof section.value === 'string') {
         return section.value;
     }
-    return section.value[0]?.val ?? '';
+    return section.value.map(value => value.val).join(' ');
 }
 
 function directiveValue(directive: Directive): string {

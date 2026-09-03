@@ -33,6 +33,8 @@ describe('SidebarViewProvider', () => {
     beforeEach(() => {
         vscode.window.showErrorMessage.mockReset();
         vscode.window.showInformationMessage.mockReset();
+        vscode.window.withProgress.mockReset();
+        vscode.window.withProgress.mockImplementation((_options, task) => task({ report: vi.fn() }, {} as never) as Promise<unknown>);
     });
 
     it('renders status colors, actions, and a safe webview policy', async () => {
@@ -69,7 +71,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
         expect(view.webview.html).toContain('post(\'connect\'');
-        expect(view.webview.html).toContain('data-action="openConfig"');
+        expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(view.webview.html).toContain('<h1 class="page-title">TestAgent Cloud 服务管理面板</h1>');
         expect(view.webview.html).not.toContain('REMOTE WORKSPACE');
@@ -86,8 +88,6 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('border-radius: 12px');
         expect(view.webview.html).toContain('.action-button { position: relative;');
         expect(view.webview.html).toContain('button.is-loading');
-        expect(view.webview.html).toContain('animation: card-enter');
-        expect(view.webview.html).toContain('<div class="toast-region"');
         expect(view.webview.html).toContain('justify-content: center');
         expect(view.webview.html).toContain('.app-bar { display: flex; align-items: center;');
         expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px;');
@@ -165,6 +165,21 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('.cloud-card, .error-page {');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(userIdProvider.getCurrentUserId).not.toHaveBeenCalled();
+    });
+
+    it('does not replace the webview when a scheduled refresh has no visible changes', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [], changed: false });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+
+        await provider.resolveWebviewView(view as never);
+        await flushMessages();
+        const initialHtml = view.webview.html;
+
+        state.update({ containers: [], changed: false });
+
+        expect(view.webview.html).toBe(initialHtml);
     });
 
     it('routes only whitelisted messages and refreshes after user actions', async () => {
@@ -287,7 +302,7 @@ describe('SidebarViewProvider', () => {
             status: 'pending',
             endpoint: '10.0.0.5:2222',
         }));
-        const values = ['alice', 'repo', 'main'];
+        const values = ['alice', 'repo', 'main', 'https://gitee.com'];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => ['授权使用 TestAgent 码云通用账户']);
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
@@ -298,11 +313,16 @@ describe('SidebarViewProvider', () => {
         await provider.createContainerFromPrompt();
 
         expect(publicApi.createContainer).toHaveBeenCalledWith({
+            gitee_url: 'https://gitee.com',
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
             authorize_general_account: true,
         });
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云用户名' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云仓库名' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(3, expect.objectContaining({ prompt: '码云分支 (可选)' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(4, expect.objectContaining({ prompt: 'Gitee 地址' }));
         expect(showQuickPick).toHaveBeenCalledWith(['授权使用 TestAgent 码云通用账户'], expect.objectContaining({ canPickMany: true }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
@@ -312,14 +332,18 @@ describe('SidebarViewProvider', () => {
         }, { skipKnownHostsCheck: true, userName: 'root' });
         expect(config.write).toHaveBeenCalledOnce();
         expect(sync.refresh).toHaveBeenCalledOnce();
-        expect(view.webview.postMessage).toHaveBeenCalledWith({
-            command: 'toast',
-            kind: 'success',
-            message: 'TestAgent Cloud 服务创建成功',
-        });
+        expect(vscode.window.withProgress).toHaveBeenCalledWith(
+            {
+                title: '正在创建TestAgent Cloud 服务...',
+                location: vscode.ProgressLocation.Notification,
+                cancellable: false,
+            },
+            expect.any(Function),
+        );
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('TestAgent Cloud 服务创建成功');
     });
 
-    it('skips repository and branch prompts when the Gitee username is blank', async () => {
+    it('requires a Gitee address before creating a service', async () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
@@ -327,22 +351,17 @@ describe('SidebarViewProvider', () => {
             status: 'pending',
             endpoint: '10.0.0.6:2222',
         }));
-        const values = ['   '];
+        const values = ['   ', '   '];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => []);
         const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
 
         await provider.createContainerFromPrompt();
 
-        expect(showInputBox).toHaveBeenCalledOnce();
-        expect(showQuickPick).toHaveBeenCalledOnce();
-        expect(publicApi.createContainer).toHaveBeenCalledWith({ authorize_general_account: false });
-        expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
-            containerId: 'created-without-gitee',
-            host: 'TestAgent Cloud 服务',
-            hostName: '10.0.0.6',
-            port: 2222,
-        }, { skipKnownHostsCheck: true, userName: 'root' });
+        expect(showInputBox).toHaveBeenCalledTimes(2);
+        expect(showQuickPick).not.toHaveBeenCalled();
+        expect(publicApi.createContainer).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Gitee 地址不能为空', { modal: true });
     });
 
     it('requires a repository when the Gitee username is provided', async () => {
@@ -368,7 +387,7 @@ describe('SidebarViewProvider', () => {
             status: 'pending',
             endpoint: 'example.com:22',
         }));
-        const values = ['', '', ''];
+        const values = ['alice', 'repo', 'main', 'https://gitee.com'];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => []);
         const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
@@ -378,7 +397,7 @@ describe('SidebarViewProvider', () => {
         await provider.createContainerFromPrompt();
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            'TestAgent Cloud 服务 "created-2" 的 endpoint 无效，应为 IP:Port 格式：example.com:22',
+            '服务 "created-2" 的 endpoint 无效，应为 IP:Port 格式：example.com:22',
             { modal: true },
         );
         expect(config.read).not.toHaveBeenCalled();
@@ -410,7 +429,6 @@ describe('Webview script', () => {
         expect(WEBVIEW_SCRIPT).toContain('querySelectorAll');
         expect(WEBVIEW_SCRIPT).toContain('startLoading');
         expect(WEBVIEW_SCRIPT).toContain('operationComplete');
-        expect(WEBVIEW_SCRIPT).toContain('toast');
     });
 });
 

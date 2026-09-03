@@ -44,7 +44,7 @@ describe('extension manifest', () => {
             'testagnet.remote.statusSyncInterval': { type: 'number', default: 5 },
             'testagnet.remote.debug': { type: 'boolean', default: false },
             'testagnet.remote.disableClientValidation': { type: 'boolean', default: true },
-            'testagnet.remote.configFile': { type: 'string', default: '~/.local/share/testagent' },
+            'testagnet.remote.configFile': { type: 'string', default: '~/.local/share/testagent/config' },
         });
 
         for (const key of [
@@ -80,7 +80,7 @@ describe('extension manifest', () => {
         expect(manifest.activationEvents).toContain('onCommand:openremotessh.createContainer');
         expect(manifest.contributes.menus['statusBar/remoteIndicator']).toContainEqual(expect.objectContaining({
             command: 'openremotessh.createContainer',
-            when: 'remoteConnectionState == disconnected',
+            when: '!remoteName && !virtualWorkspace',
         }));
     });
 });

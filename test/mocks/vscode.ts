@@ -81,6 +81,7 @@ const window = {
     showWarningMessage: vi.fn(),
     showInformationMessage: vi.fn(),
     showQuickPick: vi.fn(),
+    createQuickPick: vi.fn(),
     setPassword: (password: string) => {
         $password = password;
     },
@@ -93,14 +94,14 @@ const window = {
         return undefined;
     },
 
-    withProgress: (_options: vscode.ProgressOptions, task: ProgressTask) => {
+    withProgress: vi.fn((_options: vscode.ProgressOptions, task: ProgressTask) => {
         const mockProgressReporter = {
             report: vi.fn(),
             then: vi.fn(),
         };
 
         return task(mockProgressReporter, {} as vscode.CancellationToken) as Promise<unknown>;
-    },
+    }),
     createTreeView: vi.fn(() => ({ dispose: vi.fn() })),
     registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
 };

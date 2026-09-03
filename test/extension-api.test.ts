@@ -77,11 +77,11 @@ describe('public user container API', () => {
 
         await expect(api.createContainer({ user_id: '' })).rejects.toMatchObject({
             code: PUBLIC_API_ERROR_CODES.USER_ID_MISMATCH,
-            message: 'TestAgent Cloud 服务创建 API 的 user_id 不能为空',
+            message: 'user_id 不能为空',
         });
         await expect(api.getContainerIds({ user_id: 'user-2' })).rejects.toMatchObject({
             code: PUBLIC_API_ERROR_CODES.USER_ID_MISMATCH,
-            message: '公开 API 的 user_id 必须与当前用户 ID一致',
+            message: 'user_id 必须与当前用户 ID一致',
         });
         expect(userApiFactory).not.toHaveBeenCalled();
     });
@@ -95,7 +95,7 @@ describe('public user container API', () => {
             name: 'RestClientError',
             kind: 'configuration',
             code: 'api_url_missing',
-            message: '未配置后端 TestAgent Cloud 服务的 API 地址',
+            message: '未配置后端 TestAgent Cloud 管理服务的 API 地址',
         });
 
         const restError = new RestClientError('http', 'container_conflict', 'TestAgent Cloud 服务冲突', 409);

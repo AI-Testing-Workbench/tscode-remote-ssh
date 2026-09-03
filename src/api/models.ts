@@ -3,6 +3,7 @@ export interface UserCreateContainerRequest {
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;
+    gitee_url?: string | null;
     authorize_general_account?: boolean | null;
 }
 
@@ -50,6 +51,7 @@ export interface AdminCreateContainerRequest {
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;
+    gitee_url?: string | null;
     authorize_general_account?: boolean | null;
     image?: string | null;
     expiration_hours?: number | null;
