@@ -177,7 +177,7 @@
 				},
 				"testagnet.remote.remoteServerListenOnSocket": {
 					"type": "boolean",
-					"description": "为 true 时，TestAgent Cloud 服务将监听套接字路径，而不是监听端口。仅适用于 Linux 和 macOS 远程主机。要求 TestAgent Cloud 服务上启用了 `AllowStreamLocalForwarding`。",
+					"description": "为 true 时，TestAgent Cloud 服务将监听套接字路径，而不是监听端口。仅适用于 Linux 和 macOS 远程主机。要求 TestAgent Cloud 服务上启用了 `AllowStreamLocalForwarding` 。",
 					"default": false
 				},
 				"testagnet.remote.skipKnownHostsCheck": {
