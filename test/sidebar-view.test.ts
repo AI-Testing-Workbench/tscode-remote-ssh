@@ -319,10 +319,10 @@ describe('SidebarViewProvider', () => {
             gitee_branch: 'main',
             authorize_general_account: true,
         });
-        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云用户名' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '完整码云仓库地址或者码云用户名' }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云仓库名' }));
         expect(showInputBox).toHaveBeenNthCalledWith(3, expect.objectContaining({ prompt: '码云分支 (可选)' }));
-        expect(showInputBox).toHaveBeenNthCalledWith(4, expect.objectContaining({ prompt: 'Gitee 地址' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(4, expect.objectContaining({ prompt: '码云地址前缀' }));
         expect(showQuickPick).toHaveBeenCalledWith(['授权使用 TestAgent 码云通用账户'], expect.objectContaining({ canPickMany: true }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
@@ -343,7 +343,34 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('TestAgent Cloud 服务创建成功');
     });
 
-    it('requires a Gitee address before creating a service', async () => {
+    it('extracts Gitee fields from a repository URL and only asks for the branch', async () => {
+        const config = createConfig();
+        const publicApi = createPublicApi();
+        publicApi.createContainer = vi.fn(async () => ({
+            container_id: 'created-from-url',
+            status: 'pending',
+            endpoint: '10.0.0.7:2222',
+        }));
+        const values = ['https://github.com/JustWorkingAndWorking/testagent-cloud-remote-ssh.git', 'develop'];
+        const showInputBox = vi.fn(async () => values.shift());
+        const showQuickPick = vi.fn(async () => []);
+        const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        await provider.createContainerFromPrompt();
+
+        expect(showInputBox).toHaveBeenCalledTimes(2);
+        expect(publicApi.createContainer).toHaveBeenCalledWith({
+            gitee_url: 'https://github.com',
+            gitee_user: 'JustWorkingAndWorking',
+            gitee_repository: 'testagent-cloud-remote-ssh',
+            gitee_branch: 'develop',
+            authorize_general_account: false,
+        });
+    });
+
+    it('keeps the existing flow when the Gitee input is blank', async () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
@@ -351,17 +378,22 @@ describe('SidebarViewProvider', () => {
             status: 'pending',
             endpoint: '10.0.0.6:2222',
         }));
-        const values = ['   ', '   '];
+        const values = ['   '];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => []);
         const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
 
         await provider.createContainerFromPrompt();
 
-        expect(showInputBox).toHaveBeenCalledTimes(2);
-        expect(showQuickPick).not.toHaveBeenCalled();
-        expect(publicApi.createContainer).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Gitee 地址不能为空', { modal: true });
+        expect(showInputBox).toHaveBeenCalledOnce();
+        expect(showQuickPick).toHaveBeenCalledOnce();
+        expect(publicApi.createContainer).toHaveBeenCalledWith({ authorize_general_account: false });
+        expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
+            containerId: 'created-without-gitee',
+            host: 'TestAgent Cloud 服务',
+            hostName: '10.0.0.6',
+            port: 2222,
+        }, { skipKnownHostsCheck: true, userName: 'root' });
     });
 
     it('requires a repository when the Gitee username is provided', async () => {
