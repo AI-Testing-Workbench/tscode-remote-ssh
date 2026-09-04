@@ -4,7 +4,7 @@ import type { Log } from '../src/common/logger';
 import * as vscode from './mocks/vscode';
 
 vi.mock('../src/serverConfig', () => ({
-    DISTRO_COMMIT: 'testagent',
+    DISTRO_COMMIT: 'tscode',
     getVSCodeServerConfig: vi.fn(async () => ({
         serverApplicationName: 'codium-server',
         serverDataFolderName: '.vscodium-server',

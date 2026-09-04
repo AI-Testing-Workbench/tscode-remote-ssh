@@ -122,7 +122,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('当前已连接至 TestAgent Cloud 服务中');
         expect(view.webview.html).toContain('.cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border: 2px solid var(--warning);');
         expect(view.webview.html).toContain('.cloud-card p { margin: 0 0 8px; color: var(--warning);');
-        expect(view.webview.html).toContain('.cloud-card .action-button { width: 100%; max-width: 160px; min-height: 28px; padding: 0 12px; }');
+        expect(view.webview.html).toContain('.cloud-card .action-button { width: 100%; max-width: 160px; max-height: 28px; padding: 0 12px; }');
         expect(view.webview.html).toContain('data-action="disconnect"');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(view.webview.html).not.toContain('data-action="openConfig"');

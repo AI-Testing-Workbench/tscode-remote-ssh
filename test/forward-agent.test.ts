@@ -19,7 +19,7 @@ const PRODUCT_JSON = JSON.stringify({
   nameLong: 'VSCodium',
   applicationName: 'codium',
   quality: 'stable',
-  commit: 'testagent',
+  commit: 'tscode',
   version: '1.126.04524',
   serverApplicationName: 'codium-server',
   serverDataFolderName: '.vscodium-server',

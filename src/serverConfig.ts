@@ -4,7 +4,7 @@ import * as path from 'path';
 
 let vscodeProductJson: Record<string, unknown>;
 
-export const DISTRO_COMMIT = 'testagent';
+export const DISTRO_COMMIT = 'tscode';
 
 async function getVSCodeProductJson() {
     if (!vscodeProductJson) {
