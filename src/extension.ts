@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import {Log} from './common/logger';
 import {REMOTE_SSH_AUTHORITY, RemoteSSHResolver} from './authResolver';
-import {openRemoteSSHWindow, openSSHConfigFile, promptOpenRemoteSSHWindow} from './commands';
+import {connectToContainer, openSSHConfigFile, promptOpenRemoteSSHWindow} from './commands';
 import {getRemoteWorkspaceLocationData, RemoteLocationHistory} from './remoteLocationHistory';
 import {type CloudModeOptions, initializeCloudMode, refreshCloudMode} from './cloudMode';
 import {RestClient} from './api/restClient';
@@ -78,7 +78,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         onOpenAdmin: () => {
             void vscode.window.showInformationMessage('管理员页面将在后续版本开放。');
         },
-        onConnect: host => openRemoteSSHWindow(new SSHDestination(host).toEncodedString(), false),
+        onConnect: host => connectToContainer(host, () => activeSidebarView?.refreshCloudMode()),
         onDisconnect: async () => {
             await vscode.commands.executeCommand('workbench.action.remote.close');
         },

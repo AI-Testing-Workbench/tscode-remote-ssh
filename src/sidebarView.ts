@@ -198,6 +198,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         return this.createInFlight;
     }
 
+    public async refreshCloudMode(): Promise<void> {
+        const webviewView = this.webviewView;
+        if (!webviewView || this.disposed) {
+            return;
+        }
+        await this.refreshForVisibleView(webviewView);
+    }
+
     public dispose(): void {
         if (this.disposed) {
             return;

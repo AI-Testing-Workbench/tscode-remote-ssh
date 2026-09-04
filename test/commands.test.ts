@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openRemoteSSHWindow, promptOpenRemoteSSHWindow } from '../src/commands';
+import { connectToContainer, openRemoteSSHWindow, promptOpenRemoteSSHWindow } from '../src/commands';
 import { ContainerConfig } from '../src/containerConfig';
 import * as vscode from './mocks/vscode';
 
@@ -11,6 +11,7 @@ const temporaryDirectories: string[] = [];
 describe('openRemoteSSHWindow', () => {
     beforeEach(() => {
         vscode.commands.executeCommand.mockClear();
+        vscode.window.showInformationMessage.mockReset();
         vscode.Uri.from.mockClear();
         vscode.resetConfiguration();
         vscode.window.createQuickPick.mockReset();
@@ -50,6 +51,61 @@ describe('openRemoteSSHWindow', () => {
             'vscode.newWindow',
             expect.anything()
         );
+    });
+
+    it('connects in the current window and refreshes the sidebar without an open workspace', async () => {
+        const refreshSidebar = vi.fn();
+
+        await connectToContainer('dev', refreshSidebar);
+
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'vscode.newWindow',
+            { remoteAuthority: 'ssh-remote+dev', reuseWindow: true },
+        );
+        expect(refreshSidebar).toHaveBeenCalledOnce();
+    });
+
+    it('asks how to connect when a workspace is already open', async () => {
+        vscode.workspace.workspaceFolders = [{} as never];
+        vscode.window.showInformationMessage.mockResolvedValue('在当前窗口打开');
+        const refreshSidebar = vi.fn();
+
+        await connectToContainer('dev', refreshSidebar);
+
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+            '当前窗口已打开工作区，请选择连接 TestAgent Cloud 服务的方式',
+            '在当前窗口打开',
+            '在新窗口打开',
+        );
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'vscode.newWindow',
+            { remoteAuthority: 'ssh-remote+dev', reuseWindow: true },
+        );
+        expect(refreshSidebar).toHaveBeenCalledOnce();
+    });
+
+    it('opens a new window when selected and does not refresh the current sidebar', async () => {
+        vscode.workspace.workspaceFolders = [{} as never];
+        vscode.window.showInformationMessage.mockResolvedValue('在新窗口打开');
+        const refreshSidebar = vi.fn();
+
+        await connectToContainer('dev', refreshSidebar);
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'vscode.newWindow',
+            { remoteAuthority: 'ssh-remote+dev', reuseWindow: false },
+        );
+        expect(refreshSidebar).not.toHaveBeenCalled();
+    });
+
+    it('does not open a remote window when the connection choice is dismissed', async () => {
+        vscode.workspace.workspaceFolders = [{} as never];
+        vscode.window.showInformationMessage.mockResolvedValue(undefined);
+
+        await connectToContainer('dev');
+
+        expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
     });
 
     it('lists only TestAgent Cloud services from the dedicated config', async () => {

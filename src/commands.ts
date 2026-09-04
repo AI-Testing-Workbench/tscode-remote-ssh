@@ -17,6 +17,33 @@ export async function promptOpenRemoteSSHWindow(reuseWindow: boolean) {
     openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow);
 }
 
+const OPEN_IN_CURRENT_WINDOW = '当前窗口打开';
+const OPEN_IN_NEW_WINDOW = '新建窗口打开';
+
+export async function connectToContainer(
+    host: string,
+    refreshSidebar?: () => void | Promise<void>,
+): Promise<void> {
+    let reuseWindow = !hasOpenWorkspace();
+    if (!reuseWindow) {
+        const choice = await vscode.window.showInformationMessage(
+            '当前窗口已打开工作区，请选择连接 TestAgent Cloud 服务的方式',
+            OPEN_IN_CURRENT_WINDOW,
+            OPEN_IN_NEW_WINDOW,
+        );
+        if (!choice) {
+            return;
+        }
+        reuseWindow = choice === OPEN_IN_CURRENT_WINDOW;
+    }
+
+    const sshDest = new SSHDestination(host);
+    await openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow);
+    if (reuseWindow) {
+        await refreshSidebar?.();
+    }
+}
+
 /**
  * Lists only TestAgent Cloud services from the dedicated config while still
  * accepting an arbitrary [user@]hostname[:port]. Whatever is typed is offered
@@ -71,18 +98,17 @@ async function promptForHost(): Promise<string | undefined> {
     });
 }
 
-export function openRemoteSSHWindow(host: string, reuseWindow: boolean) {
+export function openRemoteSSHWindow(host: string, reuseWindow: boolean): Thenable<unknown> {
     const defaultPath = vscode.workspace.getConfiguration('testagnet.remote').get<string>('defaultPath', '');
     if (defaultPath) {
-        openRemoteSSHLocationWindow(host, defaultPath, reuseWindow);
-        return;
+        return openRemoteSSHLocationWindow(host, defaultPath, reuseWindow);
     }
 
-    vscode.commands.executeCommand('vscode.newWindow', { remoteAuthority: getRemoteAuthority(host), reuseWindow });
+    return vscode.commands.executeCommand('vscode.newWindow', { remoteAuthority: getRemoteAuthority(host), reuseWindow });
 }
 
-export function openRemoteSSHLocationWindow(host: string, path: string, reuseWindow: boolean) {
-    vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.from({ scheme: 'vscode-remote', authority: getRemoteAuthority(host), path }), { forceNewWindow: !reuseWindow });
+export function openRemoteSSHLocationWindow(host: string, path: string, reuseWindow: boolean): Thenable<unknown> {
+    return vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.from({ scheme: 'vscode-remote', authority: getRemoteAuthority(host), path }), { forceNewWindow: !reuseWindow });
 }
 
 export async function addNewHost() {
@@ -121,4 +147,8 @@ export async function openSSHConfigFile() {
         await fs.promises.appendFile(sshConfigPath, '');
     }
     await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(sshConfigPath));
+}
+
+function hasOpenWorkspace(): boolean {
+    return Boolean(vscode.workspace.workspaceFile) || (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
 }

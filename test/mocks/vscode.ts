@@ -22,6 +22,8 @@ function setConfigurationValue(section: string, key: string, value: unknown) {
 
 function resetConfiguration() {
     configurationValues.clear();
+    workspace.workspaceFolders = undefined;
+    workspace.workspaceFile = undefined;
 }
 
 const env = {
@@ -111,6 +113,8 @@ const Uri = {
 };
 
 const workspace = {
+    workspaceFolders: undefined as readonly vscode.WorkspaceFolder[] | undefined,
+    workspaceFile: undefined as vscode.Uri | undefined,
     getConfiguration: vi.fn((section?: string) => ({
         get: vi.fn((key: string, defaultValue?: unknown) => {
             const settingKey = `${section}.${key}`;

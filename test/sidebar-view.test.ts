@@ -146,6 +146,20 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('data-action="refresh"');
     });
 
+    it('refreshes cloud mode on demand after opening a remote connection', async () => {
+        let cloudMode = false;
+        const view = createWebviewView();
+        const getCloudMode = vi.fn(() => cloudMode);
+        const provider = createProvider({ view, getCloudMode });
+
+        await provider.resolveWebviewView(view as never);
+        cloudMode = true;
+        await provider.refreshCloudMode();
+
+        expect(getCloudMode).toHaveBeenCalledTimes(2);
+        expect(view.webview.html).toContain('当前已连接至 TestAgent Cloud 服务中');
+    });
+
     it('renders a centered error without normal controls when configuration is invalid', async () => {
         const view = createWebviewView();
         const userIdProvider = { getCurrentUserId: vi.fn(async () => 'user-1') };
