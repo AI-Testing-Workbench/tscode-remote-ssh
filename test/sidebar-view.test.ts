@@ -1,5 +1,5 @@
 import { Script } from 'node:vm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContainerConfig } from '../src/containerConfig';
 import { ContainerSyncResult, SyncedContainer } from '../src/containerSync';
 import { PublicUserContainerApi } from '../src/api/publicApi';
@@ -35,6 +35,10 @@ describe('SidebarViewProvider', () => {
         vscode.window.showInformationMessage.mockReset();
         vscode.window.withProgress.mockReset();
         vscode.window.withProgress.mockImplementation((_options, task) => task({ report: vi.fn() }, {} as never) as Promise<unknown>);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('renders status colors, actions, and a safe webview policy', async () => {
@@ -106,6 +110,40 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('script-src \'nonce-');
         expect(view.webview.html).not.toContain('data-action="openAdmin"');
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
+    });
+
+    it('renders usage separators, threshold colors, and remaining expiration time', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-09-04T00:00:00.000Z'));
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [
+                syncedContainer('healthy-usage', 'running', true, '2026-09-05T02:03:45.000Z', undefined, {
+                    cpuUsage: 74.9,
+                    memoryUsage: null,
+                }),
+                syncedContainer('critical-usage', 'running', true, '2026-09-04T01:00:00.000Z', undefined, {
+                    cpuUsage: 90,
+                    memoryUsage: 75,
+                }),
+            ],
+            changed: false,
+        });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+
+        await provider.resolveWebviewView(view as never);
+
+        expect(view.webview.html).toContain('&middot;</span>');
+        expect(view.webview.html).toContain('usage-metric-low">CPU占用率 74.90%</span>');
+        expect(view.webview.html).toContain('usage-metric-unavailable">内存占用率 --</span>');
+        expect(view.webview.html).toContain('usage-metric-critical">CPU占用率 90.00%</span>');
+        expect(view.webview.html).toContain('usage-metric-warning">内存占用率 75.00%</span>');
+        expect(view.webview.html).toContain('expiration-status warning">剩余过期时间：1天2小时3分钟</div>');
+        expect(view.webview.html).toContain('expiration-status critical">剩余过期时间：0天1小时0分钟</div>');
+        expect(view.webview.html).toContain('.expiration-status { margin-top: 16px;');
+        expect(view.webview.html.indexOf('expiration-status warning'))
+            .toBeGreaterThan(view.webview.html.indexOf('class="card-actions"'));
     });
 
     it('renders only the cloud card in cloud mode', async () => {
@@ -489,6 +527,7 @@ function syncedContainer(
     remote: boolean,
     expiresAt?: string,
     error?: SyncedContainer['error'],
+    usage?: Pick<SyncedContainer, 'cpuUsage' | 'memoryUsage'>,
 ): SyncedContainer {
     return {
         containerId,
@@ -499,6 +538,7 @@ function syncedContainer(
         ...(remote ? { endpoint: '10.0.0.1:22' } : {}),
         ...(expiresAt ? { expiresAt } : {}),
         ...(error ? { error } : {}),
+        ...(usage ?? {}),
     };
 }
 

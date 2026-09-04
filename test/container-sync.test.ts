@@ -90,6 +90,29 @@ describe('ContainerSync', () => {
         expect(await fs.readFile(store.filePath, 'utf8')).toContain(`User ${os.userInfo().username}`);
     });
 
+    it('propagates API resource usage values, including unavailable metrics', async () => {
+        const store = await createStore();
+        const sync = createSync(store, {
+            getContainerIds: vi.fn(async () => ({ container_ids: ['container-usage'] })),
+            getContainer: vi.fn(async () => ({
+                container_id: 'container-usage',
+                status: 'running',
+                endpoint: '10.0.0.4:22',
+                cpu_usage: 12.5,
+                memory_usage: null,
+                gitee_user: '',
+                gitee_repository: '',
+            })),
+        });
+
+        const result = await sync.sync();
+
+        expect(result.containers[0]).toMatchObject({
+            cpuUsage: 12.5,
+            memoryUsage: null,
+        });
+    });
+
     it('marks missing containers with ExpiresAt and removes it when they return', async () => {
         const store = await createStore();
         const initial = await store.read();

@@ -26,6 +26,8 @@ export interface ContainerStatusResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    cpu_usage?: number | null;
+    memory_usage?: number | null;
     gitee_user: string;
     gitee_repository: string;
 }
@@ -65,11 +67,14 @@ export interface AdminContainerResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    cpu_usage?: number | null;
+    memory_usage?: number | null;
     image: string;
     user_id: string;
     gitee_user: string;
     gitee_repository: string;
     gitee_branch?: string | null;
+    gitee_url: string;
     created_at: string;
     expiration_hours: number;
     authorize_general_account: boolean;
@@ -79,6 +84,14 @@ export interface AdminContainerResponse {
 
 export interface AdminContainerListResponse {
     containers: AdminContainerResponse[];
+}
+
+export interface AdminStateResponse {
+    container_count: number;
+    whitelist_container_count: number;
+    admin_container_count: number;
+    whitelist_count: number;
+    admin_count: number;
 }
 
 export interface ExpirationRequest {
@@ -92,11 +105,14 @@ export interface ExpirationResponse {
 
 export interface ContainerLimitRequest {
     container_limit: number;
+    cpu: number;
+    memory: number;
 }
 
 export interface ContainerLimitResponse {
-    container_count: number;
     container_limit: number;
+    cpu: number;
+    memory: number;
 }
 
 export interface ImageReferenceRequest {

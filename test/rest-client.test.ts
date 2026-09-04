@@ -54,6 +54,7 @@ describe('RestClient', () => {
         await client.admin.createContainer({ user_id: 'user-1' });
         await client.admin.listContainers();
         await client.admin.getContainer('container/1');
+        await client.admin.getContainerLog('container/1');
         await client.admin.startContainer('container/1');
         await client.admin.stopContainer('container/1');
         await client.admin.restartContainer('container/1');
@@ -61,8 +62,9 @@ describe('RestClient', () => {
         await client.admin.permanentDeleteContainer('container/1');
         await client.admin.setExpiration('container/1', { expiration_hours: 1 });
         await client.admin.restoreContainer('container/1', { expiration_hours: 1 });
+        await client.admin.getState();
         await client.admin.getContainerLimit();
-        await client.admin.setContainerLimit({ container_limit: 3 });
+        await client.admin.setContainerLimit({ container_limit: 3, cpu: 1, memory: 1 });
         await client.admin.addWhitelistUser({ user_id: 'user-1' });
         await client.admin.listWhitelistUsers();
         await client.admin.deleteWhitelistUser({ user_id: 'user-1' });
@@ -89,6 +91,7 @@ describe('RestClient', () => {
             'POST /v1/admin/containers',
             'GET /v1/admin/containers',
             'GET /v1/admin/containers/container%2F1',
+            'GET /v1/admin/containers/container%2F1/log',
             'POST /v1/admin/containers/container%2F1/start',
             'POST /v1/admin/containers/container%2F1/stop',
             'POST /v1/admin/containers/container%2F1/restart',
@@ -96,6 +99,7 @@ describe('RestClient', () => {
             'POST /v1/admin/containers/container%2F1/permanent-delete',
             'POST /v1/admin/containers/container%2F1/expiration',
             'POST /v1/admin/containers/container%2F1/restore',
+            'GET /v1/admin/state',
             'GET /v1/admin/containers/limit',
             'POST /v1/admin/containers/limit',
             'POST /v1/admin/whitelist-users',
@@ -156,6 +160,17 @@ describe('RestClient', () => {
         const client = new RestClient({ baseUrl: 'http://api.example.test', transport });
 
         await expect(client.user.stopContainer('id')).resolves.toBeUndefined();
+    });
+
+    it('returns raw text for the administrator container log endpoint', async () => {
+        const { requests, transport } = createTransport({
+            statusCode: 200,
+            body: Buffer.from('line 1\nline 2\n', 'utf8'),
+        });
+        const client = new RestClient({ baseUrl: 'http://api.example.test', transport });
+
+        await expect(client.admin.getContainerLog('container-1')).resolves.toBe('line 1\nline 2\n');
+        expect(requests[0].headers.Accept).toBe('text/plain');
     });
 
     it('rejects malformed API URLs before making a request', async () => {

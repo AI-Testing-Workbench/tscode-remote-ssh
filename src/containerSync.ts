@@ -22,6 +22,8 @@ export interface SyncedContainer {
     endpoint?: string | null;
     startedAt?: string | null;
     expiresAt?: string | null;
+    cpuUsage?: number | null;
+    memoryUsage?: number | null;
     remote: boolean;
     error?: ContainerSyncError;
 }
@@ -359,6 +361,8 @@ export class ContainerSync {
                 endpoint: response?.endpoint,
                 startedAt: response?.started_at,
                 expiresAt: response?.expires_at,
+                ...(response?.cpu_usage !== undefined ? { cpuUsage: response.cpu_usage } : {}),
+                ...(response?.memory_usage !== undefined ? { memoryUsage: response.memory_usage } : {}),
                 remote: true,
                 ...(remoteStatus?.error || endpointError ? { error: remoteStatus?.error ?? endpointError } : {}),
             };

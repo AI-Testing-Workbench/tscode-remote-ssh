@@ -7,6 +7,7 @@ import {
     AdminCreateContainerRequest,
     AdminCheckRequest,
     AdminCheckResponse,
+    AdminStateResponse,
     ContainerIdsResponse,
     ContainerLimitRequest,
     ContainerLimitResponse,
@@ -97,6 +98,7 @@ export interface AdminRestApi {
     createContainer(request: AdminCreateContainerRequest): Promise<AdminContainerResponse>;
     listContainers(): Promise<AdminContainerListResponse>;
     getContainer(containerId: string): Promise<AdminContainerResponse>;
+    getContainerLog(containerId: string): Promise<string>;
     startContainer(containerId: string): Promise<void>;
     stopContainer(containerId: string): Promise<void>;
     restartContainer(containerId: string): Promise<void>;
@@ -104,6 +106,7 @@ export interface AdminRestApi {
     permanentDeleteContainer(containerId: string): Promise<void>;
     setExpiration(containerId: string, request: ExpirationRequest): Promise<ExpirationResponse>;
     restoreContainer(containerId: string, request: ExpirationRequest): Promise<void>;
+    getState(): Promise<AdminStateResponse>;
     getContainerLimit(): Promise<ContainerLimitResponse>;
     setContainerLimit(request: ContainerLimitRequest): Promise<ContainerLimitResponse>;
     addWhitelistUser(request: UserIdRequest): Promise<UserMutationResponse>;
@@ -119,6 +122,7 @@ interface RequestOptions {
     jsonBody?: unknown;
     body?: Uint8Array;
     headers?: Record<string, string>;
+    responseType?: 'json' | 'text';
 }
 
 interface MultipartBody {
@@ -217,6 +221,7 @@ export class RestClient {
             createContainer: request => this.requestJson<AdminContainerResponse>('POST', '/admin/containers', { jsonBody: request }),
             listContainers: () => this.requestJson<AdminContainerListResponse>('GET', '/admin/containers'),
             getContainer: containerId => this.requestJson<AdminContainerResponse>('GET', this.containerPath('/admin/containers', containerId)),
+            getContainerLog: containerId => this.requestText('GET', `${this.containerPath('/admin/containers', containerId)}/log`),
             startContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'start')),
             stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'stop')),
             restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restart')),
@@ -224,6 +229,7 @@ export class RestClient {
             permanentDeleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'permanent-delete')),
             setExpiration: (containerId, request) => this.requestJson<ExpirationResponse>('POST', this.actionPath('/admin/containers', containerId, 'expiration'), { jsonBody: request }),
             restoreContainer: (containerId, request) => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restore'), { jsonBody: request }),
+            getState: () => this.requestJson<AdminStateResponse>('GET', '/admin/state'),
             getContainerLimit: () => this.requestJson<ContainerLimitResponse>('GET', '/admin/containers/limit'),
             setContainerLimit: request => this.requestJson<ContainerLimitResponse>('POST', '/admin/containers/limit', { jsonBody: request }),
             addWhitelistUser: request => this.requestJson<UserMutationResponse>('POST', '/admin/whitelist-users', { jsonBody: request }),
@@ -259,10 +265,22 @@ export class RestClient {
         await this.send(method, path, options);
     }
 
+    private async requestText(method: 'GET' | 'POST', path: string, options?: RequestOptions): Promise<string> {
+        const response = await this.send(method, path, { ...options, responseType: 'text' });
+        if (typeof response !== 'string') {
+            throw new RestClientError(
+                'response',
+                REST_ERROR_CODES.INVALID_RESPONSE,
+                '后端 TestAgent Cloud 管理服务返回了无效的文本响应',
+            );
+        }
+        return response;
+    }
+
     private async send(method: 'GET' | 'POST', path: string, options: RequestOptions = {}): Promise<unknown | undefined> {
         const url = this.buildUrl(path, options.query);
         const headers: Record<string, string> = {
-            Accept: 'application/json',
+            Accept: options.responseType === 'text' ? 'text/plain' : 'application/json',
             ...options.headers,
         };
         let body = options.body;
@@ -310,7 +328,8 @@ export class RestClient {
             );
         }
 
-        const bodyText = Buffer.from(response.body).toString('utf8').trim();
+        const rawBodyText = Buffer.from(response.body).toString('utf8');
+        const bodyText = rawBodyText.trim();
         let parsedBody: unknown;
         let hasJsonBody = false;
         if (bodyText) {
@@ -330,6 +349,10 @@ export class RestClient {
                 apiError?.message ?? `后端 TestAgent Cloud 管理服务请求失败 (HTTP ${response.statusCode})`,
                 response.statusCode,
             );
+        }
+
+        if (options.responseType === 'text') {
+            return rawBodyText;
         }
 
         if (!bodyText) {

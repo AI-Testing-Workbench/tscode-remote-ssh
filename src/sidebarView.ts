@@ -722,6 +722,8 @@ function renderToolbarButton(action: string, label: string, icon: SidebarIcon): 
 function renderContainerCard(container: SyncedContainer): string {
     const statusClass = getStatusClass(container);
     const statusLabel = getStatusLabel(container);
+    const usage = renderUsage(container);
+    const expiration = renderExpirationStatus(container);
     const containerId = escapeHtml(container.containerId);
     const host = escapeHtml(container.host || '未配置 Host');
     const canOperate = container.remote;
@@ -744,6 +746,7 @@ function renderContainerCard(container: SyncedContainer): string {
                 <div class="service-status">
                     <span class="status-dot ${statusClass}"></span>
                     <span class="status-label">${escapeHtml(statusLabel)}</span>
+                    ${usage}
                 </div>
             </div>
             ${error}
@@ -752,6 +755,7 @@ function renderContainerCard(container: SyncedContainer): string {
                 <button class="action-button" data-action="restart" data-container-id="${containerId}"${disabledOperation}>${renderIcon('restart')}重启</button>
                 <button class="action-button" data-action="delete" data-container-id="${containerId}"${disabledOperation}>${renderIcon('delete')}销毁</button>
             </div>
+            ${expiration}
             ${history}
         </article>
     `;
@@ -774,6 +778,73 @@ function renderErrorHtml(message: string): string {
 
 function renderLoadingHtml(): string {
     return renderDocument('<main class="loading"><span class="loading-indicator"></span><p>正在加载 TestAgent Cloud 服务...</p></main>');
+}
+
+function renderUsage(container: SyncedContainer): string {
+    return [
+        '<span class="usage-separator" aria-hidden="true">&middot;</span>',
+        renderUsageMetric('CPU占用率', container.cpuUsage),
+        '<span class="usage-separator" aria-hidden="true">&middot;</span>',
+        renderUsageMetric('内存使用率', container.memoryUsage),
+    ].join('');
+}
+
+function renderUsageMetric(label: string, value: number | null | undefined): string {
+    return `<span class="usage-metric ${getUsageClass(value)}">${label} ${formatUsage(value)}</span>`;
+}
+
+function formatUsage(value: number | null | undefined): string {
+    return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : '--';
+}
+
+function getUsageClass(value: number | null | undefined): string {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return 'usage-metric-unavailable';
+    }
+    if (value >= 90) {
+        return 'usage-metric-critical';
+    }
+    if (value >= 75) {
+        return 'usage-metric-warning';
+    }
+    return 'usage-metric-low';
+}
+
+function renderExpirationStatus(container: SyncedContainer): string {
+    if (!container.remote || container.status === 'missing' || !container.expiresAt) {
+        return '';
+    }
+
+    const expiration = getExpirationDisplay(container.expiresAt);
+    return expiration
+        ? `<div class="expiration-status ${expiration.className}">${escapeHtml(expiration.label)}</div>`
+        : '';
+}
+
+interface ExpirationDisplay {
+    label: string;
+    className: 'warning' | 'critical';
+}
+
+function getExpirationDisplay(expiresAt: string, now = Date.now()): ExpirationDisplay | undefined {
+    const expirationTime = Date.parse(expiresAt);
+    if (Number.isNaN(expirationTime)) {
+        return undefined;
+    }
+
+    const remainingMs = expirationTime - now;
+    if (remainingMs <= 0) {
+        return { label: '已过期', className: 'critical' };
+    }
+
+    const totalMinutes = Math.floor(remainingMs / 60_000);
+    const days = Math.floor(totalMinutes / 1_440);
+    const hours = Math.floor((totalMinutes % 1_440) / 60);
+    const minutes = totalMinutes % 60;
+    return {
+        label: `服务剩余时间: ${days}天 ${hours}小时 ${minutes}分钟`,
+        className: remainingMs <= 3_600_000 ? 'critical' : 'warning',
+    };
 }
 
 function renderDocument(body: string): string {
@@ -851,12 +922,20 @@ function renderDocument(body: string): string {
         .container-card:hover { border-color: var(--vscode-focusBorder); }
         .service-heading { min-width: 0; }
         .service-name { display: block; min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
-        .service-status { display: flex; align-items: center; gap: 7px; margin: 7px 0 0; color: var(--on-surface-variant); font-size: 12px; }
+        .service-status { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 7px 0 0; color: var(--on-surface-variant); font-size: 12px; }
         .status-label { white-space: nowrap; }
         .status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--vscode-charts-yellow); }
         .status-dot.running { background: var(--vscode-testing-iconPassed, #3fb950); }
         .status-dot.stopped, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
         .status-dot.missing { background: var(--vscode-descriptionForeground); }
+        .usage-separator { color: var(--on-surface-variant); font-weight: 700; }
+        .usage-metric { white-space: nowrap; }
+        .usage-metric-low { color: var(--vscode-testing-iconPassed, #3fb950); }
+        .usage-metric-warning { color: var(--vscode-editorWarning-foreground, #e5c07b); }
+        .usage-metric-critical { color: var(--vscode-errorForeground, #f28b82); }
+        .usage-metric-unavailable { color: var(--on-surface); }
+        .expiration-status { margin-top: 16px; color: var(--warning); font-size: 12px; }
+        .expiration-status.critical { color: var(--error); }
         .card-error { margin: 13px 0 0; padding: 9px 11px; border-radius: 8px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; }
         .card-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
         .action-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: var(--outline); }
