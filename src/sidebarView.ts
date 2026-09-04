@@ -942,6 +942,8 @@ function getStatusLabel(container: SyncedContainer): string {
             return '运行中';
         case 'stopped':
             return '已停止';
+        case 'pending':
+            return '准备中';
         default:
             return container.status || '未知';
     }

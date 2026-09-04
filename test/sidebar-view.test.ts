@@ -68,6 +68,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('status-dot unknown');
         expect(view.webview.html).toContain('status-dot error');
         expect(view.webview.html).toContain('status-dot missing');
+        expect(view.webview.html).toContain('<span class="status-label">准备中</span>');
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
         expect(view.webview.html).toContain('post(\'connect\'');

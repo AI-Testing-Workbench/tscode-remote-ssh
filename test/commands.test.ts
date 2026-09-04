@@ -68,15 +68,15 @@ describe('openRemoteSSHWindow', () => {
 
     it('asks how to connect when a workspace is already open', async () => {
         vscode.workspace.workspaceFolders = [{} as never];
-        vscode.window.showInformationMessage.mockResolvedValue('在当前窗口打开');
+        vscode.window.showInformationMessage.mockResolvedValue('当前窗口打开');
         const refreshSidebar = vi.fn();
 
         await connectToContainer('dev', refreshSidebar);
 
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
             '当前窗口已打开工作区，请选择连接 TestAgent Cloud 服务的方式',
-            '在当前窗口打开',
-            '在新窗口打开',
+            '当前窗口打开',
+            '新建窗口打开',
         );
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'vscode.newWindow',
@@ -87,7 +87,7 @@ describe('openRemoteSSHWindow', () => {
 
     it('opens a new window when selected and does not refresh the current sidebar', async () => {
         vscode.workspace.workspaceFolders = [{} as never];
-        vscode.window.showInformationMessage.mockResolvedValue('在新窗口打开');
+        vscode.window.showInformationMessage.mockResolvedValue('新建窗口打开');
         const refreshSidebar = vi.fn();
 
         await connectToContainer('dev', refreshSidebar);
