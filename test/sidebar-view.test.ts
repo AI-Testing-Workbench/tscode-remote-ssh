@@ -136,11 +136,11 @@ describe('SidebarViewProvider', () => {
 
         expect(view.webview.html).toContain('&middot;</span>');
         expect(view.webview.html).toContain('usage-metric-low">CPU占用率 74.90%</span>');
-        expect(view.webview.html).toContain('usage-metric-unavailable">内存占用率 --</span>');
+        expect(view.webview.html).toContain('usage-metric-unavailable">内存使用率 --</span>');
         expect(view.webview.html).toContain('usage-metric-critical">CPU占用率 90.00%</span>');
-        expect(view.webview.html).toContain('usage-metric-warning">内存占用率 75.00%</span>');
-        expect(view.webview.html).toContain('expiration-status warning">剩余过期时间：1天2小时3分钟</div>');
-        expect(view.webview.html).toContain('expiration-status critical">剩余过期时间：0天1小时0分钟</div>');
+        expect(view.webview.html).toContain('usage-metric-warning">内存使用率 75.00%</span>');
+        expect(view.webview.html).toContain('expiration-status warning">服务剩余时间: 1天 2小时 3分钟</div>');
+        expect(view.webview.html).toContain('expiration-status critical">服务剩余时间: 0天 1小时 0分钟</div>');
         expect(view.webview.html).toContain('.expiration-status { margin-top: 16px;');
         expect(view.webview.html.indexOf('expiration-status warning'))
             .toBeGreaterThan(view.webview.html.indexOf('class="card-actions"'));
