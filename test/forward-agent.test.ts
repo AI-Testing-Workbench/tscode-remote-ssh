@@ -11,6 +11,7 @@ import * as vscode from './mocks/vscode';
 import { runDocker } from './utils/run-docker';
 import { getMappedPort } from './utils/get-mapped-port';
 import { waitForSSHReady } from './utils/wait-for-ssh-ready';
+import { prepareServerPath } from './utils/prepare-server';
 
 const SERVER_SETUP = fse.readFile('./src/scripts/server-setup.sh', 'utf8').value!;
 
@@ -104,6 +105,23 @@ it('forwards the agent through a socket that stays alive', async () => {
   vscode.setConfigurationValue('testagnet.remote', 'configFile', '/etc/ssh/ssh_config');
 
   vscode.window.setPassword(PASSWORD);
+
+  const preparationConnection = new SSHConnection({
+    host: '127.0.0.1',
+    port: hostPort,
+    username: USERNAME,
+    password: PASSWORD,
+    reconnect: false,
+    readyTimeout: 10_000,
+    strictVendor: false,
+  });
+
+  try {
+    await preparationConnection.connect();
+    await prepareServerPath(preparationConnection);
+  } finally {
+    await preparationConnection.close();
+  }
 
   const logger = new Log('Remote - SSH') as unknown as SourceLog;
   const extContext = new vscode.ExtensionContext() as unknown as import('vscode').ExtensionContext;

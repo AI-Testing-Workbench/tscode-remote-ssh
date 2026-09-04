@@ -14,6 +14,7 @@ import * as vscode from './mocks/vscode';
 import { runDocker } from './utils/run-docker';
 import { getMappedPort } from './utils/get-mapped-port';
 import { waitForSSHReady } from './utils/wait-for-ssh-ready';
+import { prepareAlpineServerRuntime, prepareServerPath } from './utils/prepare-server';
 
 const ROOT = fse.join('.', 'test', 'fixtures', 'default');
 const SERVER_SETUP = fse.readFile('./src/scripts/server-setup.sh', 'utf8').value!;
@@ -93,6 +94,9 @@ for (const file of files.value) {
       hostPort = getMappedPort(containerName);
 
       await waitForSSHReady(server.username, server.password, hostPort, 60_000);
+      if (server.image === 'local-alpine-bash') {
+        prepareAlpineServerRuntime(containerName, server.username);
+      }
     }, 120_000);
 
     afterAll(() => {
@@ -144,6 +148,23 @@ for (const file of files.value) {
 
         try {
           await connection.exec('rm -rf "$HOME/.vscodium-server"');
+        } finally {
+          await connection.close();
+        }
+      } else {
+        const connection = new SSHConnection({
+          host: '127.0.0.1',
+          port: hostPort,
+          username: server.username,
+          password: server.password,
+          reconnect: false,
+          readyTimeout: 10000,
+          strictVendor: false,
+        });
+
+        try {
+          await connection.connect();
+          await prepareServerPath(connection);
         } finally {
           await connection.close();
         }
