@@ -10,7 +10,7 @@ import {
     type SyncedContainer,
 } from './containerSync';
 import { parseContainerEndpoint } from './containerEndpoint';
-import { looksLikeGiteeRepositoryUrl, parseGiteeRepositoryUrl } from './giteeRepository';
+import { parseGiteeRepositoryUrl } from './giteeRepository';
 import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } from './settings';
 import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
@@ -484,7 +484,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         const title = '创建新 TestAgent Cloud 服务';
         const giteeInput = await this.showInputBox({
             title,
-            prompt: '完整码云仓库地址或者码云用户名',
+            prompt: '码云仓库地址 (支持 HTTP 与 GIT 协议，可选)',
             placeHolder: '',
         });
         if (giteeInput === undefined) {
@@ -497,69 +497,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         let normalizedGiteeUrl = '';
         if (normalizedGiteeInput) {
             const parsedRepository = parseGiteeRepositoryUrl(normalizedGiteeInput);
-            if (looksLikeGiteeRepositoryUrl(normalizedGiteeInput) && !parsedRepository) {
-                this.showError('完整码云仓库地址格式无效');
+            if (!parsedRepository) {
+                this.showError('码云仓库地址格式无效');
                 return;
             }
 
-            if (parsedRepository) {
-                normalizedGiteeUser = parsedRepository.user;
-                normalizedGiteeRepository = parsedRepository.repository;
-                normalizedGiteeUrl = parsedRepository.url;
-                const giteeBranch = await this.showInputBox({
-                    title,
-                    prompt: '码云分支 (可选)',
-                    placeHolder: 'master',
-                });
-                if (giteeBranch === undefined) {
-                    return;
-                }
-                normalizedGiteeBranch = giteeBranch.trim();
-            } else {
-                normalizedGiteeUser = normalizedGiteeInput;
-                const giteeRepository = await this.showInputBox({
-                    title,
-                    prompt: '码云仓库名',
-                    placeHolder: '',
-                });
-                if (giteeRepository === undefined) {
-                    return;
-                }
-                normalizedGiteeRepository = giteeRepository.trim();
-                if (!normalizedGiteeRepository) {
-                    this.showError('码云仓库名不能为空');
-                    return;
-                }
-
-                const giteeBranch = await this.showInputBox({
-                    title,
-                    prompt: '码云分支 (可选)',
-                    placeHolder: 'master',
-                });
-                if (giteeBranch === undefined) {
-                    return;
-                }
-                normalizedGiteeBranch = giteeBranch.trim();
-
-                const giteeUrl = await this.showInputBox({
-                    title,
-                    prompt: '码云地址前缀',
-                    placeHolder: 'https://github.com',
-                });
-                if (giteeUrl === undefined) {
-                    return;
-                }
-                normalizedGiteeUrl = giteeUrl.trim();
-                if (!normalizedGiteeUrl) {
-                    this.showError('码云地址前缀不能为空');
-                    return;
-                }
-            }
-
-            if (!normalizedGiteeUser || !normalizedGiteeRepository || !normalizedGiteeUrl) {
-                this.showError('码云用户名、仓库名和地址前缀不能为空');
+            normalizedGiteeUser = parsedRepository.user;
+            normalizedGiteeRepository = parsedRepository.repository;
+            normalizedGiteeUrl = parsedRepository.url;
+            const giteeBranch = await this.showInputBox({
+                title,
+                prompt: '码云分支 (可选)',
+                placeHolder: 'master',
+            });
+            if (giteeBranch === undefined) {
                 return;
             }
+            normalizedGiteeBranch = giteeBranch.trim();
         }
         const authorization = await this.showQuickPick(['授权使用 TestAgent 码云通用账户'], {
             title,
