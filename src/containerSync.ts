@@ -1,6 +1,6 @@
 import { ContainerConfig, ContainerConfigEntry } from './containerConfig';
 import { RestClientError, UserRestApi } from './api/restClient';
-import { ContainerIdsResponse, ContainerStatusResponse } from './api/models';
+import { ContainerStatusResponse } from './api/models';
 import {
     InvalidContainerEndpoint,
     parseContainerEndpoint,
@@ -153,8 +153,8 @@ export class ContainerSync {
                     } catch {
                         // A sidebar listener must not turn a successful sync into an unhandled rejection.
                     }
-                    this.reconcileOperations(result);
                 }
+                this.reconcileOperations(result);
                 return result;
             })
             .finally(() => {
@@ -310,9 +310,9 @@ export class ContainerSync {
             return this.resultWithError(toSyncError(error, 'api_error', 'TestAgent Cloud 服务同步 API 未配置'));
         }
 
-        let containerIdsResponse: ContainerIdsResponse;
+        let catalog: { remoteIds: string[]; remoteStatuses: Map<string, RemoteStatusResult> };
         try {
-            containerIdsResponse = await userApi.getContainerIds({ user_id: userId });
+            catalog = await this.fetchRemoteCatalog(userApi, userId, settings.debug);
         } catch (error) {
             return {
                 containers: this.localOnlyStates(localEntries, toSyncError(error, 'sync_failed', '获取服务清单失败')),
@@ -324,14 +324,13 @@ export class ContainerSync {
             return this.disposedResult();
         }
 
-        const remoteIds = uniqueContainerIds(containerIdsResponse.container_ids);
+        const { remoteIds, remoteStatuses } = catalog;
         for (const containerId of this.locallyDeletedContainerIds) {
             if (!remoteIds.includes(containerId)) {
                 this.locallyDeletedContainerIds.delete(containerId);
             }
         }
         const visibleRemoteIds = remoteIds.filter(containerId => !this.locallyDeletedContainerIds.has(containerId));
-        const remoteStatuses = await this.getRemoteStatuses(userApi, visibleRemoteIds, settings.debug);
         if (this.disposed) {
             return this.disposedResult();
         }
@@ -397,32 +396,52 @@ export class ContainerSync {
         };
     }
 
-    private async getRemoteStatuses(
+    private async fetchRemoteCatalog(
         userApi: UserRestApi,
-        containerIds: string[],
+        userId: string,
         allowDebugProxy: boolean,
-    ): Promise<Map<string, RemoteStatusResult>> {
-        const results: Array<readonly [string, RemoteStatusResult]> = await Promise.all(containerIds.map(async (containerId): Promise<readonly [string, RemoteStatusResult]> => {
-            if (this.operationRegistry?.get(containerId)?.phase === 'processing') {
-                return [containerId, {}] as const;
-            }
-            try {
-                const response = await userApi.getContainer(containerId);
-                const parsedEndpoint = parseContainerEndpoint(response.endpoint, { allowDebugProxy });
-                if (!parsedEndpoint) {
-                    this.reportInvalidEndpoint(containerId, response.endpoint);
-                    return [containerId, {
-                        response,
-                        error: { code: 'invalid_endpoint', message: 'TestAgent Cloud 服务 endpoint 必须是 IP:Port' },
-                    }] as const;
-                }
-                this.clearInvalidEndpointNotifications(containerId);
-                return [containerId, { response, parsedEndpoint }] as const;
-            } catch (error) {
-                return [containerId, { error: toSyncError(error, 'status_failed', '获取服务状态失败') }] as const;
-            }
-        }));
-        return new Map(results);
+    ): Promise<{ remoteIds: string[]; remoteStatuses: Map<string, RemoteStatusResult> }> {
+        const list = await userApi.getContainerStatuses({ user_id: userId });
+        const containers = Array.isArray(list?.containers) ? list.containers : [];
+        const remoteIds = uniqueContainerIds(containers.map(container => container.container_id));
+        const remoteStatuses = new Map<string, RemoteStatusResult>();
+        for (const container of containers) {
+            remoteStatuses.set(container.container_id, this.parseStatusResponse(container, allowDebugProxy));
+        }
+        return { remoteIds, remoteStatuses };
+    }
+
+    private parseStatusResponse(response: ContainerStatusResponse, allowDebugProxy: boolean): RemoteStatusResult {
+        const parsedEndpoint = parseContainerEndpoint(response.endpoint, { allowDebugProxy });
+        if (!parsedEndpoint) {
+            this.reportInvalidEndpoint(response.container_id, response.endpoint);
+            return {
+                response,
+                error: { code: 'invalid_endpoint', message: 'TestAgent Cloud 服务 endpoint 必须是 IP:Port' },
+            } as const;
+        }
+        this.clearInvalidEndpointNotifications(response.container_id);
+        return { response, parsedEndpoint };
+    }
+
+    private removeExcessHistory(config: import('ssh-config').default, historyLimit: number): boolean {
+        if (historyLimit === 0) {
+            return false;
+        }
+
+        const normalizedLimit = Number.isInteger(historyLimit) && historyLimit >= 0 ? historyLimit : 5;
+        const history = this.config.list(config)
+            .filter(entry => entry.expiresAt)
+            .sort((left, right) => compareExpiration(left, right));
+        if (normalizedLimit === 0 || history.length <= normalizedLimit) {
+            return false;
+        }
+
+        let changed = false;
+        for (const entry of history.slice(0, history.length - normalizedLimit)) {
+            changed = this.config.removeContainer(config, entry.containerId) || changed;
+        }
+        return changed;
     }
 
     private reconcileOperations(result: ContainerSyncResult): void {
@@ -469,26 +488,6 @@ export class ContainerSync {
             case 'permanent-delete':
                 return false;
         }
-    }
-
-    private removeExcessHistory(config: import('ssh-config').default, historyLimit: number): boolean {
-        if (historyLimit === 0) {
-            return false;
-        }
-
-        const normalizedLimit = Number.isInteger(historyLimit) && historyLimit >= 0 ? historyLimit : 5;
-        const history = this.config.list(config)
-            .filter(entry => entry.expiresAt)
-            .sort((left, right) => compareExpiration(left, right));
-        if (normalizedLimit === 0 || history.length <= normalizedLimit) {
-            return false;
-        }
-
-        let changed = false;
-        for (const entry of history.slice(0, history.length - normalizedLimit)) {
-            changed = this.config.removeContainer(config, entry.containerId) || changed;
-        }
-        return changed;
     }
 
     private buildStates(

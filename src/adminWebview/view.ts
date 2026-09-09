@@ -2,10 +2,12 @@ import type {
     AdminContainerResponse,
     AdminStateResponse,
     ContainerLimitResponse,
+    ContainerTypeValue,
     ImageListItem,
 } from '../api/models';
 import { ADMIN_WEBVIEW_SCRIPT } from './script';
-import type { AdminPanelState, AdminTab } from './types';
+import { ADMIN_CONTAINER_TYPES, containerTypeLabel } from './containerTypes';
+import type { AdminDefaultImage, AdminPanelState, AdminTab } from './types';
 
 interface SelectOption {
     value: string;
@@ -56,7 +58,7 @@ function renderReadyPage(state: AdminPanelState): string {
             <button class="tonal-button" type="button" data-action="refresh">刷新</button>
         </header>
         ${renderStats(state.stats, state.limit, state.orphanContainerIds)}
-        ${renderDefaultBanner(state.defaultImage, state.images)}
+        ${renderDefaultBanners(state.defaultImages, state.images)}
         ${renderLimitForm(state.limit)}
         <nav class="tab-bar" data-patch-key="tab-bar">
             ${renderTabButton('images', '镜像管理', state.activeTab)}
@@ -77,9 +79,9 @@ function renderTabButton(tab: AdminTab, label: string, activeTab: AdminTab): str
 function renderTabContent(state: AdminPanelState): string {
     switch (state.activeTab) {
         case 'images':
-            return renderImagesTab(state.images, state.defaultImage, state.selectedImageFilename, state.search, state.containers);
+            return renderImagesTab(state.images, state.defaultImages, state.selectedImageFilename, state.search, state.containers);
         case 'containers':
-            return renderContainersTab(state.containers, state.images, state.defaultImage, state.search);
+            return renderContainersTab(state.containers, state.images, state.defaultImages, state.search);
         case 'whitelist':
             return renderUsersTab('whitelist', '白名单用户', state.whitelistUsers, state.search);
         case 'adminUsers':
@@ -87,18 +89,23 @@ function renderTabContent(state: AdminPanelState): string {
     }
 }
 
-function renderDefaultBanner(defaultImage: string | null, images: ImageListItem[]): string {
-    const imageExists = Boolean(defaultImage && images.some(image => image.full_name === defaultImage));
-    const missingDefault = Boolean(defaultImage && !imageExists);
-    const stateClass = !defaultImage ? ' danger' : missingDefault ? ' warning' : '';
-    const stateTag = defaultImage && !imageExists
+function renderDefaultBanners(defaultImages: AdminDefaultImage[], images: ImageListItem[]): string {
+    const banners = defaultImages.map(entry => renderDefaultBanner(entry, images)).join('');
+    return `<div class="default-banners" data-patch-key="default-images">${banners}</div>`;
+}
+
+function renderDefaultBanner(defaultImage: AdminDefaultImage, images: ImageListItem[]): string {
+    const imageExists = Boolean(defaultImage.fullName && images.some(image => image.full_name === defaultImage.fullName));
+    const missingDefault = Boolean(defaultImage.fullName && !imageExists);
+    const stateClass = !defaultImage.fullName ? ' danger' : missingDefault ? ' warning' : '';
+    const stateTag = defaultImage.fullName && !imageExists
         ? '<span class="tag warning-tag">默认镜像不存在</span>'
-        : !defaultImage
+        : !defaultImage.fullName
             ? '<span class="tag danger-tag">默认镜像未配置</span>'
             : '';
-    return `<div class="stat-card default-banner overview-card${stateClass}" data-patch-key="default-image">
+    return `<div class="stat-card default-banner overview-card${stateClass}" data-patch-key="default-image:${escapeAttribute(defaultImage.type)}" data-default-image-type="${escapeAttribute(defaultImage.type)}">
         <div class="default-image-copy">
-            <div class="default-image-line"><span class="default-label">默认镜像</span><strong class="default-image-name">${defaultImage ? escapeHtml(defaultImage) : '请及时设置默认镜像'}</strong></div>
+            <div class="default-image-line"><span class="default-label">${escapeHtml(containerTypeLabel(defaultImage.type))}默认镜像</span><strong class="default-image-name">${defaultImage.fullName ? escapeHtml(defaultImage.fullName) : '请及时设置默认镜像'}</strong></div>
         </div>
         ${stateTag}
     </div>`;
@@ -106,14 +113,14 @@ function renderDefaultBanner(defaultImage: string | null, images: ImageListItem[
 
 function renderImagesTab(
     images: ImageListItem[],
-    defaultImage: string | null,
+    defaultImages: AdminDefaultImage[],
     selectedImageFilename?: string,
     search = '',
     containers: AdminContainerResponse[] = [],
 ): string {
     const imageUsage = new Map<string, number>();
     containers.forEach(container => imageUsage.set(container.image, (imageUsage.get(container.image) ?? 0) + 1));
-    const rows = images.map(image => renderImageRow(image, defaultImage, imageUsage.get(image.full_name) ?? 0)).join('');
+    const rows = images.map(image => renderImageRow(image, defaultImages, imageUsage.get(image.full_name) ?? 0)).join('');
     const empty = images.length ? '' : '<p class="empty-message" data-empty-data>暂无镜像数据</p>';
     const emptySearch = images.length ? '<p class="empty-message" data-empty-search hidden>没有匹配的镜像</p>' : '';
     return `<section class="tab-panel" data-tab-panel data-patch-key="tab-images" aria-labelledby="images-tab">
@@ -135,36 +142,57 @@ function renderImagesTab(
                 </div>
             </div>
         </details>
+        <div class="tab-toolbar image-toolbar">
+            <button class="tonal-button" type="button" data-action="checkImagePushStates">检查全部镜像推送状态</button>
+            <span class="toolbar-hint">列表加载不会自动探测远端仓库；点击后逐个校验「已推送」</span>
+        </div>
         ${renderSearchBox('搜索镜像...', search)}
         ${renderListControls('images')}
         <div class="resource-list image-list" data-resource-list><div class="resource-items" data-resource-items>${rows}</div>${empty}${emptySearch}</div>
     </section>`;
 }
 
-function renderImageRow(image: ImageListItem, defaultImage: string | null, containerCount: number): string {
+function renderImageRow(image: ImageListItem, defaultImages: AdminDefaultImage[], containerCount: number): string {
     const imageStatus = image.status.toLowerCase();
-    const isDefault = image.full_name === defaultImage || imageStatus === 'default';
+    const defaultTypes = defaultImageTypes(image.full_name, defaultImages);
+    const isDefault = defaultTypes.length > 0;
     const pushed = imageStatus === 'pushed' || isDefault;
     const status = isDefault ? 'default' : imageStatus;
     const usageTag = containerCount > 0 ? `<span class="image-usage tag">被 ${containerCount} 个容器使用中</span>` : '';
-    const searchText = [image.full_name, image.registry, image.namespace, image.name, image.version, status, imageStatusLabel(status)].join(' ');
+    const defaultTags = defaultTypes
+        .map(type => `<span class="tag default-type-tag">默认·${escapeHtml(containerTypeLabel(type))}</span>`)
+        .join('');
+    const searchText = [image.full_name, image.registry, image.namespace, image.name, image.version, status, imageStatusLabel(status)]
+        .concat(defaultTypes.map(containerTypeLabel))
+        .join(' ');
+    const defaultActions = ADMIN_CONTAINER_TYPES.map(({ type, label }) => {
+        const shortLabel = type === 'testagent_cloud' ? 'TestAgentCloud' : '自动化跑批';
+        if (defaultTypes.includes(type)) {
+            return `<button class="small-button tonal-button" type="button" data-action="unsetDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}">取消默认·${escapeHtml(label)}</button>`;
+        }
+        return `<button class="small-button" type="button" data-action="setDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}" ${pushed ? '' : 'disabled'}>设为默认·${escapeHtml(shortLabel)}</button>`;
+    }).join('');
     return `<article class="resource-row image-row searchable" data-patch-key="image:${escapeAttribute(image.full_name)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-sort-name="${escapeAttribute(image.full_name)}" data-sort-status="${escapeAttribute(status)}" data-sort-size="${image.size}" data-sort-created="${escapeAttribute(image.created_at)}">
-        <div class="resource-main"><div class="image-title"><strong>${escapeHtml(image.full_name)}</strong><span class="status-chip tag ${statusClass(status)}">${escapeHtml(imageStatusLabel(status))}</span><span class="image-size tag">${formatBytes(image.size)}</span>${usageTag}</div></div>
+        <div class="resource-main"><div class="image-title"><strong>${escapeHtml(image.full_name)}</strong><span class="status-chip tag ${statusClass(status)}">${escapeHtml(imageStatusLabel(status))}</span>${defaultTags}<span class="image-size tag">${formatBytes(image.size)}</span>${usageTag}</div></div>
         <div class="row-actions">
             <button class="small-button" type="button" data-action="pushImage" data-full-name="${escapeAttribute(image.full_name)}" ${pushed ? 'disabled' : ''}>推送</button>
-            ${isDefault
-                ? '<button class="small-button tonal-button" type="button" data-action="unsetDefaultImage">取消默认</button>'
-                : `<button class="small-button" type="button" data-action="setDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" ${pushed ? '' : 'disabled'}>设为默认</button>`}
+            ${defaultActions}
             <button class="small-button danger-button" type="button" data-action="deleteImage" data-full-name="${escapeAttribute(image.full_name)}" ${isDefault ? 'disabled' : ''}>删除</button>
             <label class="row-check check-button${isDefault ? ' disabled' : ''}"><input data-field="alsoRegistry" data-persist-key="image.${escapeAttribute(image.full_name)}.alsoRegistry" type="checkbox" checked${isDefault ? ' disabled' : ''}>同步推送至注册表 (镜像仓库)</label>
         </div>
     </article>`;
 }
 
+function defaultImageTypes(fullName: string, defaultImages: AdminDefaultImage[]): ContainerTypeValue[] {
+    return defaultImages
+        .filter(entry => entry.fullName === fullName)
+        .map(entry => entry.type);
+}
+
 function renderContainersTab(
     containers: AdminContainerResponse[],
     images: ImageListItem[],
-    defaultImage: string | null,
+    defaultImages: AdminDefaultImage[],
     search = '',
 ): string {
     const rows = containers.map(renderContainerRow).join('');
@@ -177,6 +205,10 @@ function renderContainersTab(
             <div class="create-form-body">
                 <div class="form-row single-field">
                     <label>用户 ID<input data-field="user_id" data-persist-key="create.user_id" type="text" required placeholder="10001"></label>
+                </div>
+                <div class="form-row two-fields type-image-row">
+                    <label>容器类型${renderStyledSelect('data-field="type" data-persist-key="create.type"', renderContainerTypeOptions())}</label>
+                    <label>镜像${renderStyledSelect('data-field="image" data-persist-key="create.image"', renderImageOptions(images, defaultImages))}</label>
                 </div>
                 <div class="gitee-option-row">
                     <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="none" type="radio" checked>无码云仓库绑定</label>
@@ -201,9 +233,6 @@ function renderContainersTab(
                     <label class="check-button form-check"><input data-field="authorize_general_account" data-persist-key="create.authorize_general_account" type="checkbox">授权使用 TestAgent Cloud 通用码云账户</label>
                 </div>
                 <div class="form-row single-field">
-                    <label>镜像${renderStyledSelect('data-field="image" data-persist-key="create.image"', renderImageOptions(images, defaultImage))}</label>
-                </div>
-                <div class="form-row single-field">
                     <label>有效期 (小时)<input data-field="expiration_hours" data-persist-key="create.expiration_hours" type="number" min="0" step="1" placeholder="0 表示该容器永不过期"></label>
                 </div>
                 <div class="form-row two-fields">
@@ -214,33 +243,51 @@ function renderContainersTab(
             </div>
         </details>
         ${renderSearchBox('搜索容器...', search)}
-        ${renderListControls('containers')}
+        ${renderListControls('containers', 'containers', renderContainerTypeFilter())}
         <div class="resource-list container-list" data-resource-list><div class="resource-items" data-resource-items>${rows}</div>${empty}${emptySearch}</div>
     </section>`;
 }
 
-function renderImageOptions(images: ImageListItem[], defaultImage: string | null): SelectOption[] {
+function renderContainerTypeOptions(): SelectOption[] {
+    return ADMIN_CONTAINER_TYPES.map((entry, index) => ({
+        value: entry.type,
+        label: entry.label,
+        selected: index === 0,
+    }));
+}
+
+function renderContainerTypeFilter(): string {
+    const options: SelectOption[] = [{ value: 'all', label: '全部类型' }].concat(ADMIN_CONTAINER_TYPES.map(entry => ({
+        value: entry.type,
+        label: entry.label,
+    })));
+    return `<label class="control-inline"><span>类型过滤</span>${renderStyledSelect('data-type-filter', options)}</label>`;
+}
+
+function renderImageOptions(images: ImageListItem[], defaultImages: AdminDefaultImage[]): SelectOption[] {
+    const isDefaultImage = (image: ImageListItem): boolean => defaultImageTypes(image.full_name, defaultImages).length > 0;
     const usableImages = images
-        .filter(image => image.status.toLowerCase() === 'pushed' || image.status.toLowerCase() === 'default' || image.full_name === defaultImage)
+        .filter(image => image.status.toLowerCase() === 'pushed' || image.status.toLowerCase() === 'default' || isDefaultImage(image))
         .sort((left, right) => {
-            const leftDefault = left.full_name === defaultImage || !defaultImage && left.status.toLowerCase() === 'default';
-            const rightDefault = right.full_name === defaultImage || !defaultImage && right.status.toLowerCase() === 'default';
+            const leftDefault = isDefaultImage(left);
+            const rightDefault = isDefaultImage(right);
             return leftDefault === rightDefault ? left.full_name.localeCompare(right.full_name) : leftDefault ? -1 : 1;
         });
+    const defaultRef = defaultImages.find(entry => entry.fullName);
     const statusDefault = usableImages.find(image => image.status.toLowerCase() === 'default');
-    const hasDefault = Boolean(defaultImage && usableImages.some(image => image.full_name === defaultImage) || !defaultImage && statusDefault);
+    const hasDefault = Boolean(defaultRef && usableImages.some(image => image.full_name === defaultRef.fullName) || statusDefault);
     const options: SelectOption[] = [];
-    if (!defaultImage && !statusDefault) {
+    if (!defaultRef?.fullName && !statusDefault) {
         options.push({ value: '', label: '请选择一个镜像', selected: true, disabled: true });
     }
-    const missingDefault = defaultImage && !hasDefault
-        ? { value: defaultImage, label: '默认镜像 (镜像不存在)', selected: true }
+    const missingDefault = defaultRef?.fullName && !hasDefault
+        ? { value: defaultRef.fullName, label: '默认镜像 (镜像不存在)', selected: true }
         : undefined;
     if (missingDefault) {
         options.push(missingDefault);
     }
     options.push(...usableImages.map(image => {
-        const isDefault = image.full_name === defaultImage || !defaultImage && image.status.toLowerCase() === 'default';
+        const isDefault = isDefaultImage(image) || !defaultRef?.fullName && image.status.toLowerCase() === 'default';
         return {
             value: image.full_name,
             label: `${image.full_name}${isDefault ? ' (默认镜像)' : ''}`,
@@ -304,7 +351,7 @@ function renderSearchBox(placeholder: string, value = ''): string {
     </div>`;
 }
 
-function renderListControls(kind: 'images' | 'containers' | 'users', stateKey: string = kind): string {
+function renderListControls(kind: 'images' | 'containers' | 'users', stateKey: string = kind, extraFilter: string = ''): string {
     const options: Array<[string, string]> = kind === 'images'
         ? [['name', '名称'], ['status', '状态'], ['size', '大小'], ['created', '创建时间']]
         : kind === 'containers'
@@ -319,6 +366,7 @@ function renderListControls(kind: 'images' | 'containers' | 'users', stateKey: s
         <label class="control-inline"><span>排列依据</span>${renderStyledSelect('data-sort-select', sortOptions)}</label>
         <div class="direction-control"><span>排序顺序</span><button class="small-button sort-toggle" type="button" data-sort-toggle><span data-sort-arrow aria-hidden="true">↑</span><span data-sort-label>升序</span></button></div>
         ${kind === 'users' ? '' : `<label class="control-inline"><span>状态过滤</span>${renderStyledSelect('data-status-filter', statusSelectOptions)}</label>`}
+        ${extraFilter}
         <label class="control-inline"><span>每页数目</span>${renderStyledSelect('data-page-size', [{ value: '10', label: '10' }, { value: '20', label: '20', selected: true }, { value: '50', label: '50' }])}</label>
         <div class="pagination"><button class="small-button" type="button" data-page-action="previous" disabled>上一页</button><span data-page-indicator>第 1/1 页 · 共 0 项</span><button class="small-button" type="button" data-page-action="next" disabled>下一页</button></div>
     </div>`;
@@ -344,20 +392,25 @@ function renderContainerRow(container: AdminContainerResponse): string {
     const lifecycle = deleted
         ? { label: '删除时间', value: formatDateTime(container.deleted_at) || '未删除' }
         : { label: '删除时间 (计划)', value: container.expires_at ? formatDateTime(container.expires_at) : '永不过期' };
+    const typeBadge = container.type
+        ? `<span class="tag container-type-badge" data-container-type="${escapeAttribute(container.type)}">${escapeHtml(containerTypeLabel(container.type))}</span>`
+        : '';
     const searchText = [
         container.container_id,
         container.user_id,
         container.image,
         status,
         containerStatusLabel(container.status, deleted),
+        container.type ?? '',
+        containerTypeLabel(container.type),
         container.gitee_user,
         container.gitee_repository,
         container.gitee_branch ?? '',
         container.gitee_url,
     ].join(' ');
-    return `<article class="${rowClasses}" data-patch-key="container:${escapeAttribute(container.container_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-sort-container_id="${escapeAttribute(container.container_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
+    return `<article class="${rowClasses}" data-patch-key="container:${escapeAttribute(container.container_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-filter-type="${escapeAttribute(container.type ?? '')}" data-sort-container_id="${escapeAttribute(container.container_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
         <div class="container-card-heading">
-            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted))}</span></div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
+            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted))}</span>${typeBadge}</div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
             <button class="small-button log-button" type="button" data-action="getContainerLog" data-container-id="${escapeAttribute(container.container_id)}">日志</button>
         </div>
         <div class="container-details">
@@ -829,4 +882,35 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 body.vscode-light { color-scheme: light; }
 body.vscode-dark { color-scheme: dark; }
 body.vscode-high-contrast { color-scheme: dark; }
+
+/* ---- 层级与描边强化 ---- */
+:root { --outline-soft: var(--vscode-editorWidget-border, rgb(128 128 128 / 35%)); }
+.page-header { padding-bottom: 16px; margin-bottom: 22px; border-bottom: 1px solid var(--outline); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; margin: 24px 0 14px; border-bottom: 1px solid var(--outline); }
+.tab-panel { border-top: 1px solid var(--outline); padding-top: 6px; }
+.stats-grid { margin-bottom: 10px; }
+.overview-card, .default-banner, .inline-form, .form-card, .limit-card, .image-upload-card, .resource-row { border-width: 1px; }
+.overview-card, .inline-form, .form-card, .limit-card, .image-upload-card { box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
+.limit-card { border-color: var(--outline); }
+.resource-row { border-color: var(--outline); box-shadow: 0 1px 0 rgb(0 0 0 / 14%); }
+.container-row.status-border-success { border-color: var(--success); box-shadow: inset 0 2px 0 var(--success); }
+.container-row.status-border-warning { border-color: var(--warning); box-shadow: inset 0 2px 0 var(--warning); }
+.container-row.status-border-error { border-color: var(--danger); box-shadow: inset 0 2px 0 var(--danger); }
+.container-row.status-border-primary { border-color: var(--primary-hover); box-shadow: inset 0 2px 0 var(--primary-hover); }
+.detail-item { border-color: var(--outline-soft); }
+.list-controls { border-color: var(--outline); background: var(--surface-raised); }
+.collapsible-summary { border-bottom: 1px solid transparent; }
+.collapsible-card[open] > .collapsible-summary { border-bottom-color: var(--outline); }
+.empty-message { border-color: var(--outline-soft); background: var(--surface); }
+
+/* ---- 类型与批量检查 ---- */
+.default-banners { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.default-banner { margin-bottom: 0; }
+.default-banner { border-width: 1px; }
+.container-type-badge { border-style: dashed; color: var(--primary-hover); }
+.container-type-badge[data-container-type="autotest_cloud"] { color: var(--warning); }
+.default-type-tag { color: var(--primary-hover); }
+.image-toolbar, .tab-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.toolbar-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.form-row.type-image-row .select-wrap { width: 100%; }
 `;

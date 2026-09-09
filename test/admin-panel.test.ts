@@ -3,7 +3,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { AdminPanel } from '../src/adminPanel';
 import { ADMIN_WEBVIEW_SCRIPT } from '../src/adminWebview/script';
 import { renderAdminPage } from '../src/adminWebview/view';
-import type { AdminPanelState } from '../src/adminWebview/types';
+import type { AdminDefaultImage, AdminPanelState } from '../src/adminWebview/types';
 import { REST_ERROR_CODES, RestClientError, type AdminRestApi, type UserRestApi } from '../src/api/restClient';
 import * as vscode from './mocks/vscode';
 import { ContainerOperationRegistry } from '../src/containerOperations';
@@ -54,7 +54,9 @@ describe('AdminPanel', () => {
         expect(adminApiFactory).toHaveBeenCalledWith('https://api.example.test', 'admin-1');
         expect(adminApiFactory).toHaveBeenCalledOnce();
         expect(adminApi.listImages).toHaveBeenCalledOnce();
-        expect(adminApi.getDefaultImage).toHaveBeenCalledOnce();
+        expect(adminApi.getDefaultImage).toHaveBeenCalledWith('testagent_cloud');
+        expect(adminApi.getDefaultImage).toHaveBeenCalledWith('autotest_cloud');
+        expect(adminApi.getDefaultImage).toHaveBeenCalledTimes(2);
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
         expect(adminApi.listOrphanContainers).toHaveBeenCalledOnce();
         expect(adminApi.getState).toHaveBeenCalledOnce();
@@ -99,6 +101,51 @@ describe('AdminPanel', () => {
         expect(adminApiFactory).not.toHaveBeenCalled();
         expect(adminApi.listImages).not.toHaveBeenCalled();
         expect(adminApi.deleteAdminUser).not.toHaveBeenCalled();
+    });
+
+    it('logs permission check failures to the log channel', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const logger = { error: vi.fn() };
+        const adminPanel = createPanel({
+            userApiFactory: vi.fn(() => createUserApi(false)),
+            adminApiFactory: vi.fn(() => createAdminApi()),
+            logger,
+        });
+
+        await adminPanel.open();
+
+        expect(panel.webview.html).toContain('无权访问管理员页面');
+        expect(logger.error).toHaveBeenCalledWith(
+            '管理员面板权限校验失败',
+            expect.objectContaining({ baseUrl: 'https://api.example.test' }),
+        );
+    });
+
+    it('logs data load failures with the failing endpoint to the log channel', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.listImages = vi.fn(async () => {
+            throw new RestClientError('network', 'request_timeout', '后端服务请求超时，将自动进行重试...');
+        });
+        const logger = { error: vi.fn() };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            logger,
+        });
+
+        await adminPanel.open();
+
+        expect(panel.webview.html).toContain('管理员页面加载失败');
+        expect(logger.error).toHaveBeenCalledWith(
+            '管理员面板数据加载失败：镜像列表',
+            expect.objectContaining({ elapsedMs: expect.any(Number), error: expect.any(Error) }),
+        );
+        expect(logger.error).toHaveBeenCalledWith(
+            '管理员面板数据刷新失败',
+            expect.objectContaining({ error: expect.any(Error) }),
+        );
     });
 
     it('shows the backend error below the error summary', async () => {
@@ -229,7 +276,7 @@ describe('AdminPanel', () => {
             activeTab: 'containers',
             search: '',
             images: [],
-            defaultImage: 'registry.test:5000/testagent/missing:v1',
+            defaultImages: createDefaultImages('registry.test:5000/testagent/missing:v1', null),
             containers: [],
             orphanContainerIds: ['orphan-1', 'orphan-2'],
             stats: {
@@ -288,13 +335,14 @@ describe('AdminPanel', () => {
             'create.gitee_url',
             'create.gitee_branch',
             'create.authorize_general_account',
+            'create.type',
             'create.image',
             'create.expiration_hours',
             'create.cpu',
             'create.memory',
         ]);
 
-        const noDefaultHtml = renderAdminPage({ ...state, defaultImage: null }, 'nonce', 'vscode-resource://test');
+        const noDefaultHtml = renderAdminPage({ ...state, defaultImages: createDefaultImages(null, null) }, 'nonce', 'vscode-resource://test');
         expect(noDefaultHtml).toContain('default-banner overview-card danger');
         expect(noDefaultHtml).toContain('danger-tag">未配置');
         expect(noDefaultHtml).toContain('.default-banner.danger { border-color: var(--danger);');
@@ -401,7 +449,7 @@ describe('AdminPanel', () => {
         const defaultImageHtml = renderAdminPage({
             ...state,
             activeTab: 'images',
-            defaultImage: 'registry.test:5000/testagent/app:v1',
+            defaultImages: createDefaultImages('registry.test:5000/testagent/app:v1', null),
             images: [{
                 id: 'image-1',
                 full_name: 'registry.test:5000/testagent/app:v1',
@@ -457,6 +505,7 @@ describe('AdminPanel', () => {
 
         expect(adminApi.createContainer).toHaveBeenCalledWith({
             user_id: 'user-5',
+            type: 'testagent_cloud',
             authorize_general_account: false,
         });
     });
@@ -658,7 +707,7 @@ describe('AdminPanel', () => {
         await send(panel, { command: 'deleteOrphanContainers', orphanContainerIds: 'orphan-1,orphan-2' });
         await send(panel, { command: 'uploadImage', registry: 'registry.test:5000', namespace: 'testagent', autoPush: false });
         await send(panel, { command: 'pushImage', fullName: 'registry.test:5000/testagent/app:v1' });
-        await send(panel, { command: 'setDefaultImage', fullName: 'registry.test:5000/testagent/app:v1' });
+        await send(panel, { command: 'setDefaultImage', fullName: 'registry.test:5000/testagent/app:v1', type: 'testagent_cloud' });
         await send(panel, { command: 'unsetDefaultImage' });
         await send(panel, { command: 'deleteImage', fullName: 'registry.test:5000/testagent/app:v1', alsoRegistry: false });
         await send(panel, {
@@ -702,7 +751,10 @@ describe('AdminPanel', () => {
         expect(adminApi.getContainerLog).toHaveBeenCalledWith('container-1');
         expect(adminApi.deleteOrphanContainers).toHaveBeenCalledWith({ container_ids: ['orphan-1', 'orphan-2'] });
         expect(adminApi.pushImage).toHaveBeenCalledWith({ full_name: 'registry.test:5000/testagent/app:v1' });
-        expect(adminApi.setDefaultImage).toHaveBeenCalledWith({ full_name: 'registry.test:5000/testagent/app:v1' });
+        expect(adminApi.setDefaultImage).toHaveBeenCalledWith({
+            full_name: 'registry.test:5000/testagent/app:v1',
+            type: 'testagent_cloud',
+        });
         expect(adminApi.unsetDefaultImage).toHaveBeenCalledOnce();
         expect(adminApi.deleteImage).toHaveBeenCalledWith({
             full_name: 'registry.test:5000/testagent/app:v1',
@@ -710,6 +762,7 @@ describe('AdminPanel', () => {
         });
         expect(adminApi.createContainer).toHaveBeenCalledWith({
             user_id: 'user-2',
+            type: 'testagent_cloud',
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
@@ -722,6 +775,7 @@ describe('AdminPanel', () => {
         });
         expect(adminApi.createContainer).toHaveBeenLastCalledWith({
             user_id: 'user-4',
+            type: 'testagent_cloud',
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_url: 'https://gitee.com',
@@ -799,6 +853,78 @@ describe('AdminPanel', () => {
         expect(secondPanel.webview.html).toContain('镜像管理');
     });
 
+    it('sends the selected container type when creating a container', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-9',
+            type: 'autotest_cloud',
+            giteeMode: 'none',
+        });
+
+        expect(adminApi.createContainer).toHaveBeenCalledWith({
+            user_id: 'user-9',
+            type: 'autotest_cloud',
+            authorize_general_account: false,
+        });
+    });
+
+    it('manually checks image push states without reloading the image list', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.checkImagePushStates = vi.fn(async () => ({
+            images: [{
+                id: 'image-1',
+                full_name: 'registry.test:5000/testagent/app:v1',
+                registry: 'registry.test:5000',
+                namespace: 'testagent',
+                name: 'app',
+                version: 'v1',
+                created_at: '2026-09-04T00:00:00Z',
+                size: 1024,
+                status: 'not_pushed',
+            }],
+        }));
+        adminApi.getDefaultImage = vi.fn(async (type?: string) => ({ type: type ?? 'testagent_cloud', full_name: null }));
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        const listCallsBefore = vi.mocked(adminApi.listImages).mock.calls.length;
+        await send(panel, { command: 'checkImagePushStates' });
+
+        expect(adminApi.checkImagePushStates).toHaveBeenCalledOnce();
+        expect(vi.mocked(adminApi.listImages).mock.calls.length).toBe(listCallsBefore);
+        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'adminUpdate',
+            html: expect.stringContaining('未推送'),
+        }));
+    });
+
+    it('renders container type badges and the type filter on the containers tab', () => {
+        const html = renderAdminPage({
+            status: 'ready',
+            activeTab: 'containers',
+            search: '',
+            images: [],
+            defaultImages: createDefaultImages(null, null),
+            containers: [{ ...sampleContainer(), type: 'autotest_cloud' }],
+            orphanContainerIds: [],
+            whitelistUsers: [],
+            adminUsers: [],
+        }, 'nonce', 'vscode-resource://test');
+
+        expect(html).toContain('data-type-filter');
+        expect(html).toContain('container-type-badge');
+        expect(html).toContain('data-filter-type="autotest_cloud"');
+        expect(html).toContain('自动化跑批');
+    });
+
     it('keeps the webview script valid and the page free of direct REST calls or theme controls', () => {
         expect(() => new Script(ADMIN_WEBVIEW_SCRIPT)).not.toThrow();
         expect(ADMIN_WEBVIEW_SCRIPT).not.toContain('fetch(');
@@ -831,6 +957,7 @@ function createUserApi(admin: boolean): UserRestApi {
     return {
         createContainer: vi.fn(),
         getContainerIds: vi.fn(),
+        getContainerStatuses: vi.fn(),
         getContainer: vi.fn(),
         checkAdmin: vi.fn(async () => ({ admin })),
         startContainer: vi.fn(),
@@ -858,7 +985,11 @@ function createAdminApi(): AdminRestApi {
             }],
         })),
         deleteImage: vi.fn(async () => undefined),
-        getDefaultImage: vi.fn(async () => ({ full_name: 'registry.test:5000/testagent/app:v1' })),
+        getDefaultImage: vi.fn(async (type?: string) => ({
+            type: type ?? 'testagent_cloud',
+            full_name: 'registry.test:5000/testagent/app:v1',
+        })),
+        checkImagePushStates: vi.fn(async () => ({ images: [] })),
         setDefaultImage: vi.fn(async () => undefined),
         unsetDefaultImage: vi.fn(async () => undefined),
             createContainer: vi.fn(async () => sampleContainer()),
@@ -890,6 +1021,13 @@ function createAdminApi(): AdminRestApi {
         listAdminUsers: vi.fn(async () => ({ user_ids: ['admin-2'] })),
         deleteAdminUser: vi.fn(async () => undefined),
     };
+}
+
+function createDefaultImages(testagentCloud: string | null, autotestCloud: string | null): AdminDefaultImage[] {
+    return [
+        { type: 'testagent_cloud', fullName: testagentCloud },
+        { type: 'autotest_cloud', fullName: autotestCloud },
+    ];
 }
 
 function sampleContainer() {

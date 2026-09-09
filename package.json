@@ -2,7 +2,7 @@
 	"name": "tscode-remote-ssh",
 	"displayName": "TSCode Remote",
 	"description": "连接至 TestAgent Cloud 服务",
-	"version": "1.0.0",
+	"version": "1.0.3",
 	"publisher": "test-tech",
 	"engines": {
 		"vscode": "^1.70.2"

@@ -1,5 +1,8 @@
+export type ContainerTypeValue = 'testagent_cloud' | 'autotest_cloud';
+
 export interface UserCreateContainerRequest {
     user_id: string;
+    type?: ContainerTypeValue;
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;
@@ -22,7 +25,7 @@ export interface ContainerIdsResponse {
 
 export interface ContainerStatusResponse {
     container_id: string;
-    type?: string | null;
+    type?: ContainerTypeValue | null;
     novnc_url?: string | null;
     status: string;
     endpoint?: string | null;
@@ -34,9 +37,13 @@ export interface ContainerStatusResponse {
     gitee_repository: string;
 }
 
+export interface ContainerStatusListResponse {
+    containers: ContainerStatusResponse[];
+}
+
 export interface CreateContainerResponse {
     container_id: string;
-    type?: string | null;
+    type?: ContainerTypeValue | null;
     novnc_url?: string | null;
     status: string;
     endpoint?: string | null;
@@ -54,6 +61,7 @@ export interface AdminCheckResponse {
 
 export interface AdminCreateContainerRequest {
     user_id: string;
+    type?: ContainerTypeValue;
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;
@@ -67,6 +75,8 @@ export interface AdminCreateContainerRequest {
 
 export interface AdminContainerResponse {
     container_id: string;
+    type?: ContainerTypeValue | null;
+    novnc_url?: string | null;
     status: string;
     endpoint?: string | null;
     started_at?: string | null;
@@ -131,6 +141,11 @@ export interface ImageReferenceRequest {
     full_name: string;
 }
 
+export interface SetDefaultImageRequest {
+    full_name: string;
+    type: ContainerTypeValue;
+}
+
 export interface ImageDeleteRequest {
     full_name: string;
     also_registry?: boolean;
@@ -154,6 +169,7 @@ export interface ImageListResponse {
 
 export interface DefaultImageResponse {
     full_name?: string | null;
+    type?: string | null;
 }
 
 export interface UserIdRequest {

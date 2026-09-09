@@ -869,6 +869,7 @@ function createUserApi(admin: boolean): UserRestApi {
     return {
         createContainer: vi.fn(async () => ({ container_id: 'container-1', status: 'pending' })),
         getContainerIds: vi.fn(async () => ({ container_ids: [] })),
+        getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => ({
             container_id: 'container-1',
             status: 'running',

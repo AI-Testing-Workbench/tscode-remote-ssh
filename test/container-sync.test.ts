@@ -6,6 +6,7 @@ import { ContainerConfig } from '../src/containerConfig';
 import { ContainerSync, getHostFromEndpoint, getUniqueHostName } from '../src/containerSync';
 import { ContainerOperationRegistry } from '../src/containerOperations';
 import { RestClientError, UserRestApi } from '../src/api/restClient';
+import { ContainerStatusResponse } from '../src/api/models';
 
 const temporaryDirectories: string[] = [];
 
@@ -22,22 +23,20 @@ afterEach(async () => {
 describe('ContainerSync', () => {
     it('adds new remote containers, deduplicates IDs, and reports missing endpoints per container', async () => {
         const store = await createStore();
-        const getContainerIds = vi.fn(async () => ({ container_ids: ['container-1', 'container-1', 'container-2'] }));
-        const getContainer = vi.fn(async (containerId: string) => ({
-            container_id: containerId,
-            status: containerId === 'container-1' ? 'running' : 'stopped',
-            endpoint: containerId === 'container-1' ? '10.0.0.1:22' : null,
-            gitee_user: containerId === 'container-1' ? 'alice' : '',
-            gitee_repository: containerId === 'container-1' ? 'repo' : '',
+        const getContainerStatuses = vi.fn(async () => ({
+            containers: [
+                status('container-1', 'running', '10.0.0.1:22', 'alice', 'repo'),
+                status('container-1', 'running', '10.0.0.1:22', 'alice', 'repo'),
+                status('container-2', 'stopped', null, '', ''),
+            ],
         }));
-        const sync = createSync(store, { getContainerIds, getContainer }, {
+        const sync = createSync(store, { getContainerStatuses }, {
             skipKnownHostsCheck: true,
         });
 
         const result = await sync.sync();
 
-        expect(getContainerIds).toHaveBeenCalledOnce();
-        expect(getContainer).toHaveBeenCalledTimes(2);
+        expect(getContainerStatuses).toHaveBeenCalledOnce();
         expect(result.changed).toBe(true);
         expect(result.containers).toEqual([
             {
@@ -85,10 +84,7 @@ describe('ContainerSync', () => {
         store.upsertContainer(document.config, { containerId: 'legacy', host: 'legacy-host' });
         await store.write(document);
 
-        const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: [] })),
-            getContainer: vi.fn(),
-        }, { userName: '' });
+        const sync = createSync(store, emptyBatch(), { userName: '' });
 
         await sync.sync();
 
@@ -98,15 +94,16 @@ describe('ContainerSync', () => {
     it('propagates API resource usage values, including unavailable metrics', async () => {
         const store = await createStore();
         const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: ['container-usage'] })),
-            getContainer: vi.fn(async () => ({
-                container_id: 'container-usage',
-                status: 'running',
-                endpoint: '10.0.0.4:22',
-                cpu_usage: 12.5,
-                memory_usage: null,
-                gitee_user: '',
-                gitee_repository: '',
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [{
+                    container_id: 'container-usage',
+                    status: 'running',
+                    endpoint: '10.0.0.4:22',
+                    cpu_usage: 12.5,
+                    memory_usage: null,
+                    gitee_user: '',
+                    gitee_repository: '',
+                }],
             })),
         });
 
@@ -126,13 +123,10 @@ describe('ContainerSync', () => {
 
         let present = false;
         const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: present ? ['container-3'] : [] })),
-            getContainer: vi.fn(async () => ({
-                container_id: 'container-3',
-                status: 'running',
-                endpoint: '10.0.0.3:22',
-                gitee_user: '',
-                gitee_repository: '',
+            getContainerStatuses: vi.fn(async () => ({
+                containers: present
+                    ? [status('container-3', 'running', '10.0.0.3:22', '', '')]
+                    : [],
             })),
         }, {
             skipKnownHostsCheck: false,
@@ -170,8 +164,7 @@ describe('ContainerSync', () => {
         await store.write(document);
 
         const userApi = {
-            getContainerIds: vi.fn(async () => ({ container_ids: [] })),
-            getContainer: vi.fn(),
+            getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         } as unknown as UserRestApi;
         const sync = new ContainerSync({
             config: store,
@@ -212,64 +205,24 @@ describe('ContainerSync', () => {
         expect(store.list((await store.read()).config).map(entry => entry.containerId)).toEqual(['middle', 'newest']);
     });
 
-    it('isolates status failures and preserves the rest of the sync', async () => {
+    it('surfaces a batch status failure as a sync error', async () => {
         const store = await createStore();
         const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: ['missing-status', 'healthy'] })),
-            getContainer: vi.fn(async (containerId: string) => {
-                if (containerId === 'missing-status') {
-                    throw new RestClientError('http', 'container_not_found', 'TestAgent Cloud 服务不存在', 404);
-                }
-                return {
-                    container_id: containerId,
-                    status: 'running',
-                    endpoint: '10.0.0.20:22',
-                    gitee_user: 'alice',
-                    gitee_repository: 'healthy',
-                };
+            getContainerStatuses: vi.fn(async () => {
+                throw new RestClientError('http', 'backend_error', 'TestAgent Cloud 服务异常', 502);
             }),
         });
 
         const result = await sync.sync();
 
-        expect(result.error).toBeUndefined();
-        expect(result.containers).toEqual([
-            {
-                containerId: 'missing-status',
-                host: 'TestAgent Cloud 服务',
-                status: 'unknown',
-                endpoint: undefined,
-                startedAt: undefined,
-                expiresAt: undefined,
-                containerType: null,
-                novncUrl: null,
-                remote: true,
-                error: {
-                    code: 'container_not_found',
-                    message: 'TestAgent Cloud 服务不存在',
-                },
-            },
-            {
-                containerId: 'healthy',
-                host: 'alice/healthy',
-                hostName: '10.0.0.20',
-                port: 22,
-                status: 'running',
-                endpoint: '10.0.0.20:22',
-                startedAt: undefined,
-                expiresAt: undefined,
-                containerType: null,
-                novncUrl: null,
-                remote: true,
-            },
-        ]);
-        expect((await fs.readFile(store.filePath, 'utf8'))).toContain('ContainerId healthy');
+        expect(result.error).toMatchObject({ code: 'backend_error' });
+        expect(result.containers).toEqual([]);
     });
 
     it('does not call the API for an empty URL or empty user ID', async () => {
         const store = await createStore();
-        const getContainerIds = vi.fn(async () => ({ container_ids: [] }));
-        const userApi = { getContainerIds } as unknown as UserRestApi;
+        const getContainerStatuses = vi.fn();
+        const userApi = { getContainerStatuses } as unknown as UserRestApi;
         const emptyUrl = new ContainerSync({
             config: store,
             userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
@@ -277,7 +230,7 @@ describe('ContainerSync', () => {
             getSettings: () => ({ userName: 'root', backendApiUrl: '', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false, disableClientValidation: true }),
         });
         expect((await emptyUrl.sync()).error?.code).toBe('api_url_missing');
-        expect(getContainerIds).not.toHaveBeenCalled();
+        expect(getContainerStatuses).not.toHaveBeenCalled();
 
         const emptyUser = new ContainerSync({
             config: store,
@@ -286,19 +239,18 @@ describe('ContainerSync', () => {
             getSettings: () => ({ userName: 'root', backendApiUrl: 'http://api.example.test', skipKnownHostsCheck: true, historyLimit: 5, statusSyncInterval: 5, debug: false, disableClientValidation: true }),
         });
         expect((await emptyUser.sync()).error?.code).toBe('user_id_missing');
-        expect(getContainerIds).not.toHaveBeenCalled();
+        expect(getContainerStatuses).not.toHaveBeenCalled();
     });
 
     it('creates unique descriptive Host aliases from Gitee fields', async () => {
         const store = await createStore();
         const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: ['one', 'two', 'three'] })),
-            getContainer: vi.fn(async (containerId: string) => ({
-                container_id: containerId,
-                status: 'running',
-                endpoint: `10.0.0.${containerId === 'one' ? '1' : containerId === 'two' ? '2' : '3'}:22`,
-                gitee_user: containerId === 'three' ? '' : 'alice',
-                gitee_repository: containerId === 'three' ? '' : 'repo',
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [
+                    status('one', 'running', '10.0.0.1:22', 'alice', 'repo'),
+                    status('two', 'running', '10.0.0.2:22', 'alice', 'repo'),
+                    status('three', 'running', '10.0.0.3:22', '', ''),
+                ],
             })),
         });
 
@@ -324,13 +276,11 @@ describe('ContainerSync', () => {
         await store.write(document);
 
         const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: ['one', 'two'] })),
-            getContainer: vi.fn(async (containerId: string) => ({
-                container_id: containerId,
-                status: 'running',
-                endpoint: containerId === 'one' ? '10.0.0.1:22' : '10.0.0.2:22',
-                gitee_user: 'alice',
-                gitee_repository: 'repo',
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [
+                    status('one', 'running', '10.0.0.1:22', 'alice', 'repo'),
+                    status('two', 'running', '10.0.0.2:22', 'alice', 'repo'),
+                ],
             })),
         });
 
@@ -354,13 +304,14 @@ describe('ContainerSync', () => {
             config: store,
             userIdProvider: { getCurrentUserId: async () => 'user-1' },
             userApi: {
-                getContainerIds: vi.fn(async () => ({ container_ids: ['invalid'] })),
-                getContainer: vi.fn(async () => ({
-                    container_id: 'invalid',
-                    status: 'running',
-                    endpoint: 'example.com:22',
-                    gitee_user: 'alice',
-                    gitee_repository: 'repo',
+                getContainerStatuses: vi.fn(async () => ({
+                    containers: [{
+                        container_id: 'invalid',
+                        status: 'running',
+                        endpoint: 'example.com:22',
+                        gitee_user: 'alice',
+                        gitee_repository: 'repo',
+                    }],
                 })),
             } as unknown as UserRestApi,
             getSettings: () => ({
@@ -395,13 +346,14 @@ describe('ContainerSync', () => {
     it('accepts and stores only the IP and port from a debug proxy endpoint when enabled', async () => {
         const store = await createStore();
         const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: ['debug-container'] })),
-            getContainer: vi.fn(async () => ({
-                container_id: 'debug-container',
-                status: 'running',
-                endpoint: '10.0.0.30:2200/proxy/XX',
-                gitee_user: 'alice',
-                gitee_repository: 'debug-repo',
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [{
+                    container_id: 'debug-container',
+                    status: 'running',
+                    endpoint: '10.0.0.30:2200/proxy/XX',
+                    gitee_user: 'alice',
+                    gitee_repository: 'debug-repo',
+                }],
             })),
         }, { debug: true });
 
@@ -423,21 +375,18 @@ describe('ContainerSync', () => {
 
     it('coalesces concurrent sync calls', async () => {
         const store = await createStore();
-        let resolveIds: ((value: { container_ids: string[] }) => void) | undefined;
-        const getContainerIds = vi.fn(() => new Promise<{ container_ids: string[] }>(resolve => {
-            resolveIds = resolve;
+        let resolveBatch: ((value: { containers: ContainerStatusResponse[] }) => void) | undefined;
+        const getContainerStatuses = vi.fn(() => new Promise<{ containers: ContainerStatusResponse[] }>(resolve => {
+            resolveBatch = resolve;
         }));
-        const sync = createSync(store, {
-            getContainerIds,
-            getContainer: vi.fn(),
-        });
+        const sync = createSync(store, { getContainerStatuses });
 
         const first = sync.sync();
         const second = sync.sync();
         expect(second).toBe(first);
-        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledOnce());
-        expect(getContainerIds).toHaveBeenCalledOnce();
-        resolveIds?.({ container_ids: [] });
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledOnce());
+        expect(getContainerStatuses).toHaveBeenCalledOnce();
+        resolveBatch?.({ containers: [] });
         await first;
     });
 
@@ -446,11 +395,8 @@ describe('ContainerSync', () => {
         const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
         const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
         const store = await createStore();
-        const getContainerIds = vi.fn(async () => ({ container_ids: [] }));
-        const sync = createSync(store, {
-            getContainerIds,
-            getContainer: vi.fn(),
-        }, {
+        const getContainerStatuses = vi.fn(async () => ({ containers: [] }));
+        const sync = createSync(store, { getContainerStatuses }, {
             backendApiUrl: 'http://api.example.test',
             statusSyncInterval: 2.5,
             debug: false,
@@ -460,30 +406,29 @@ describe('ContainerSync', () => {
         sync.start();
         expect(setIntervalSpy).toHaveBeenCalledOnce();
         expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2500);
-        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledOnce());
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledOnce());
 
         await vi.advanceTimersByTimeAsync(2500);
-        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledTimes(2));
 
         sync.dispose();
         expect(clearIntervalSpy).toHaveBeenCalledOnce();
         await vi.advanceTimersByTimeAsync(10_000);
-        expect(getContainerIds).toHaveBeenCalledTimes(2);
+        expect(getContainerStatuses).toHaveBeenCalledTimes(2);
     });
 
     it('does not notify the sidebar after an in-flight sync is disposed', async () => {
         const store = await createStore();
-        let resolveIds: ((value: { container_ids: string[] }) => void) | undefined;
-        const getContainerIds = vi.fn(() => new Promise<{ container_ids: string[] }>(resolve => {
-            resolveIds = resolve;
+        let resolveBatch: ((value: { containers: ContainerStatusResponse[] }) => void) | undefined;
+        const getContainerStatuses = vi.fn(() => new Promise<{ containers: ContainerStatusResponse[] }>(resolve => {
+            resolveBatch = resolve;
         }));
         const onSync = vi.fn();
         const sync = new ContainerSync({
             config: store,
             userIdProvider: { getCurrentUserId: async () => 'user-1' },
             userApi: {
-                getContainerIds,
-                getContainer: vi.fn(),
+                getContainerStatuses,
             } as unknown as UserRestApi,
             getSettings: () => ({
                 backendApiUrl: 'http://api.example.test',
@@ -498,19 +443,16 @@ describe('ContainerSync', () => {
         });
 
         const pending = sync.sync();
-        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledOnce());
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledOnce());
         sync.dispose();
-        resolveIds?.({ container_ids: [] });
+        resolveBatch?.({ containers: [] });
         await pending;
         expect(onSync).not.toHaveBeenCalled();
     });
 
     it('makes manual refresh use the same in-flight sync promise', async () => {
         const store = await createStore();
-        const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: [] })),
-            getContainer: vi.fn(),
-        }, { backendApiUrl: '' });
+        const sync = createSync(store, emptyBatch(), { backendApiUrl: '' });
 
         const first = sync.sync();
         expect(sync.refresh()).toBe(first);
@@ -519,35 +461,29 @@ describe('ContainerSync', () => {
 
     it('runs a fresh sync after an in-flight sync for a mutation', async () => {
         const store = await createStore();
-        const resolvers: Array<(value: { container_ids: string[] }) => void> = [];
-        const getContainerIds = vi.fn(() => new Promise<{ container_ids: string[] }>(resolve => {
+        const resolvers: Array<(value: { containers: ContainerStatusResponse[] }) => void> = [];
+        const getContainerStatuses = vi.fn(() => new Promise<{ containers: ContainerStatusResponse[] }>(resolve => {
             resolvers.push(resolve);
         }));
-        const sync = createSync(store, {
-            getContainerIds,
-            getContainer: vi.fn(),
-        });
+        const sync = createSync(store, { getContainerStatuses });
 
         const first = sync.sync();
-        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledOnce());
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledOnce());
         const forced = sync.refreshAfterMutation();
         expect(sync.refreshAfterMutation()).toBe(forced);
         expect(forced).not.toBe(first);
 
-        resolvers.shift()?.({ container_ids: [] });
-        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledTimes(2));
-        resolvers.shift()?.({ container_ids: [] });
+        resolvers.shift()?.({ containers: [] });
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledTimes(2));
+        resolvers.shift()?.({ containers: [] });
         await first;
         await forced;
     });
 
     it('blocks synchronization while a mutation owns the config boundary', async () => {
         const store = await createStore();
-        const getContainerIds = vi.fn(async () => ({ container_ids: [] }));
-        const sync = createSync(store, {
-            getContainerIds,
-            getContainer: vi.fn(),
-        });
+        const getContainerStatuses = vi.fn(async () => ({ containers: [] }));
+        const sync = createSync(store, { getContainerStatuses });
         let releaseMutation: (() => void) | undefined;
         let mutationStarted = false;
         const mutation = sync.runMutation(async () => {
@@ -559,11 +495,11 @@ describe('ContainerSync', () => {
         const waitingSync = sync.sync();
 
         await vi.waitFor(() => expect(mutationStarted).toBe(true));
-        expect(getContainerIds).not.toHaveBeenCalled();
+        expect(getContainerStatuses).not.toHaveBeenCalled();
         releaseMutation?.();
         await mutation;
         await waitingSync;
-        expect(getContainerIds).toHaveBeenCalledOnce();
+        expect(getContainerStatuses).toHaveBeenCalledOnce();
     });
 
     it('suppresses a stale remote ID after local deletion until the cloud confirms removal', async () => {
@@ -575,8 +511,9 @@ describe('ContainerSync', () => {
 
         let remoteIds = ['deleted-1'];
         const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: remoteIds })),
-            getContainer: vi.fn(),
+            getContainerStatuses: vi.fn(async () => ({
+                containers: remoteIds.map(id => status(id, 'running', '10.0.0.1:22', '', '')),
+            })),
         });
         sync.markContainerDeleted('deleted-1');
 
@@ -591,30 +528,22 @@ describe('ContainerSync', () => {
 
     it('keeps an external lifecycle operation active until a fresh sync confirms the target state', async () => {
         const store = await createStore();
-        let status = 'running';
+        let statusValue = 'running';
         const registry = new ContainerOperationRegistry();
-        const getContainer = vi.fn(async () => ({
-            container_id: 'container-1',
-            status,
-            endpoint: '10.0.0.1:22',
-            gitee_user: '',
-            gitee_repository: '',
+        const getContainerStatuses = vi.fn(async () => ({
+            containers: [status('container-1', statusValue, '10.0.0.1:22', '', '')],
         }));
-        const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: ['container-1'] })),
-            getContainer,
-        }, {}, registry);
+        const sync = createSync(store, { getContainerStatuses }, {}, registry);
         registry.begin('container-1', 'stop', 'admin');
 
         await sync.sync();
         expect(registry.get('container-1')).toMatchObject({ phase: 'processing', action: 'stop' });
-        expect(getContainer).not.toHaveBeenCalled();
 
         registry.setPhase('container-1', 'reconciling');
 
-        status = 'stopped';
+        statusValue = 'stopped';
         await sync.sync();
-        expect(getContainer).toHaveBeenCalledOnce();
+        expect(getContainerStatuses).toHaveBeenCalled();
         expect(registry.get('container-1')).toBeUndefined();
     });
 
@@ -628,25 +557,17 @@ describe('ContainerSync', () => {
         });
         await store.write(document);
 
-        let remoteIds: string[] = [];
+        let remote: ContainerStatusResponse[] = [];
         const registry = new ContainerOperationRegistry();
-        const sync = createSync(store, {
-            getContainerIds: vi.fn(async () => ({ container_ids: remoteIds })),
-            getContainer: vi.fn(async () => ({
-                container_id: 'container-restore',
-                status: 'running',
-                endpoint: '10.0.0.9:22',
-                gitee_user: '',
-                gitee_repository: '',
-            })),
-        }, {}, registry);
+        const getContainerStatuses = vi.fn(async () => ({ containers: remote }));
+        const sync = createSync(store, { getContainerStatuses }, {}, registry);
         registry.begin('container-restore', 'restore', 'admin');
         registry.setPhase('container-restore', 'reconciling');
 
         await sync.sync();
         expect(registry.get('container-restore')).toBeDefined();
 
-        remoteIds = ['container-restore'];
+        remote = [status('container-restore', 'running', '10.0.0.9:22', '', '')];
         await sync.sync();
         expect(registry.get('container-restore')).toBeUndefined();
     });
@@ -668,9 +589,29 @@ async function createStore(): Promise<ContainerConfig> {
     return new ContainerConfig(path.join(directory, 'testagent'));
 }
 
+function status(
+    containerId: string,
+    statusValue: string,
+    endpoint: string | null,
+    giteeUser: string,
+    giteeRepository: string,
+): ContainerStatusResponse {
+    return {
+        container_id: containerId,
+        status: statusValue,
+        ...(endpoint !== null ? { endpoint } : { endpoint: null }),
+        gitee_user: giteeUser,
+        gitee_repository: giteeRepository,
+    };
+}
+
+function emptyBatch(): Pick<UserRestApi, 'getContainerStatuses'> {
+    return { getContainerStatuses: vi.fn(async () => ({ containers: [] })) };
+}
+
 function createSync(
     store: ContainerConfig,
-    api: Pick<UserRestApi, 'getContainerIds' | 'getContainer'>,
+    api: Pick<UserRestApi, 'getContainerStatuses'>,
     settings: Partial<ReturnType<NonNullable<ContainerSyncOptionsForTest['getSettings']>>> = {},
     operationRegistry?: ContainerOperationRegistry,
 ): ContainerSync {

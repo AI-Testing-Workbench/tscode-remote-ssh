@@ -60,9 +60,9 @@ describe('RestClient', () => {
         await client.admin.pushImage({ full_name: 'registry/ns/app:v1' });
         await client.admin.listImages();
         await client.admin.deleteImage({ full_name: 'registry/ns/app:v1', also_registry: false });
-        await client.admin.getDefaultImage();
-        await client.admin.setDefaultImage({ full_name: 'registry/ns/app:v1' });
-        await client.admin.unsetDefaultImage();
+        await client.admin.getDefaultImage('autotest_cloud');
+        await client.admin.setDefaultImage({ full_name: 'registry/ns/app:v1', type: 'autotest_cloud' });
+        await client.admin.unsetDefaultImage('autotest_cloud');
         await client.admin.createContainer({ user_id: 'user-1' });
         await client.admin.listContainers();
         await client.admin.listOrphanContainers();
@@ -85,6 +85,7 @@ describe('RestClient', () => {
         await client.admin.addAdminUser({ user_id: 'user-1' });
         await client.admin.listAdminUsers();
         await client.admin.deleteAdminUser({ user_id: 'user-1' });
+        await client.admin.checkImagePushStates();
 
         expect(requests.map(request => `${request.method} ${request.url.pathname}`)).toEqual([
             'POST /v1/user/containers',
@@ -124,6 +125,7 @@ describe('RestClient', () => {
             'POST /v1/admin/admin-users',
             'GET /v1/admin/admin-users',
             'POST /v1/admin/admin-users/delete',
+            'POST /v1/admin/images/check',
         ]);
 
         expect(requests[1].url.search).toBe('?user_id=user-1&gitee_user=alice&gitee_repository=repo&gitee_branch=main');

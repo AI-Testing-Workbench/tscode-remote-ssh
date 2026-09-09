@@ -1,9 +1,11 @@
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import type { Log } from './common/logger';
 import {
     AdminCreateContainerRequest,
     ContainerLimitRequest,
+    ContainerTypeValue,
     ExpirationRequest,
     ImageDeleteRequest,
     UploadImageFileInput,
@@ -22,16 +24,18 @@ import { getRemoteSettings, RemoteSettings } from './settings';
 import { UserIdProvider } from './user';
 import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository';
 import { renderAdminContent, renderAdminPage } from './adminWebview/view';
-import { AdminPanelState, AdminTab } from './adminWebview/types';
+import { ADMIN_CONTAINER_TYPES, containerTypeOf } from './adminWebview/containerTypes';
+import { AdminDefaultImage, AdminPanelState, AdminTab } from './adminWebview/types';
 
 export const ADMIN_PANEL_VIEW_TYPE = 'testagentRemote.adminPanel';
 export const ADMIN_PANEL_TITLE = '管理员页面';
 const OPERATION_RECONCILIATION_TIMEOUT_MS = 60_000;
 
 type UserIdSource = Pick<UserIdProvider, 'getCurrentUserId'>;
+type PanelLogger = Pick<Log, 'error'>;
 type ShowOpenDialog = (options?: vscode.OpenDialogOptions) => Thenable<vscode.Uri[] | undefined>;
 type AdminApiFactory = (baseUrl: string, operatorUserId: string) => AdminRestApi;
-type AdminData = Pick<AdminPanelState, 'images' | 'defaultImage' | 'containers' | 'orphanContainerIds' | 'stats' | 'limit' | 'whitelistUsers' | 'adminUsers'>;
+type AdminData = Pick<AdminPanelState, 'images' | 'defaultImages' | 'containers' | 'orphanContainerIds' | 'stats' | 'limit' | 'whitelistUsers' | 'adminUsers'>;
 
 export interface AdminPanelOptions {
     userIdProvider?: UserIdSource;
@@ -41,6 +45,7 @@ export interface AdminPanelOptions {
     operationRegistry?: ContainerOperationRegistry;
     onContainerOperation?: (operation: ContainerOperationState) => Promise<boolean>;
     showOpenDialog?: ShowOpenDialog;
+    logger?: PanelLogger;
 }
 
 export class AdminPanel implements vscode.Disposable {
@@ -51,6 +56,7 @@ export class AdminPanel implements vscode.Disposable {
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly onContainerOperation: ((operation: ContainerOperationState) => Promise<boolean>) | undefined;
     private readonly showOpenDialog: ShowOpenDialog;
+    private readonly logger: PanelLogger | undefined;
 
     private panel: vscode.WebviewPanel | undefined;
     private selectedImageFile: { fsPath: string; filename: string } | undefined;
@@ -78,8 +84,9 @@ export class AdminPanel implements vscode.Disposable {
         this.adminApiFactory = options.adminApiFactory ?? ((baseUrl: string, operatorUserId: string) => new RestClient(baseUrl, { operatorUserId }).admin);
         this.operationRegistry = options.operationRegistry;
         this.onContainerOperation = options.onContainerOperation;
-        this.showOpenDialog = options.showOpenDialog ?? (dialogOptions => vscode.window.showOpenDialog(dialogOptions));
         this.operationSubscription = this.operationRegistry?.subscribe(event => this.handleContainerOperationEvent(event)) ?? { dispose: () => undefined };
+        this.logger = options.logger;
+        this.showOpenDialog = options.showOpenDialog ?? (dialogOptions => vscode.window.showOpenDialog(dialogOptions));
     }
 
     public open(): Promise<void> {
@@ -239,6 +246,14 @@ export class AdminPanel implements vscode.Disposable {
                 }
                 return;
             }
+            if (message.command === 'checkImagePushStates') {
+                const list = await adminApi.checkImagePushStates();
+                if (this.isActive(panel, generation)) {
+                    this.state.images = list.images;
+                    this.postAdminUpdate(panel, generation);
+                }
+                return;
+            }
             const changed = await this.executeAction(adminApi, message);
             if (changed) {
                 await this.refresh(panel, generation, false, true);
@@ -263,11 +278,13 @@ export class AdminPanel implements vscode.Disposable {
     }
 
     private async authorize(panel: vscode.WebviewPanel, generation: number, showError = true): Promise<AdminRestApi | undefined> {
+        let baseUrl = '';
         try {
             const settings = this.getSettings();
             if (!settings.backendApiUrl) {
                 throw new Error('未配置后端 TestAgent Cloud 管理服务的 API 地址');
             }
+            baseUrl = settings.backendApiUrl;
 
             const userId = (await this.userIdProvider.getCurrentUserId()).trim();
             if (!userId) {
@@ -284,6 +301,7 @@ export class AdminPanel implements vscode.Disposable {
             }
             return this.adminApiFactory(settings.backendApiUrl, userId);
         } catch (error) {
+            this.logger?.error('管理员面板权限校验失败', { baseUrl, error });
             if (showError && this.isActive(panel, generation)) {
                 this.showPageError(error);
             }
@@ -316,7 +334,7 @@ export class AdminPanel implements vscode.Disposable {
             }
 
             try {
-                const data = await loadAdminData(adminApi);
+                const data = await loadAdminData(adminApi, this.logger);
                 if (!this.isActive(panel, generation)) {
                     return;
                 }
@@ -337,6 +355,7 @@ export class AdminPanel implements vscode.Disposable {
                     }
                 }
             } catch (error) {
+                this.logger?.error('管理员面板数据刷新失败', { error });
                 if ((showLoading || allowDuringOperation) && this.isActive(panel, generation)) {
                     this.showPageError(error);
                 }
@@ -383,10 +402,13 @@ export class AdminPanel implements vscode.Disposable {
                 await adminApi.pushImage({ full_name: requireText(message.fullName, '镜像名称不能为空') });
                 return true;
             case 'setDefaultImage':
-                await adminApi.setDefaultImage({ full_name: requireText(message.fullName, '镜像名称不能为空') });
+                await adminApi.setDefaultImage({
+                    full_name: requireText(message.fullName, '镜像名称不能为空'),
+                    type: requireContainerType(message.type),
+                });
                 return true;
             case 'unsetDefaultImage':
-                await adminApi.unsetDefaultImage();
+                await adminApi.unsetDefaultImage(containerTypeOf(message.type));
                 return true;
             case 'deleteImage':
                 return this.deleteImage(adminApi, message);
@@ -847,6 +869,7 @@ export class AdminPanel implements vscode.Disposable {
 const ADMIN_ACTIONS = new Set([
     'uploadImage',
     'pushImage',
+    'checkImagePushStates',
     'setDefaultImage',
     'unsetDefaultImage',
     'deleteImage',
@@ -870,7 +893,7 @@ function createInitialState(): AdminPanelState {
         activeTab: 'images',
         search: '',
         images: [],
-        defaultImage: null,
+        defaultImages: ADMIN_CONTAINER_TYPES.map(entry => ({ type: entry.type, fullName: null })),
         containers: [],
         orphanContainerIds: [],
         whitelistUsers: [],
@@ -878,20 +901,30 @@ function createInitialState(): AdminPanelState {
     };
 }
 
-async function loadAdminData(adminApi: AdminRestApi): Promise<AdminData> {
-    const [images, defaultImage, containers, orphanContainers, stats, limit, whitelistUsers, adminUsers] = await Promise.all([
-        adminApi.listImages(),
-        adminApi.getDefaultImage(),
-        adminApi.listContainers(),
-        adminApi.listOrphanContainers(),
-        adminApi.getState(),
-        adminApi.getContainerLimit(),
-        adminApi.listWhitelistUsers(),
-        adminApi.listAdminUsers(),
+async function loadAdminData(adminApi: AdminRestApi, logger?: PanelLogger): Promise<AdminData> {
+    const request = async <T>(label: string, operation: () => Promise<T>): Promise<T> => {
+        const startedAt = Date.now();
+        try {
+            return await operation();
+        } catch (error) {
+            logger?.error(`管理员面板数据加载失败：${label}`, { elapsedMs: Date.now() - startedAt, error });
+            throw error;
+        }
+    };
+
+    const [images, defaultImages, containers, orphanContainers, stats, limit, whitelistUsers, adminUsers] = await Promise.all([
+        request('镜像列表', () => adminApi.listImages()),
+        request('默认镜像', () => loadDefaultImages(adminApi)),
+        request('容器列表', () => adminApi.listContainers()),
+        request('孤儿容器列表', () => adminApi.listOrphanContainers()),
+        request('服务状态', () => adminApi.getState()),
+        request('容器数量限制', () => adminApi.getContainerLimit()),
+        request('白名单用户列表', () => adminApi.listWhitelistUsers()),
+        request('管理员用户列表', () => adminApi.listAdminUsers()),
     ]);
     return {
         images: images.images,
-        defaultImage: defaultImage.full_name ?? null,
+        defaultImages,
         containers: containers.containers,
         orphanContainerIds: orphanContainers.container_ids,
         stats,
@@ -901,10 +934,18 @@ async function loadAdminData(adminApi: AdminRestApi): Promise<AdminData> {
     };
 }
 
+async function loadDefaultImages(adminApi: AdminRestApi): Promise<AdminDefaultImage[]> {
+    const pairs = await Promise.all(ADMIN_CONTAINER_TYPES.map(async entry => {
+        const response = await adminApi.getDefaultImage(entry.type);
+        return { type: entry.type, fullName: response.full_name ?? null };
+    }));
+    return pairs;
+}
+
 function hasAdminDataChanged(previous: AdminPanelState, next: AdminData): boolean {
     return JSON.stringify({
         images: previous.images,
-        defaultImage: previous.defaultImage,
+        defaultImages: previous.defaultImages,
         containers: previous.containers,
         orphanContainerIds: previous.orphanContainerIds,
         stats: previous.stats,
@@ -917,6 +958,7 @@ function hasAdminDataChanged(previous: AdminPanelState, next: AdminData): boolea
 function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateContainerRequest {
     const request: AdminCreateContainerRequest = {
         user_id: requireText(message.user_id, '用户 ID 不能为空'),
+        type: containerTypeOf(message.type) ?? 'testagent_cloud',
     };
     const giteeBranch = optionalText(message.gitee_branch);
     const image = optionalText(message.image);
@@ -1010,6 +1052,14 @@ function requireText(value: unknown, message: string): string {
         throw new Error(message);
     }
     return text;
+}
+
+function requireContainerType(value: unknown): ContainerTypeValue {
+    const type = containerTypeOf(value);
+    if (!type) {
+        throw new Error('请选择容器类型');
+    }
+    return type;
 }
 
 function optionalText(value: unknown): string | undefined {

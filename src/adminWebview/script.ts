@@ -55,6 +55,7 @@ const getFocusStateKey = element => {
             element.getAttribute('data-container-action'),
             element.getAttribute('data-full-name'),
             element.getAttribute('data-user-id'),
+            element.getAttribute('data-type'),
             element.getAttribute('data-tab'),
         ].join(':');
         return 'action.' + action + ':' + identity;
@@ -256,6 +257,7 @@ const saveListState = () => {
     const kind = controls.getAttribute('data-list-kind');
     const sortSelect = controls.querySelector('[data-sort-select]');
     const statusSelect = controls.querySelector('[data-status-filter]');
+    const typeFilterSelect = controls.querySelector('[data-type-filter]');
     const pageSizeSelect = controls.querySelector('[data-page-size]');
     const saved = getSavedState();
     const lists = { ...(saved.lists || {}) };
@@ -264,6 +266,7 @@ const saveListState = () => {
         sortKey: sortSelect ? sortSelect.value : '',
         sortDirection: controls.getAttribute('data-sort-direction') || 'asc',
         statusFilter: statusSelect ? statusSelect.value : 'all',
+        typeFilter: typeFilterSelect ? typeFilterSelect.value : 'all',
         pageSize: pageSizeSelect ? pageSizeSelect.value : '20',
         page: controls.getAttribute('data-page') || '1',
     };
@@ -281,10 +284,12 @@ const restoreListState = () => {
     const saved = getSavedListState(kind);
     const sortSelect = controls.querySelector('[data-sort-select]');
     const statusSelect = controls.querySelector('[data-status-filter]');
+    const typeFilterSelect = controls.querySelector('[data-type-filter]');
     const pageSizeSelect = controls.querySelector('[data-page-size]');
     if (searchInput && typeof saved.search === 'string') searchInput.value = saved.search;
     if (sortSelect && typeof saved.sortKey === 'string' && Array.from(sortSelect.options).some(option => option.value === saved.sortKey)) sortSelect.value = saved.sortKey;
     if (statusSelect && typeof saved.statusFilter === 'string' && Array.from(statusSelect.options).some(option => option.value === saved.statusFilter)) statusSelect.value = saved.statusFilter;
+    if (typeFilterSelect && typeof saved.typeFilter === 'string' && Array.from(typeFilterSelect.options).some(option => option.value === saved.typeFilter)) typeFilterSelect.value = saved.typeFilter;
     if (pageSizeSelect && typeof saved.pageSize === 'string' && Array.from(pageSizeSelect.options).some(option => option.value === saved.pageSize)) pageSizeSelect.value = saved.pageSize;
     if (saved.sortDirection === 'desc') controls.setAttribute('data-sort-direction', 'desc');
     if (typeof saved.page === 'string') controls.setAttribute('data-page', saved.page);
@@ -316,6 +321,7 @@ const getNodeKey = node => {
             node.getAttribute('data-container-action'),
             node.getAttribute('data-full-name'),
             node.getAttribute('data-user-id'),
+            node.getAttribute('data-type'),
             node.getAttribute('data-tab'),
         ].join(':');
     }
@@ -500,6 +506,7 @@ const readButtonData = button => {
     if (button.dataset.containerAction) values.action = button.dataset.containerAction;
     if (button.dataset.fullName) values.fullName = button.dataset.fullName;
     if (button.dataset.userId) values.userId = button.dataset.userId;
+    if (button.dataset.type) values.type = button.dataset.type;
     if (button.dataset.tab) values.tab = button.dataset.tab;
     if (button.dataset.orphanContainerIds) values.orphanContainerIds = button.dataset.orphanContainerIds;
     return values;
@@ -598,6 +605,8 @@ const applyListView = () => {
     const direction = controls.getAttribute('data-sort-direction') || 'asc';
     const statusSelect = controls.querySelector('[data-status-filter]');
     const statusFilter = statusSelect ? statusSelect.value : 'all';
+    const typeFilterSelect = controls.querySelector('[data-type-filter]');
+    const typeFilter = typeFilterSelect ? typeFilterSelect.value : 'all';
     const pageSizeSelect = controls.querySelector('[data-page-size]');
     const requestedPageSize = pageSizeSelect ? Number(pageSizeSelect.value) : 20;
     const pageSize = Number.isInteger(requestedPageSize) && requestedPageSize > 0 ? requestedPageSize : 20;
@@ -608,7 +617,8 @@ const applyListView = () => {
     const matchingRows = sortedRows.filter(item => {
         const matchesSearchResult = matchesSearch(item, searchTokens);
         const matchesStatus = statusFilter === 'all' || item.getAttribute('data-filter-status') === statusFilter;
-        return matchesSearchResult && matchesStatus;
+        const matchesType = typeFilter === 'all' || item.getAttribute('data-filter-type') === typeFilter;
+        return matchesSearchResult && matchesStatus && matchesType;
     });
     const pageCount = Math.max(1, Math.ceil(matchingRows.length / pageSize));
     page = Math.min(Math.max(1, page), pageCount);
@@ -735,7 +745,7 @@ document.addEventListener('change', event => {
     const select = event.target;
     if (select && select.matches && select.matches('[data-field]')) saveFormState();
     if (select && select.matches && select.matches('.native-select')) syncCustomSelect(select);
-    if (select && select.matches && select.matches('[data-sort-select], [data-status-filter], [data-page-size]')) {
+    if (select && select.matches && select.matches('[data-sort-select], [data-status-filter], [data-type-filter], [data-page-size]')) {
         const controls = select.closest('[data-list-controls]');
         controls?.setAttribute('data-page', '1');
         saveListState();

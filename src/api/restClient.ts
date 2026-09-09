@@ -14,18 +14,21 @@ import {
     ContainerIdsResponse,
     ContainerLimitRequest,
     ContainerLimitResponse,
+    ContainerStatusListResponse,
     ContainerStatusResponse,
+    ContainerTypeValue,
     CreateContainerRequest,
     CreateContainerResponse,
     DefaultImageResponse,
+    ErrorResponse,
     ExpirationRequest,
     ExpirationResponse,
-    ErrorResponse,
     ImageDeleteRequest,
     ImageListResponse,
     ImageReferenceRequest,
     OrphanContainerDeleteRequest,
     OrphanContainerListResponse,
+    SetDefaultImageRequest,
     UploadImageFileInput,
     UploadImageInput,
     UploadImageRequest,
@@ -112,6 +115,7 @@ export interface RestClientOptions {
 export interface UserRestApi {
     createContainer(request: CreateContainerRequest): Promise<CreateContainerResponse>;
     getContainerIds(query: UserContainerQuery): Promise<ContainerIdsResponse>;
+    getContainerStatuses(query: UserContainerQuery): Promise<ContainerStatusListResponse>;
     getContainer(containerId: string): Promise<ContainerStatusResponse>;
     checkAdmin(request: AdminCheckRequest): Promise<AdminCheckResponse>;
     startContainer(containerId: string): Promise<void>;
@@ -124,10 +128,11 @@ export interface AdminRestApi {
     uploadImage(input: UploadImageRequest): Promise<void>;
     pushImage(request: ImageReferenceRequest): Promise<void>;
     listImages(): Promise<ImageListResponse>;
+    checkImagePushStates(): Promise<ImageListResponse>;
     deleteImage(request: ImageDeleteRequest): Promise<void>;
-    getDefaultImage(): Promise<DefaultImageResponse>;
-    setDefaultImage(request: ImageReferenceRequest): Promise<void>;
-    unsetDefaultImage(): Promise<void>;
+    getDefaultImage(type?: ContainerTypeValue): Promise<DefaultImageResponse>;
+    setDefaultImage(request: SetDefaultImageRequest): Promise<void>;
+    unsetDefaultImage(type?: ContainerTypeValue): Promise<void>;
     createContainer(request: AdminCreateContainerRequest): Promise<AdminContainerResponse>;
     listContainers(): Promise<AdminContainerListResponse>;
     listOrphanContainers(): Promise<OrphanContainerListResponse>;
@@ -308,6 +313,7 @@ export class RestClient {
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
             }),
             getContainerIds: query => this.requestJson<ContainerIdsResponse>('GET', '/user/containers', { query }),
+            getContainerStatuses: query => this.requestJson<ContainerStatusListResponse>('GET', '/user/containers/status', { query }),
             getContainer: containerId => this.requestJson<ContainerStatusResponse>('GET', this.containerPath('/user/containers', containerId)),
             checkAdmin: request => this.requestJson<AdminCheckResponse>('POST', '/user/check', { jsonBody: request }),
             startContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
@@ -320,10 +326,11 @@ export class RestClient {
             uploadImage: input => this.uploadImage(input),
             pushImage: request => this.requestNoContent('POST', '/admin/images/push', { jsonBody: request }),
             listImages: () => this.requestJson<ImageListResponse>('GET', '/admin/images'),
+            checkImagePushStates: () => this.requestJson<ImageListResponse>('POST', '/admin/images/check'),
             deleteImage: request => this.requestNoContent('POST', '/admin/images/delete', { jsonBody: request }),
-            getDefaultImage: () => this.requestJson<DefaultImageResponse>('GET', '/admin/images/default'),
+            getDefaultImage: type => this.requestJson<DefaultImageResponse>('GET', this.defaultImagePath(type)),
             setDefaultImage: request => this.requestNoContent('POST', '/admin/images/default', { jsonBody: request }),
-            unsetDefaultImage: () => this.requestNoContent('POST', '/admin/images/default/unset'),
+            unsetDefaultImage: type => this.requestNoContent('POST', this.unsetDefaultImagePath(type)),
             createContainer: request => this.requestJson<AdminContainerResponse>('POST', '/admin/containers', {
                 jsonBody: request,
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
@@ -586,6 +593,14 @@ export class RestClient {
 
     private actionPath(prefix: string, containerId: string, action: string): string {
         return `${this.containerPath(prefix, containerId)}/${action}`;
+    }
+
+    private defaultImagePath(type?: ContainerTypeValue): string {
+        return type ? `/admin/images/default?type=${encodeURIComponent(type)}` : '/admin/images/default';
+    }
+
+    private unsetDefaultImagePath(type?: ContainerTypeValue): string {
+        return type ? `/admin/images/default/unset?type=${encodeURIComponent(type)}` : '/admin/images/default/unset';
     }
 }
 

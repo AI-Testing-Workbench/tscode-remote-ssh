@@ -70,6 +70,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const adminPanel = new AdminPanel({
         userIdProvider,
         operationRegistry,
+        logger,
         onContainerOperation: operation => containerSync.reconcileContainerOperation(operation),
     });
     activeContainerSync = containerSync;
