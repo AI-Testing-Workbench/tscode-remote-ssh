@@ -86,6 +86,14 @@ export interface AdminContainerListResponse {
     containers: AdminContainerResponse[];
 }
 
+export interface OrphanContainerListResponse {
+    container_ids: string[];
+}
+
+export interface OrphanContainerDeleteRequest {
+    container_ids: string[];
+}
+
 export interface AdminStateResponse {
     container_count: number;
     whitelist_container_count: number;
@@ -166,5 +174,15 @@ export interface UploadImageInput {
     filename: string;
     registry?: string | null;
     namespace?: string | null;
-    auto_push?: boolean;
+    auto_push: boolean;
 }
+
+export interface UploadImageFileInput {
+    filePath: string;
+    filename: string;
+    registry?: string | null;
+    namespace?: string | null;
+    auto_push: boolean;
+}
+
+export type UploadImageRequest = UploadImageInput | UploadImageFileInput;

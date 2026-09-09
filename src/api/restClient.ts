@@ -1,5 +1,8 @@
+import * as fs from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import * as http from 'node:http';
 import * as https from 'node:https';
+import { Readable } from 'node:stream';
 import { URL } from 'node:url';
 import {
     AdminContainerListResponse,
@@ -21,7 +24,11 @@ import {
     ImageDeleteRequest,
     ImageListResponse,
     ImageReferenceRequest,
+    OrphanContainerDeleteRequest,
+    OrphanContainerListResponse,
+    UploadImageFileInput,
     UploadImageInput,
+    UploadImageRequest,
     UserContainerQuery,
     UserIdRequest,
     UserIdsResponse,
@@ -29,6 +36,8 @@ import {
 } from './models';
 
 export const DEFAULT_REST_TIMEOUT_MS = 15_000;
+export const DEFAULT_LONG_RUNNING_TIMEOUT_MS = 20 * 60_000;
+export const ADMIN_OPERATOR_USER_ID_HEADER = 'X-Operator-User-ID';
 
 export const REST_ERROR_CODES = {
     API_URL_MISSING: 'api_url_missing',
@@ -37,6 +46,7 @@ export const REST_ERROR_CODES = {
     HTTP: 'http_error',
     INVALID_RESPONSE: 'invalid_response',
     REQUEST: 'request_error',
+    TIMEOUT: 'request_timeout',
 } as const;
 
 export type RestClientErrorKind = 'configuration' | 'network' | 'http' | 'response' | 'request';
@@ -54,11 +64,38 @@ export class RestClientError extends Error {
     }
 }
 
+export function formatRestClientError(error: unknown, fallback = 'TestAgent Cloud 服务操作失败'): string {
+    if (!(error instanceof RestClientError)) {
+        return error instanceof Error && error.message ? error.message : String(error ?? fallback);
+    }
+
+    if (error.kind === 'http' || error.kind === 'response') {
+        const metadata = [
+            error.code ? `错误码: ${error.code}` : '',
+            error.statusCode ? `HTTP 状态码 ${error.statusCode}` : '',
+        ].filter(Boolean).join('，');
+        return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n${error.message}${metadata ? ` (${metadata})` : ''}`;
+    }
+    if (error.kind === 'network') {
+        const apiError = getApiError(error.cause);
+        if (apiError) {
+            const metadata = [
+                `错误码: ${apiError.code}`,
+                error.statusCode ? `HTTP 状态码 ${error.statusCode}` : '',
+            ].filter(Boolean).join('，');
+            return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}\n${apiError.message}${metadata ? ` (${metadata})` : ''}`;
+        }
+        return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}`;
+    }
+    return error.message || fallback;
+}
+
 export interface RestHttpRequest {
     method: 'GET' | 'POST';
     url: URL;
     headers: Record<string, string>;
     body?: Uint8Array;
+    bodyStream?: Readable;
     timeoutMs: number;
 }
 
@@ -74,6 +111,7 @@ export interface RestClientOptions {
     baseUrl?: string;
     timeoutMs?: number;
     transport?: RestHttpTransport;
+    operatorUserId?: string;
 }
 
 export interface UserRestApi {
@@ -88,7 +126,7 @@ export interface UserRestApi {
 }
 
 export interface AdminRestApi {
-    uploadImage(input: UploadImageInput): Promise<void>;
+    uploadImage(input: UploadImageRequest): Promise<void>;
     pushImage(request: ImageReferenceRequest): Promise<void>;
     listImages(): Promise<ImageListResponse>;
     deleteImage(request: ImageDeleteRequest): Promise<void>;
@@ -97,6 +135,8 @@ export interface AdminRestApi {
     unsetDefaultImage(): Promise<void>;
     createContainer(request: AdminCreateContainerRequest): Promise<AdminContainerResponse>;
     listContainers(): Promise<AdminContainerListResponse>;
+    listOrphanContainers(): Promise<OrphanContainerListResponse>;
+    deleteOrphanContainers(request: OrphanContainerDeleteRequest): Promise<void>;
     getContainer(containerId: string): Promise<AdminContainerResponse>;
     getContainerLog(containerId: string): Promise<string>;
     startContainer(containerId: string): Promise<void>;
@@ -121,12 +161,21 @@ interface RequestOptions {
     query?: UserContainerQuery;
     jsonBody?: unknown;
     body?: Uint8Array;
+    bodyStream?: Readable;
+    bodyLength?: number;
     headers?: Record<string, string>;
     responseType?: 'json' | 'text';
+    timeoutMs?: number;
 }
 
 interface MultipartBody {
     body: Uint8Array;
+    contentType: string;
+}
+
+interface MultipartStreamBody {
+    body: Readable;
+    contentLength: number;
     contentType: string;
 }
 
@@ -135,15 +184,65 @@ export function normalizeBackendApiUrl(value: string | undefined): string {
 }
 
 export function buildMultipartBody(input: UploadImageInput): MultipartBody {
-    if (!input.filename || /[\r\n]/.test(input.filename)) {
+    const boundary = `----TestAgentRemote${Math.random().toString(16).slice(2)}`;
+    const parts = buildMultipartParts(input, boundary);
+
+    return {
+        body: Buffer.concat([parts.prefix, Buffer.from(input.file), parts.suffix]),
+        contentType: `multipart/form-data; boundary=${boundary}`,
+    };
+}
+
+async function buildMultipartFileBody(input: UploadImageFileInput): Promise<MultipartStreamBody> {
+    validateMultipartFilename(input.filename);
+
+    let fileSize: number;
+    try {
+        const stats = await fsPromises.stat(input.filePath);
+        if (!stats.isFile()) {
+            throw new Error('not a file');
+        }
+        fileSize = stats.size;
+    } catch (error) {
         throw new RestClientError(
             'request',
             REST_ERROR_CODES.REQUEST,
-            '镜像文件名无效',
+            '镜像文件无法读取',
+            undefined,
+            error,
+        );
+    }
+    if (fileSize === 0) {
+        throw new RestClientError(
+            'request',
+            REST_ERROR_CODES.REQUEST,
+            '镜像文件不能为空',
         );
     }
 
     const boundary = `----TestAgentRemote${Math.random().toString(16).slice(2)}`;
+    const parts = buildMultipartParts(input, boundary);
+    const body = Readable.from((async function* () {
+        yield parts.prefix;
+        const file = fs.createReadStream(input.filePath);
+        try {
+            for await (const chunk of file) {
+                yield chunk;
+            }
+        } finally {
+            file.destroy();
+        }
+        yield parts.suffix;
+    })());
+
+    return {
+        body,
+        contentLength: parts.prefix.byteLength + fileSize + parts.suffix.byteLength,
+        contentType: `multipart/form-data; boundary=${boundary}`,
+    };
+}
+
+function buildMultipartParts(input: UploadImageInput | UploadImageFileInput, boundary: string): { prefix: Buffer; suffix: Buffer } {
     const parts: Buffer[] = [];
     const appendField = (name: string, value: string): void => {
         parts.push(Buffer.from(
@@ -152,28 +251,35 @@ export function buildMultipartBody(input: UploadImageInput): MultipartBody {
         ));
     };
 
+    validateMultipartFilename(input.filename);
     if (input.registry !== undefined && input.registry !== null) {
         appendField('registry', input.registry);
     }
     if (input.namespace !== undefined && input.namespace !== null) {
         appendField('namespace', input.namespace);
     }
-    if (input.auto_push !== undefined) {
-        appendField('auto_push', String(input.auto_push));
-    }
+    appendField('auto_push', String(input.auto_push));
 
     const escapedFilename = input.filename.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     parts.push(Buffer.from(
         `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${escapedFilename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
         'utf8',
     ));
-    parts.push(Buffer.from(input.file));
-    parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
 
     return {
-        body: Buffer.concat(parts),
-        contentType: `multipart/form-data; boundary=${boundary}`,
+        prefix: Buffer.concat(parts),
+        suffix: Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'),
     };
+}
+
+function validateMultipartFilename(filename: string): void {
+    if (!filename || /[\r\n]/.test(filename)) {
+        throw new RestClientError(
+            'request',
+            REST_ERROR_CODES.REQUEST,
+            '镜像文件名无效',
+        );
+    }
 }
 
 export class RestClient {
@@ -183,6 +289,7 @@ export class RestClient {
     private readonly baseUrl: string;
     private readonly timeoutMs: number;
     private readonly transport: RestHttpTransport;
+    private readonly operatorUserId: string;
 
     constructor(baseUrl: string, options?: Omit<RestClientOptions, 'baseUrl'>);
     constructor(options?: RestClientOptions);
@@ -198,9 +305,13 @@ export class RestClient {
             ? options.timeoutMs
             : DEFAULT_REST_TIMEOUT_MS;
         this.transport = options.transport ?? requestWithNode;
+        this.operatorUserId = options.operatorUserId?.trim() ?? '';
 
         this.user = {
-            createContainer: request => this.requestJson<CreateContainerResponse>('POST', '/user/containers', { jsonBody: request }),
+            createContainer: request => this.requestJson<CreateContainerResponse>('POST', '/user/containers', {
+                jsonBody: request,
+                timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
+            }),
             getContainerIds: query => this.requestJson<ContainerIdsResponse>('GET', '/user/containers', { query }),
             getContainer: containerId => this.requestJson<ContainerStatusResponse>('GET', this.containerPath('/user/containers', containerId)),
             checkAdmin: request => this.requestJson<AdminCheckResponse>('POST', '/user/check', { jsonBody: request }),
@@ -218,8 +329,13 @@ export class RestClient {
             getDefaultImage: () => this.requestJson<DefaultImageResponse>('GET', '/admin/images/default'),
             setDefaultImage: request => this.requestNoContent('POST', '/admin/images/default', { jsonBody: request }),
             unsetDefaultImage: () => this.requestNoContent('POST', '/admin/images/default/unset'),
-            createContainer: request => this.requestJson<AdminContainerResponse>('POST', '/admin/containers', { jsonBody: request }),
+            createContainer: request => this.requestJson<AdminContainerResponse>('POST', '/admin/containers', {
+                jsonBody: request,
+                timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
+            }),
             listContainers: () => this.requestJson<AdminContainerListResponse>('GET', '/admin/containers'),
+            listOrphanContainers: () => this.requestJson<OrphanContainerListResponse>('GET', '/admin/containers/orphans'),
+            deleteOrphanContainers: request => this.requestNoContent('POST', '/admin/containers/orphans/delete', { jsonBody: request }),
             getContainer: containerId => this.requestJson<AdminContainerResponse>('GET', this.containerPath('/admin/containers', containerId)),
             getContainerLog: containerId => this.requestText('GET', `${this.containerPath('/admin/containers', containerId)}/log`),
             startContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'start')),
@@ -241,11 +357,23 @@ export class RestClient {
         };
     }
 
-    private async uploadImage(input: UploadImageInput): Promise<void> {
+    private async uploadImage(input: UploadImageRequest): Promise<void> {
+        if ('filePath' in input) {
+            const multipart = await buildMultipartFileBody(input);
+            await this.requestNoContent('POST', '/admin/images/upload', {
+                bodyStream: multipart.body,
+                bodyLength: multipart.contentLength,
+                headers: { 'Content-Type': multipart.contentType },
+                timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
+            });
+            return;
+        }
+
         const multipart = buildMultipartBody(input);
         await this.requestNoContent('POST', '/admin/images/upload', {
             body: multipart.body,
             headers: { 'Content-Type': multipart.contentType },
+            timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
         });
     }
 
@@ -283,10 +411,14 @@ export class RestClient {
             Accept: options.responseType === 'text' ? 'text/plain' : 'application/json',
             ...options.headers,
         };
+        if (this.operatorUserId && (path === '/admin' || path.startsWith('/admin/'))) {
+            headers[ADMIN_OPERATOR_USER_ID_HEADER] = this.operatorUserId;
+        }
         let body = options.body;
+        const bodyStream = options.bodyStream;
 
         if (options.jsonBody !== undefined) {
-            if (body !== undefined) {
+            if (body !== undefined || bodyStream !== undefined) {
                 throw new RestClientError(
                     'request',
                     REST_ERROR_CODES.REQUEST,
@@ -308,16 +440,50 @@ export class RestClient {
             headers['Content-Type'] = 'application/json';
         }
 
+        if (body !== undefined && bodyStream !== undefined) {
+            throw new RestClientError(
+                'request',
+                REST_ERROR_CODES.REQUEST,
+                '请求不能同时包含内存和流式请求体',
+            );
+        }
+        if (bodyStream !== undefined
+            && (!Number.isSafeInteger(options.bodyLength) || (options.bodyLength ?? -1) < 0)) {
+            throw new RestClientError(
+                'request',
+                REST_ERROR_CODES.REQUEST,
+                '流式请求缺少有效的请求体长度',
+            );
+        }
+
         if (body !== undefined) {
             headers['Content-Length'] = String(body.byteLength);
+        } else if (bodyStream !== undefined) {
+            headers['Content-Length'] = String(options.bodyLength);
         }
 
         let response: RestHttpResponse;
         try {
-            response = await this.transport({ method, url, headers, body, timeoutMs: this.timeoutMs });
+            response = await this.transport({
+                method,
+                url,
+                headers,
+                body,
+                bodyStream,
+                timeoutMs: options.timeoutMs ?? this.timeoutMs,
+            });
         } catch (error) {
             if (error instanceof RestClientError) {
                 throw error;
+            }
+            if (isRequestTimeoutError(error)) {
+                throw new RestClientError(
+                    'network',
+                    REST_ERROR_CODES.TIMEOUT,
+                    formatTimeoutMessage(path),
+                    undefined,
+                    error,
+                );
             }
             throw new RestClientError(
                 'network',
@@ -343,6 +509,15 @@ export class RestClient {
 
         if (response.statusCode < 200 || response.statusCode >= 300) {
             const apiError = getApiError(parsedBody);
+            if (response.statusCode === 408 || response.statusCode === 504) {
+                throw new RestClientError(
+                    'network',
+                    REST_ERROR_CODES.TIMEOUT,
+                    formatTimeoutMessage(path),
+                    response.statusCode,
+                    apiError,
+                );
+            }
             throw new RestClientError(
                 'http',
                 apiError?.code ?? REST_ERROR_CODES.HTTP,
@@ -433,6 +608,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
+class RequestTimeoutError extends Error {
+    public constructor() {
+        super('request timed out');
+        this.name = 'RequestTimeoutError';
+    }
+}
+
 const requestWithNode: RestHttpTransport = request => new Promise<RestHttpResponse>((resolve, reject) => {
     const requestModule = request.url.protocol === 'https:' ? https : http;
     const nodeRequest = requestModule.request(request.url, {
@@ -455,11 +637,49 @@ const requestWithNode: RestHttpTransport = request => new Promise<RestHttpRespon
     });
 
     nodeRequest.on('timeout', () => {
-        nodeRequest.destroy(new Error('request timed out'));
+        request.bodyStream?.destroy();
+        nodeRequest.destroy(new RequestTimeoutError());
     });
-    nodeRequest.on('error', reject);
-    if (request.body !== undefined) {
-        nodeRequest.write(Buffer.from(request.body));
+    nodeRequest.on('error', error => {
+        request.bodyStream?.destroy();
+        reject(error);
+    });
+    if (request.bodyStream !== undefined) {
+        request.bodyStream.once('error', error => {
+            nodeRequest.destroy(error);
+        });
+        request.bodyStream.pipe(nodeRequest);
+    } else {
+        if (request.body !== undefined) {
+            nodeRequest.write(Buffer.from(request.body));
+        }
+        nodeRequest.end();
     }
-    nodeRequest.end();
 });
+
+function isRequestTimeoutError(error: unknown): boolean {
+    if (error instanceof RequestTimeoutError) {
+        return true;
+    }
+    if (!isRecord(error)) {
+        return false;
+    }
+    const code = typeof error.code === 'string' ? error.code.toUpperCase() : '';
+    const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+    return code === 'ETIMEDOUT'
+        || code === 'ESOCKETTIMEDOUT'
+        || code === 'ERR_SOCKET_TIMEOUT'
+        || code === 'UND_ERR_CONNECT_TIMEOUT'
+        || message.includes('timed out')
+        || message.includes('timeout')
+        || message.includes('timedout');
+}
+
+function formatTimeoutMessage(path: string): string {
+    const operation = path === '/admin/images/upload'
+        ? '上传镜像'
+        : path === '/user/containers' || path === '/admin/containers'
+            ? '创建容器'
+            : '后端服务请求';
+    return `${operation}超时，将自动进行重试...`;
+}
