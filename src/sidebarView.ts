@@ -470,6 +470,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 case 'connect':
                     await this.connectContainer(containerId);
                     return;
+                case 'openNovnc':
+                    await this.openNovncUrl(containerId);
+                    return;
                 case 'restart':
                     await this.runContainerAction(containerId, 'restart', id => this.publicApi.restartContainer(id));
                     return;
@@ -507,6 +510,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             throw new Error(`服务 "${container.containerId}" 没有可用的连接端口`);
         }
         await this.onConnect?.(container.host);
+    }
+
+    private async openNovncUrl(containerId: string | undefined): Promise<void> {
+        const container = this.findContainer(containerId);
+        if (!container?.novncUrl) {
+            throw new Error('当前服务没有可用的沙箱访问链接');
+        }
+        const url = container.novncUrl.trim();
+        if (!/^https?:\/\//i.test(url)) {
+            throw new Error('沙箱访问链接格式无效');
+        }
+        await vscode.env.openExternal(vscode.Uri.parse(url));
     }
 
     private async runContainerAction(
@@ -781,7 +796,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 }
 
-type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'delete' | 'disconnect' | 'refresh' | 'restart' | 'warning';
+type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'warning';
 
 const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     admin: '<path d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 3.5v3M17 5h3"/>',
@@ -791,6 +806,7 @@ const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     cloud: '<path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/>',
     delete: '<path d="M5 7h14M9 7V5h6v2M7 7l.8 12h8.4L17 7M10 10.5v5M14 10.5v5"/>',
     disconnect: '<path d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H9M13 15l4-4-4-4M17 11H9"/>',
+    external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     refresh: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3M19 20v-4h-4"/>',
     restart: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3"/><path d="M19 16v4h-4"/>',
     warning: '<path d="m12 4 8 15H4Z"/><path d="M12 9v4M12 16h.01"/>',
@@ -838,6 +854,8 @@ function renderContainerCard(container: SyncedContainer, operationInFlight: bool
     const statusLabel = getStatusLabel(container);
     const usage = renderUsage(container);
     const expiration = renderExpirationStatus(container);
+    const typeBadge = renderTypeBadge(container.containerType);
+    const sandboxAccess = renderSandboxAccess(container);
     const containerId = escapeHtml(container.containerId);
     const host = escapeHtml(container.host || '未配置 Host');
     const canOperate = container.remote;
@@ -863,6 +881,7 @@ function renderContainerCard(container: SyncedContainer, operationInFlight: bool
             <div class="service-heading" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}">
                 <strong class="service-name">${host}</strong>
                 <div class="service-status">
+                    ${typeBadge}
                     <span class="status-dot ${statusClass}"></span>
                     <span class="status-label">${escapeHtml(statusLabel)}</span>
                     ${usage}
@@ -874,9 +893,45 @@ function renderContainerCard(container: SyncedContainer, operationInFlight: bool
                 <button class="action-button" data-action="restart" data-container-id="${containerId}"${disabledRestart}>${renderIcon('restart')}重启</button>
                 <button class="action-button" data-action="delete" data-container-id="${containerId}"${disabledOperation}>${renderIcon('delete')}销毁</button>
             </div>
+            ${sandboxAccess}
             ${expiration}
             ${history}
         </article>
+    `;
+}
+
+function renderTypeBadge(containerType: string | null | undefined): string {
+    if (!containerType) {
+        return '';
+    }
+    let label: string;
+    let variant: string;
+    switch (containerType) {
+        case 'testagent_cloud':
+            label = 'TestAgentCloud';
+            variant = 'testagent';
+            break;
+        case 'autotest_cloud':
+            label = '自动化跑批';
+            variant = 'autotest';
+            break;
+        default:
+            label = containerType;
+            variant = 'unknown';
+    }
+    return `<span class="type-badge type-badge-${variant}" title="${escapeHtml(containerType)}">${escapeHtml(label)}</span>`;
+}
+
+function renderSandboxAccess(container: SyncedContainer): string {
+    if (!container.remote || !container.novncUrl) {
+        return '';
+    }
+    return `
+        <div class="sandbox-access-row">
+            <button class="sandbox-access-link" data-action="openNovnc" data-container-id="${escapeHtml(container.containerId)}" title="在浏览器中打开沙箱可视化访问链接">
+                ${renderIcon('external')}沙箱访问
+            </button>
+        </div>
     `;
 }
 
@@ -1054,6 +1109,14 @@ function renderDocument(body: string): string {
         .usage-metric-warning { color: var(--vscode-editorWarning-foreground, #e5c07b); }
         .usage-metric-critical { color: var(--vscode-errorForeground, #f28b82); }
         .usage-metric-unavailable { color: var(--on-surface); }
+        .type-badge { padding: 1px 7px; border: 1px solid currentColor; border-radius: 999px; font-size: 11px; line-height: 1.5; white-space: nowrap; }
+        .type-badge-testagent { color: var(--vscode-textLink-foreground, #8ab4f8); }
+        .type-badge-autotest { color: var(--vscode-charts-yellow, #e5c07b); }
+        .type-badge-unknown { color: var(--on-surface-variant); }
+        .sandbox-access-row { display: flex; align-items: center; justify-content: center; margin-top: 12px; }
+        .sandbox-access-link { min-height: auto; display: inline-flex; align-items: center; gap: 6px; padding: 1px 4px; border: 0; border-radius: 4px; color: var(--primary); background: transparent; text-decoration: underline; cursor: pointer; }
+        .sandbox-access-link:hover { border: 0; color: var(--primary); background: transparent; opacity: .85; text-decoration: none; }
+        .sandbox-access-link .icon { width: 15px; height: 15px; }
         .expiration-status { margin-top: 16px; color: var(--warning); font-size: 12px; }
         .expiration-status.critical { color: var(--error); }
         .card-error { margin: 13px 0 0; padding: 9px 11px; border-radius: 8px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; }

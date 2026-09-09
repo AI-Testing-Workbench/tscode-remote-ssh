@@ -49,6 +49,8 @@ describe('ContainerSync', () => {
                 endpoint: '10.0.0.1:22',
                 startedAt: undefined,
                 expiresAt: undefined,
+                containerType: null,
+                novncUrl: null,
                 remote: true,
             },
             {
@@ -58,6 +60,8 @@ describe('ContainerSync', () => {
                 endpoint: null,
                 startedAt: undefined,
                 expiresAt: undefined,
+                containerType: null,
+                novncUrl: null,
                 remote: true,
                 error: {
                     code: 'invalid_endpoint',
@@ -237,6 +241,8 @@ describe('ContainerSync', () => {
                 endpoint: undefined,
                 startedAt: undefined,
                 expiresAt: undefined,
+                containerType: null,
+                novncUrl: null,
                 remote: true,
                 error: {
                     code: 'container_not_found',
@@ -252,6 +258,8 @@ describe('ContainerSync', () => {
                 endpoint: '10.0.0.20:22',
                 startedAt: undefined,
                 expiresAt: undefined,
+                containerType: null,
+                novncUrl: null,
                 remote: true,
             },
         ]);

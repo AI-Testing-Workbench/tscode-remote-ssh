@@ -37,6 +37,8 @@ describe('SidebarViewProvider', () => {
         vscode.window.showInformationMessage.mockReset();
         vscode.window.withProgress.mockReset();
         vscode.window.withProgress.mockImplementation((_options, task) => task({ report: vi.fn() }, {} as never) as Promise<unknown>);
+        vscode.env.openExternal.mockReset();
+        vscode.Uri.parse.mockReset();
     });
 
     afterEach(() => {
@@ -436,6 +438,54 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('container-1');
     });
 
+    it('marks container type badges and the sandbox access link', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [
+                syncedContainer('dev-1', 'running', true, undefined, undefined, undefined, {
+                    containerType: 'testagent_cloud',
+                }),
+                syncedContainer('autotest-1', 'running', true, undefined, undefined, undefined, {
+                    containerType: 'autotest_cloud',
+                    novncUrl: 'http://127.0.0.1:59864/proxy/6080/vnc.html?host=127.0.0.1&port=59864&path=proxy/6080',
+                }),
+            ],
+            changed: false,
+        });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+
+        await provider.resolveWebviewView(view as never);
+
+        expect(view.webview.html).toContain('type-badge-testagent');
+        expect(view.webview.html).toContain('TestAgentCloud');
+        expect(view.webview.html).toContain('type-badge-autotest');
+        expect(view.webview.html).toContain('自动化跑批');
+        expect(view.webview.html.match(/data-action="openNovnc"/g)).toHaveLength(1);
+        expect(view.webview.html).toContain('沙箱访问');
+    });
+
+    it('opens the noVNC link in the external browser when sandbox access is clicked', async () => {
+        const novncUrl = 'http://127.0.0.1:59864/proxy/6080/vnc.html?host=127.0.0.1&port=59864&path=proxy/6080';
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('autotest-1', 'running', true, undefined, undefined, undefined, {
+                containerType: 'autotest_cloud',
+                novncUrl,
+            })],
+            changed: false,
+        });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'openNovnc', containerId: 'autotest-1' });
+        await flushMessages();
+
+        expect(vscode.Uri.parse).toHaveBeenCalledWith(novncUrl);
+        expect(vscode.env.openExternal).toHaveBeenCalledOnce();
+    });
+
     it('shows the administrator entry only after /user/check grants access', async () => {
         const state = new SidebarSyncState();
         state.update({ containers: [], changed: false });
@@ -710,6 +760,7 @@ function syncedContainer(
     expiresAt?: string,
     error?: SyncedContainer['error'],
     usage?: Pick<SyncedContainer, 'cpuUsage' | 'memoryUsage'>,
+    extras: Partial<SyncedContainer> = {},
 ): SyncedContainer {
     return {
         containerId,
@@ -721,6 +772,7 @@ function syncedContainer(
         ...(expiresAt ? { expiresAt } : {}),
         ...(error ? { error } : {}),
         ...(usage ?? {}),
+        ...extras,
     };
 }
 

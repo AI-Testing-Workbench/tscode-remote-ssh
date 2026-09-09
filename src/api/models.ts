@@ -22,6 +22,8 @@ export interface ContainerIdsResponse {
 
 export interface ContainerStatusResponse {
     container_id: string;
+    type?: string | null;
+    novnc_url?: string | null;
     status: string;
     endpoint?: string | null;
     started_at?: string | null;
@@ -34,6 +36,8 @@ export interface ContainerStatusResponse {
 
 export interface CreateContainerResponse {
     container_id: string;
+    type?: string | null;
+    novnc_url?: string | null;
     status: string;
     endpoint?: string | null;
     started_at?: string | null;

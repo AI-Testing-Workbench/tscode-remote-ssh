@@ -31,7 +31,8 @@ const env = {
     appRoot: '/bin/vscodium/app',
     clipboard: {
         writeText: vi.fn(() => Promise.resolve())
-    }
+    },
+    openExternal: vi.fn(async () => true)
 };
 
 class ExtensionContext {
@@ -117,6 +118,7 @@ const ViewColumn = {
 
 const Uri = {
     from: vi.fn((components: { scheme: string; authority: string; path: string }) => components),
+    parse: vi.fn((value: string) => ({ value })),
 };
 
 const workspace = {
