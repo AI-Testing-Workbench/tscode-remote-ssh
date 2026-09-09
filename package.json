@@ -206,10 +206,8 @@
 			"remote": [
 				{
 					"id": "sshHosts",
-					"name": "云端沙箱",
-					"group": "targets@1",
-					"type": "webview",
-					"remoteName": "ssh-remote"
+					"name": "",
+					"type": "webview"
 				}
 			]
 		},

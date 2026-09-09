@@ -91,7 +91,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
         expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
-        expect(view.webview.html).toContain('<h1 class="page-title">云端沙箱</h1>');
+        expect(view.webview.html).not.toContain('<h1 class="page-title">');
         expect(view.webview.html).not.toContain('REMOTE WORKSPACE');
         expect(view.webview.html).not.toContain('YOUR SERVICES');
         expect(view.webview.html).not.toContain('>TC<');

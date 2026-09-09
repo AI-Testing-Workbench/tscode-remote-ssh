@@ -71,10 +71,8 @@ describe('extension manifest', () => {
     it('declares a webview sidebar and the disconnected create command', () => {
         expect(manifest.contributes.views.remote).toContainEqual({
             id: 'sshHosts',
-            name: '云端沙箱',
-            group: 'targets@1',
+            name: '',
             type: 'webview',
-            remoteName: 'ssh-remote',
         });
         expect(manifest.contributes.commands.map(({ command }) => command)).toContain('openremotessh.createContainer');
         expect(manifest.activationEvents).toContain('onCommand:openremotessh.createContainer');
