@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as os from 'node:os';
 
-export const REMOTE_CONFIGURATION_SECTION = 'testagnet.remote';
+export const REMOTE_CONFIGURATION_SECTION = 'tscode.remote';
 
 export const REMOTE_SETTING_DEFAULTS = {
     backendApiUrl: '',

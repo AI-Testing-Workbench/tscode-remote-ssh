@@ -68,22 +68,22 @@ export class RestClientError extends Error {
     }
 }
 
-export function formatRestClientError(error: unknown, fallback = 'TestAgent Cloud 服务操作失败'): string {
+export function formatRestClientError(error: unknown, fallback = '云端沙箱 服务操作失败'): string {
     if (!(error instanceof RestClientError)) {
         return error instanceof Error && error.message ? error.message : String(error ?? fallback);
     }
 
     if (error.kind === 'http' || error.kind === 'response') {
         const metadata = formatErrorMetadata(error.code, error.statusCode);
-        return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n${error.message}${metadata ? ` (${metadata})` : ''}`;
+        return `后端 云端沙箱 服务请求失败\n请联系支持团队解决\n${error.message}${metadata ? ` (${metadata})` : ''}`;
     }
     if (error.kind === 'network') {
         const apiError = getApiError(error.cause);
         if (apiError) {
             const metadata = formatErrorMetadata(apiError.code, error.statusCode);
-            return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}\n${apiError.message}${metadata ? ` (${metadata})` : ''}`;
+            return `后端 云端沙箱 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}\n${apiError.message}${metadata ? ` (${metadata})` : ''}`;
         }
-        return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}`;
+        return `后端 云端沙箱 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}`;
     }
     return error.message || fallback;
 }
@@ -385,7 +385,7 @@ export class RestClient {
             throw new RestClientError(
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
-                '后端 TestAgent Cloud 管理服务返回空响应',
+                '后端 云端沙箱 管理服务返回空响应',
             );
         }
         return response as T;
@@ -401,7 +401,7 @@ export class RestClient {
             throw new RestClientError(
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
-                '后端 TestAgent Cloud 管理服务返回了无效的文本响应',
+                '后端 云端沙箱 管理服务返回了无效的文本响应',
             );
         }
         return response;
@@ -490,7 +490,7 @@ export class RestClient {
             throw new RestClientError(
                 'network',
                 REST_ERROR_CODES.NETWORK,
-                '后端 TestAgent Cloud 管理服务请求失败',
+                '后端 云端沙箱 管理服务请求失败',
                 undefined,
                 error,
             );
@@ -523,7 +523,7 @@ export class RestClient {
             throw new RestClientError(
                 'http',
                 apiError?.code ?? REST_ERROR_CODES.HTTP,
-                apiError?.message ?? `后端 TestAgent Cloud 管理服务请求失败 (HTTP ${response.statusCode})`,
+                apiError?.message ?? `后端 云端沙箱 管理服务请求失败 (HTTP ${response.statusCode})`,
                 response.statusCode,
             );
         }
@@ -539,7 +539,7 @@ export class RestClient {
             throw new RestClientError(
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
-                '后端 TestAgent Cloud 管理服务返回了无效的 JSON',
+                '后端 云端沙箱 管理服务返回了无效的 JSON',
                 response.statusCode,
             );
         }
@@ -551,7 +551,7 @@ export class RestClient {
             throw new RestClientError(
                 'configuration',
                 REST_ERROR_CODES.API_URL_MISSING,
-                '未配置后端 TestAgent Cloud 管理服务的 API 地址',
+                '未配置后端 云端沙箱 管理服务的 API 地址',
             );
         }
 
@@ -570,7 +570,7 @@ export class RestClient {
             throw new RestClientError(
                 'configuration',
                 REST_ERROR_CODES.INVALID_API_URL,
-                '后端 TestAgent Cloud 管理服务的 API 地址无效',
+                '后端 云端沙箱 管理服务的 API 地址无效',
                 undefined,
                 error,
             );
@@ -689,16 +689,16 @@ function formatTimeoutMessage(path: string, timeoutMs: number, statusCode?: numb
     const operation = path === '/admin/images/upload'
         ? '上传镜像'
         : isContainerActionPath(path, '/start')
-            ? '启动 TestAgent Cloud 服务'
+            ? '启动 云端沙箱 服务'
             : isContainerActionPath(path, '/stop')
-                ? '停止 TestAgent Cloud 服务'
+                ? '停止 云端沙箱 服务'
                 : isContainerActionPath(path, '/restart')
-                    ? '重启 TestAgent Cloud 服务'
+                    ? '重启 云端沙箱 服务'
                     : isContainerActionPath(path, '/restore')
-                        ? '恢复 TestAgent Cloud 服务'
+                        ? '恢复 云端沙箱 服务'
                         : isContainerActionPath(path, '/delete') || isContainerActionPath(path, '/permanent-delete')
-                            ? '删除 TestAgent Cloud 服务'
-                            : '后端 TestAgent Cloud 管理服务请求';
+                            ? '删除 云端沙箱 服务'
+                            : '后端 云端沙箱 管理服务请求';
     const duration = formatTimeoutDuration(timeoutMs);
     const responseDetail = statusCode
         ? `，HTTP 状态码 ${statusCode}，仍未收到响应`

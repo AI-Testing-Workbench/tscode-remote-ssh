@@ -37,25 +37,25 @@ describe('extension manifest', () => {
         const properties = manifest.contributes.configuration.properties;
 
         expect(properties).toMatchObject({
-            'testagnet.remote.backendApiUrl': { type: 'string', default: '' },
-            'testagnet.remote.userName': { type: 'string', default: 'root' },
-            'testagnet.remote.skipKnownHostsCheck': { type: 'boolean', default: true },
-            'testagnet.remote.historyLimit': { type: 'integer', default: 5 },
-            'testagnet.remote.statusSyncInterval': { type: 'number', default: 5 },
-            'testagnet.remote.debug': { type: 'boolean', default: false },
-            'testagnet.remote.disableClientValidation': { type: 'boolean', default: true },
-            'testagnet.remote.configFile': { type: 'string', default: '~/.local/share/testagent/config' },
+            'tscode.remote.backendApiUrl': { type: 'string', default: '' },
+            'tscode.remote.userName': { type: 'string', default: 'root' },
+            'tscode.remote.skipKnownHostsCheck': { type: 'boolean', default: true },
+            'tscode.remote.historyLimit': { type: 'integer', default: 5 },
+            'tscode.remote.statusSyncInterval': { type: 'number', default: 5 },
+            'tscode.remote.debug': { type: 'boolean', default: false },
+            'tscode.remote.disableClientValidation': { type: 'boolean', default: true },
+            'tscode.remote.configFile': { type: 'string', default: '~/.local/share/testagent/config' },
         });
 
         for (const key of [
-            'testagnet.remote.backendApiUrl',
-            'testagnet.remote.userName',
-            'testagnet.remote.skipKnownHostsCheck',
-            'testagnet.remote.historyLimit',
-            'testagnet.remote.statusSyncInterval',
-            'testagnet.remote.debug',
-            'testagnet.remote.disableClientValidation',
-            'testagnet.remote.configFile',
+            'tscode.remote.backendApiUrl',
+            'tscode.remote.userName',
+            'tscode.remote.skipKnownHostsCheck',
+            'tscode.remote.historyLimit',
+            'tscode.remote.statusSyncInterval',
+            'tscode.remote.debug',
+            'tscode.remote.disableClientValidation',
+            'tscode.remote.configFile',
         ]) {
             expect(properties[key].description).toBeTruthy();
         }
@@ -71,7 +71,7 @@ describe('extension manifest', () => {
     it('declares a webview sidebar and the disconnected create command', () => {
         expect(manifest.contributes.views.remote).toContainEqual({
             id: 'sshHosts',
-            name: 'TestAgent Cloud',
+            name: '云端沙箱',
             group: 'targets@1',
             type: 'webview',
             remoteName: 'ssh-remote',

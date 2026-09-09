@@ -116,10 +116,10 @@ describe('public user container API', () => {
             name: 'RestClientError',
             kind: 'configuration',
             code: 'api_url_missing',
-            message: '未配置后端 TestAgent Cloud 管理服务的 API 地址',
+            message: '未配置后端 云端沙箱 管理服务的 API 地址',
         });
 
-        const restError = new RestClientError('http', 'container_conflict', 'TestAgent Cloud 服务冲突', 409);
+        const restError = new RestClientError('http', 'container_conflict', '云端沙箱 服务冲突', 409);
         const userApi = createUserApi();
         vi.spyOn(userApi, 'createContainer').mockRejectedValue(restError);
         const api = createPublicUserContainerApi({

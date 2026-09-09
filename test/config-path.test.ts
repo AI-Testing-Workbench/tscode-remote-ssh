@@ -44,7 +44,7 @@ describe('SSH config path setting', () => {
     it('uses a config file inside an existing configFile directory', async () => {
         const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-config-directory-'));
         temporaryDirectories.push(directory);
-        vscode.setConfigurationValue('testagnet.remote', 'configFile', directory);
+        vscode.setConfigurationValue('tscode.remote', 'configFile', directory);
 
         const expectedPath = path.join(directory, 'config');
         expect(getConfiguredContainerConfigPath()).toBe(expectedPath);
@@ -64,7 +64,7 @@ describe('SSH config path setting', () => {
 
     it('resolves an expanded custom configFile path to an absolute path', () => {
         process.env[environmentVariable] = path.join(os.tmpdir(), 'testagent-config-root');
-        vscode.setConfigurationValue('testagnet.remote', 'configFile', `$${environmentVariable}/ssh/config`);
+        vscode.setConfigurationValue('tscode.remote', 'configFile', `$${environmentVariable}/ssh/config`);
 
         const expectedPath = path.resolve(process.env[environmentVariable] ?? '', 'ssh', 'config');
         expect(getConfiguredContainerConfigPath()).toBe(expectedPath);

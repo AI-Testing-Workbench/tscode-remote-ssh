@@ -1,7 +1,7 @@
 {
 	"name": "tscode-remote-ssh",
 	"displayName": "TSCode Remote",
-	"description": "连接至 TestAgent Cloud 服务",
+	"description": "连接至远端沙箱",
 	"version": "1.0.3",
 	"publisher": "test-tech",
 	"engines": {
@@ -98,71 +98,71 @@
 		"configuration": {
 			"title": "TestAgent Remote",
 			"properties": {
-				"testagnet.remote.backendApiUrl": {
+				"tscode.remote.backendApiUrl": {
 					"type": "string",
-					"description": "后端 TestAgent Cloud 管理服务的 API 地址。",
+					"description": "后端 云端沙箱 管理服务的 API 地址。",
 					"default": "",
 					"scope": "application"
 				},
-				"testagnet.remote.configFile": {
+				"tscode.remote.configFile": {
 					"type": "string",
 					"description": "指定插件使用的配置文件的绝对路径。",
 					"default": "~/.local/share/testagent/config",
 					"scope": "application"
 				},
-				"testagnet.remote.connectTimeout": {
+				"tscode.remote.connectTimeout": {
 					"type": "number",
-					"description": "指定用于连接 TestAgent Cloud 服务的超时时间 (秒)。",
+					"description": "指定用于连接 云端沙箱 服务的超时时间 (秒)。",
 					"default": 60,
 					"scope": "application",
 					"minimum": 1
 				},
-				"testagnet.remote.debug": {
+				"tscode.remote.debug": {
 					"type": "boolean",
 					"description": "启用调试模式",
 					"default": false,
 					"scope": "application"
 				},
-				"testagnet.remote.disableClientValidation": {
+				"tscode.remote.disableClientValidation": {
 					"type": "boolean",
 					"description": "是否禁用 TestAgent 本地与云端版本校验功能。",
 					"default": true,
 					"scope": "application"
 				},
-				"testagnet.remote.defaultExtensions": {
+				"tscode.remote.defaultExtensions": {
 					"type": "array",
 					"items": {
 						"type": "string"
 					},
-					"description": "应自动安装到所有 TestAgent Cloud 服务上的扩展列表。",
+					"description": "应自动安装到所有 云端沙箱 服务上的扩展列表。",
 					"scope": "application"
 				},
-				"testagnet.remote.defaultPath": {
+				"tscode.remote.defaultPath": {
 					"type": "string",
-					"description": "连接至 TestAgent Cloud 服务后默认进入的绝对路径。",
+					"description": "连接至 云端沙箱 服务后默认进入的绝对路径。",
 					"default": "/app",
 					"scope": "application"
 				},
-				"testagnet.remote.enableAgentForwarding": {
+				"tscode.remote.enableAgentForwarding": {
 					"type": "boolean",
-					"markdownDescription": "启用远程环境修复，使得配置选项 `ForwardAgent` 在 TestAgent Cloud 服务中按预期生效。",
+					"markdownDescription": "启用远程环境修复，使得配置选项 `ForwardAgent` 在 云端沙箱 服务中按预期生效。",
 					"scope": "application",
 					"default": true
 				},
-				"testagnet.remote.enableDynamicForwarding": {
+				"tscode.remote.enableDynamicForwarding": {
 					"type": "boolean",
 					"description": "是否使用动态转发，以便通过现有连接建立新的端口隧道。",
 					"scope": "application",
 					"default": true
 				},
-				"testagnet.remote.historyLimit": {
+				"tscode.remote.historyLimit": {
 					"type": "integer",
-					"description": "指定过期的 TestAgent Cloud 服务的保留数。",
+					"description": "指定过期的 云端沙箱 服务的保留数。",
 					"default": 5,
 					"minimum": 0,
 					"scope": "application"
 				},
-				"testagnet.remote.remotePlatform": {
+				"tscode.remote.remotePlatform": {
 					"type": "object",
 					"description": "将远程主机名映射到对应平台。有效值：linux、macos、windows。",
 					"scope": "application",
@@ -176,27 +176,27 @@
 						]
 					}
 				},
-				"testagnet.remote.remoteServerListenOnSocket": {
+				"tscode.remote.remoteServerListenOnSocket": {
 					"type": "boolean",
-					"markdownDescription": "为 true 时，TestAgent Cloud 服务将监听套接字路径，而不是监听端口。仅适用于 Linux 和 macOS 远程主机。要求 TestAgent Cloud 服务上启用了 `AllowStreamLocalForwarding` 。",
+					"markdownDescription": "为 true 时，云端沙箱 服务将监听套接字路径，而不是监听端口。仅适用于 Linux 和 macOS 远程主机。要求 云端沙箱 服务上启用了 `AllowStreamLocalForwarding` 。",
 					"default": false
 				},
-				"testagnet.remote.skipKnownHostsCheck": {
+				"tscode.remote.skipKnownHostsCheck": {
 					"type": "boolean",
-					"description": "是否在配置中为新增的 TestAgent Cloud 服务跳过主机指纹验证。",
+					"description": "是否在配置中为新增的 云端沙箱 服务跳过主机指纹验证。",
 					"default": true,
 					"scope": "application"
 				},
-				"testagnet.remote.statusSyncInterval": {
+				"tscode.remote.statusSyncInterval": {
 					"type": "number",
-					"description": "指定 TestAgent Cloud 服务的状态同步时间 (秒)。",
+					"description": "指定 云端沙箱 服务的状态同步时间 (秒)。",
 					"default": 5,
 					"minimum": 1,
 					"scope": "application"
 				},
-				"testagnet.remote.userName": {
+				"tscode.remote.userName": {
 					"type": "string",
-					"description": "TestAgent Cloud 服务登录用户名。",
+					"description": "云端沙箱 服务登录用户名。",
 					"default": "root",
 					"scope": "application"
 				}
@@ -206,7 +206,7 @@
 			"remote": [
 				{
 					"id": "sshHosts",
-					"name": "TestAgent Cloud",
+					"name": "云端沙箱",
 					"group": "targets@1",
 					"type": "webview",
 					"remoteName": "ssh-remote"
@@ -216,38 +216,38 @@
 		"commands": [
 			{
 				"command": "openremotessh.createContainer",
-				"title": "创建新的 TestAgent Cloud 服务...",
-				"category": "TestAgent Cloud"
+				"title": "创建新的 云端沙箱 服务...",
+				"category": "云端沙箱"
 			},
 			{
 				"command": "openremotessh.openAdmin",
 				"title": "打开管理员页面",
-				"category": "TestAgent Cloud"
+				"category": "云端沙箱"
 			},
 			{
 				"command": "openremotessh.openEmptyWindow",
-				"title": "连接到已有的 TestAgent Cloud 服务...",
-				"category": "TestAgent Cloud"
+				"title": "连接到已有的 云端沙箱 服务...",
+				"category": "云端沙箱"
 			},
 			{
 				"command": "openremotessh.openEmptyWindowInCurrentWindow",
-				"title": "将当前窗口连接到已有的 TestAgent Cloud 服务...",
-				"category": "TestAgent Cloud"
+				"title": "将当前窗口连接到已有的 云端沙箱 服务...",
+				"category": "云端沙箱"
 			},
 			{
 				"command": "openremotessh.openConfigFile",
 				"title": "打开配置文件",
-				"category": "TestAgent Cloud"
+				"category": "云端沙箱"
 			},
 			{
 				"command": "openremotessh.refreshContainers",
-				"title": "刷新 TestAgent Cloud 服务列表",
-				"category": "TestAgent Cloud"
+				"title": "刷新 云端沙箱 服务列表",
+				"category": "云端沙箱"
 			},
 			{
 				"command": "openremotessh.showLog",
 				"title": "显示日志",
-				"category": "TestAgent Cloud"
+				"category": "云端沙箱"
 			}
 		],
 		"resourceLabelFormatters": [
@@ -258,7 +258,7 @@
 					"label": "${path}",
 					"separator": "/",
 					"tildify": true,
-					"workspaceSuffix": "TestAgent Cloud 服务"
+					"workspaceSuffix": "云端沙箱 服务"
 				}
 			}
 		],

@@ -162,7 +162,7 @@ describe('AdminPanel', () => {
         await flushMessages();
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            '后端 TestAgent Cloud 服务请求失败\n返回错误：容器当前不可启动（错误码：container_not_ready，HTTP 409）',
+            '后端 云端沙箱 服务请求失败\n返回错误：容器当前不可启动（错误码：container_not_ready，HTTP 409）',
         );
     });
 
@@ -186,7 +186,7 @@ describe('AdminPanel', () => {
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
         const adminApi = createAdminApi();
         adminApi.stopContainer = vi.fn(async () => {
-            throw new RestClientError('network', REST_ERROR_CODES.TIMEOUT, '停止 TestAgent Cloud 服务超时');
+            throw new RestClientError('network', REST_ERROR_CODES.TIMEOUT, '停止 云端沙箱 服务超时');
         });
         const operationRegistry = new ContainerOperationRegistry();
         const reconcile = vi.fn(async () => false);
@@ -213,7 +213,7 @@ describe('AdminPanel', () => {
             html: expect.stringContaining('停止中'),
         }));
         expect(vscode.window.withProgress).toHaveBeenCalledWith(expect.objectContaining({
-            title: '正在停止 TestAgent Cloud 服务',
+            title: '正在停止 云端沙箱 服务',
             location: vscode.ProgressLocation.Notification,
             cancellable: false,
         }), expect.any(Function));
@@ -244,7 +244,7 @@ describe('AdminPanel', () => {
         expect(adminApi.restoreContainer).toHaveBeenCalledWith('container-1', { expiration_hours: 24 });
         expect(operationRegistry.get('container-1')).toMatchObject({ action: 'restore', phase: 'reconciling' });
         expect(vscode.window.withProgress).toHaveBeenCalledWith(expect.objectContaining({
-            title: '正在恢复 TestAgent Cloud 服务',
+            title: '正在恢复 云端沙箱 服务',
             location: vscode.ProgressLocation.Notification,
             cancellable: false,
         }), expect.any(Function));
@@ -1063,7 +1063,7 @@ function createWebviewPanel() {
     let disposed = false;
     const panel = {
         viewType: 'testagentRemote.adminPanel',
-        title: 'TestAgent Cloud 管理员控制台',
+        title: '云端沙箱 管理员控制台',
         webview: {
             options: {},
             html: '',

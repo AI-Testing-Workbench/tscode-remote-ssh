@@ -41,7 +41,7 @@ export interface UpsertContainerOptions {
 }
 
 export function getConfiguredContainerConfigPath(): string {
-    const configuredPath = vscode.workspace.getConfiguration('testagnet.remote').get<unknown>(
+    const configuredPath = vscode.workspace.getConfiguration('tscode.remote').get<unknown>(
         'configFile',
         DEFAULT_CONTAINER_CONFIG_SETTING,
     );

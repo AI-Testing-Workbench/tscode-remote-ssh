@@ -54,7 +54,7 @@ describe('ContainerSync', () => {
             },
             {
                 containerId: 'container-2',
-                host: 'TestAgent Cloud 服务',
+                host: '云端沙箱 服务',
                 status: 'stopped',
                 endpoint: null,
                 startedAt: undefined,
@@ -64,7 +64,7 @@ describe('ContainerSync', () => {
                 remote: true,
                 error: {
                     code: 'invalid_endpoint',
-                    message: 'TestAgent Cloud 服务 endpoint 必须是 IP:Port',
+                    message: '云端沙箱 服务 endpoint 必须是 IP:Port',
                 },
             },
         ]);
@@ -146,7 +146,7 @@ describe('ContainerSync', () => {
         const returned = await sync.sync();
         expect(returned.containers[0]).toMatchObject({
             containerId: 'container-3',
-            host: 'TestAgent Cloud 服务',
+            host: '云端沙箱 服务',
             hostName: '10.0.0.3',
             port: 22,
             status: 'running',
@@ -209,7 +209,7 @@ describe('ContainerSync', () => {
         const store = await createStore();
         const sync = createSync(store, {
             getContainerStatuses: vi.fn(async () => {
-                throw new RestClientError('http', 'backend_error', 'TestAgent Cloud 服务异常', 502);
+                throw new RestClientError('http', 'backend_error', '云端沙箱 服务异常', 502);
             }),
         });
 
@@ -259,12 +259,12 @@ describe('ContainerSync', () => {
         expect(result.containers.map(container => container.host)).toEqual([
             'alice/repo',
             'alice/repo (1)',
-            'TestAgent Cloud 服务',
+            '云端沙箱 服务',
         ]);
         const text = await fs.readFile(store.filePath, 'utf8');
         expect(text).toContain('Host alice/repo\n');
         expect(text).toContain('Host "alice/repo (1)"\n');
-        expect(text).toContain('Host "TestAgent Cloud 服务"\n');
+        expect(text).toContain('Host "云端沙箱 服务"\n');
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(3);
     });
 

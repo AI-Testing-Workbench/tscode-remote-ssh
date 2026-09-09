@@ -8,13 +8,13 @@ describe('remote settings', () => {
     });
 
     it('returns the configured values without mixing setting types', () => {
-        vscode.setConfigurationValue('testagnet.remote', 'backendApiUrl', ' https://api.example.test/ ');
-        vscode.setConfigurationValue('testagnet.remote', 'userName', ' cloud-user ');
-        vscode.setConfigurationValue('testagnet.remote', 'skipKnownHostsCheck', false);
-        vscode.setConfigurationValue('testagnet.remote', 'historyLimit', 12);
-        vscode.setConfigurationValue('testagnet.remote', 'statusSyncInterval', 2.5);
-        vscode.setConfigurationValue('testagnet.remote', 'debug', true);
-        vscode.setConfigurationValue('testagnet.remote', 'disableClientValidation', false);
+        vscode.setConfigurationValue('tscode.remote', 'backendApiUrl', ' https://api.example.test/ ');
+        vscode.setConfigurationValue('tscode.remote', 'userName', ' cloud-user ');
+        vscode.setConfigurationValue('tscode.remote', 'skipKnownHostsCheck', false);
+        vscode.setConfigurationValue('tscode.remote', 'historyLimit', 12);
+        vscode.setConfigurationValue('tscode.remote', 'statusSyncInterval', 2.5);
+        vscode.setConfigurationValue('tscode.remote', 'debug', true);
+        vscode.setConfigurationValue('tscode.remote', 'disableClientValidation', false);
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: 'https://api.example.test/',
@@ -28,13 +28,13 @@ describe('remote settings', () => {
     });
 
     it('uses safe defaults for invalid configured values', () => {
-        vscode.setConfigurationValue('testagnet.remote', 'backendApiUrl', false);
-        vscode.setConfigurationValue('testagnet.remote', 'userName', 42);
-        vscode.setConfigurationValue('testagnet.remote', 'skipKnownHostsCheck', 'false');
-        vscode.setConfigurationValue('testagnet.remote', 'historyLimit', 1.5);
-        vscode.setConfigurationValue('testagnet.remote', 'statusSyncInterval', 0);
-        vscode.setConfigurationValue('testagnet.remote', 'debug', 'true');
-        vscode.setConfigurationValue('testagnet.remote', 'disableClientValidation', 'false');
+        vscode.setConfigurationValue('tscode.remote', 'backendApiUrl', false);
+        vscode.setConfigurationValue('tscode.remote', 'userName', 42);
+        vscode.setConfigurationValue('tscode.remote', 'skipKnownHostsCheck', 'false');
+        vscode.setConfigurationValue('tscode.remote', 'historyLimit', 1.5);
+        vscode.setConfigurationValue('tscode.remote', 'statusSyncInterval', 0);
+        vscode.setConfigurationValue('tscode.remote', 'debug', 'true');
+        vscode.setConfigurationValue('tscode.remote', 'disableClientValidation', 'false');
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: '',
@@ -48,7 +48,7 @@ describe('remote settings', () => {
     });
 
     it('keeps an explicitly blank userName for current SSH fallback handling', () => {
-        vscode.setConfigurationValue('testagnet.remote', 'userName', '   ');
+        vscode.setConfigurationValue('tscode.remote', 'userName', '   ');
 
         expect(getRemoteSettings().userName).toBe('');
     });

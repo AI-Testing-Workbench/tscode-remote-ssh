@@ -282,7 +282,7 @@ export class AdminPanel implements vscode.Disposable {
         try {
             const settings = this.getSettings();
             if (!settings.backendApiUrl) {
-                throw new Error('未配置后端 TestAgent Cloud 管理服务的 API 地址');
+                throw new Error('未配置后端 云端沙箱 管理服务的 API 地址');
             }
             baseUrl = settings.backendApiUrl;
 
@@ -546,7 +546,7 @@ export class AdminPanel implements vscode.Disposable {
 
             try {
                 await vscode.window.withProgress({
-                    title: `正在${getContainerOperationName(action)} TestAgent Cloud 服务`,
+                    title: `正在${getContainerOperationName(action)} 云端沙箱 服务`,
                     location: vscode.ProgressLocation.Notification,
                     cancellable: false,
                 }, async progress => {
@@ -561,7 +561,7 @@ export class AdminPanel implements vscode.Disposable {
                         const confirmed = await this.reconcileContainerOperation(reconciling);
                         if (!confirmed) {
                             void vscode.window.showInformationMessage(
-                                `TestAgent Cloud 服务 "${containerId}" 已提交${getContainerOperationName(action)}，正在确认状态`,
+                                `云端沙箱 服务 "${containerId}" 已提交${getContainerOperationName(action)}，正在确认状态`,
                             );
                         }
                     }
@@ -575,7 +575,7 @@ export class AdminPanel implements vscode.Disposable {
                         void this.reconcileContainerOperation(reconciling);
                     }
                     void vscode.window.showInformationMessage(
-                        `TestAgent Cloud 服务 "${containerId}" 的${getContainerOperationName(action)}请求已等待 1 分钟，正在进行重试...`,
+                        `云端沙箱 服务 "${containerId}" 的${getContainerOperationName(action)}请求已等待 1 分钟，正在进行重试...`,
                     );
                     return true;
                 }
@@ -656,12 +656,12 @@ export class AdminPanel implements vscode.Disposable {
             this.clearReconciliationTimer(event.operation.containerId);
             if (event.operation.source === 'admin' && event.outcome === 'succeeded') {
                 void vscode.window.showInformationMessage(
-                    `TestAgent Cloud 服务 "${event.operation.containerId}" 已${getContainerOperationName(event.operation.action)}`,
+                    `云端沙箱 服务 "${event.operation.containerId}" 已${getContainerOperationName(event.operation.action)}`,
                 );
             }
             if (event.operation.source === 'admin' && event.outcome === 'failed' && event.operation.phase === 'reconciling') {
                 void vscode.window.showWarningMessage(
-                    `TestAgent Cloud 服务 "${event.operation.containerId}" 的${getContainerOperationName(event.operation.action)}结果暂时无法确认，请刷新后再试`,
+                    `云端沙箱 服务 "${event.operation.containerId}" 的${getContainerOperationName(event.operation.action)}结果暂时无法确认，请刷新后再试`,
                 );
             }
             if (panel && this.state.status === 'ready') {

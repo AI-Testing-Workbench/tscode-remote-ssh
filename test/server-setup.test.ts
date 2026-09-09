@@ -50,7 +50,7 @@ function resultForCommand(command: string): CommandResult {
 }
 
 async function generateScript(platform: 'linux' | 'windows', disableClientValidation: boolean): Promise<string> {
-    vscode.setConfigurationValue('testagnet.remote', 'disableClientValidation', disableClientValidation);
+    vscode.setConfigurationValue('tscode.remote', 'disableClientValidation', disableClientValidation);
     const commands: string[] = [];
     const connection = {
         exec: vi.fn(async (command: string) => {

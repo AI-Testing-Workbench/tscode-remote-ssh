@@ -273,7 +273,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         try {
             settings = this.getSettings();
         } catch (error) {
-            this.pageError = toSidebarError(error, 'settings_error', '读取 TestAgent Cloud 服务设置失败');
+            this.pageError = toSidebarError(error, 'settings_error', '读取 云端沙箱 服务设置失败');
             this.render();
             return;
         }
@@ -281,7 +281,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!settings.backendApiUrl) {
             this.pageError = {
                 code: 'api_url_missing',
-                message: '未配置后端 TestAgent Cloud 管理服务的 API 地址',
+                message: '未配置后端 云端沙箱 管理服务的 API 地址',
             };
             this.render();
             return;
@@ -624,7 +624,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
 
-        const title = '创建新 TestAgent Cloud 服务';
+        const title = '创建新 云端沙箱 服务';
         const giteeInput = await this.showInputBox({
             title,
             prompt: '码云仓库地址 (支持 HTTP 与 GIT 协议，可选)',
@@ -668,7 +668,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const createdSuccessfully = await vscode.window.withProgress({
-            title: '正在创建TestAgent Cloud 服务...',
+            title: '正在创建云端沙箱 服务...',
             location: vscode.ProgressLocation.Notification,
             cancellable: false,
         }, async () => {
@@ -771,7 +771,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private showCreateSuccess(): void {
-        void vscode.window.showInformationMessage('TestAgent Cloud 服务创建成功');
+        void vscode.window.showInformationMessage('云端沙箱 服务创建成功');
     }
 
     private completeWebviewAction(action: string, containerId: string | undefined): void {
@@ -825,7 +825,7 @@ function renderSidebarHtml(
         ? containers.map(container => renderContainerCard(container, inFlightContainerIds.has(container.containerId))).join('')
         : `<div class="empty-state">
                 ${renderIcon('cloud')}
-                <strong>还没有 TestAgent Cloud 服务</strong>
+                <strong>还没有 云端沙箱 服务</strong>
                 <span>请使用 测小智TestAgent 插件进行创建</span>
             </div>`;
     const adminButton = showAdmin ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin') : '';
@@ -833,7 +833,7 @@ function renderSidebarHtml(
     return renderDocument(`
         <main class="sidebar">
             <header class="app-bar">
-                <h1 class="page-title">TestAgent Cloud 服务管理面板</h1>
+                <h1 class="page-title">云端沙箱</h1>
                 <div class="toolbar-actions" role="toolbar">
                     ${adminButton}
                     ${configButton}
@@ -939,8 +939,8 @@ function renderCloudHtml(): string {
     return renderDocument(`
         <main class="cloud-card">
             <div class="cloud-icon" aria-hidden="true">${renderIcon('cloud')}</div>
-            <h1>当前已连接至 TestAgent Cloud 服务中</h1>
-            <p>所有改动均只在 TestAgent Cloud 服务内生效！</p>
+            <h1>当前已连接至 云端沙箱 服务中</h1>
+            <p>所有改动均只在 云端沙箱 服务内生效！</p>
             <button class="action-button action-primary" data-action="disconnect">${renderIcon('disconnect')}断开连接</button>
         </main>
     `);
@@ -951,7 +951,7 @@ function renderErrorHtml(message: string): string {
 }
 
 function renderLoadingHtml(): string {
-    return renderDocument('<main class="loading"><span class="loading-indicator"></span><p>正在加载 TestAgent Cloud 服务...</p></main>');
+    return renderDocument('<main class="loading"><span class="loading-indicator"></span><p>正在加载 云端沙箱 服务...</p></main>');
 }
 
 function renderUsage(container: SyncedContainer): string {

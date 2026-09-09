@@ -62,7 +62,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         onSync: result => sidebarSyncState.update(result),
         onInvalidEndpoint: ({ containerId, endpoint }) => {
             void vscode.window.showErrorMessage(
-                `TestAgent Cloud 服务 "${containerId}" 的 endpoint 无效，应为 IP:Port：${endpoint ?? '(空)'}`,
+                `云端沙箱 服务 "${containerId}" 的 endpoint 无效，应为 IP:Port：${endpoint ?? '(空)'}`,
                 { modal: true },
             );
         },

@@ -27,7 +27,7 @@ export async function connectToContainer(
     let reuseWindow = !hasOpenWorkspace();
     if (!reuseWindow) {
         const choice = await vscode.window.showInformationMessage(
-            '当前窗口已打开工作区，请选择连接 TestAgent Cloud 服务的方式',
+            '当前窗口已打开工作区，请选择连接 云端沙箱 服务的方式',
             OPEN_IN_CURRENT_WINDOW,
             OPEN_IN_NEW_WINDOW,
         );
@@ -45,7 +45,7 @@ export async function connectToContainer(
 }
 
 /**
- * Lists only TestAgent Cloud services from the dedicated config while still
+ * Lists only 云端沙箱 services from the dedicated config while still
  * accepting an arbitrary [user@]hostname[:port]. Whatever is typed is offered
  * as the first item, so typing a host and pressing enter keeps working.
  */
@@ -72,14 +72,14 @@ async function promptForHost(): Promise<string | undefined> {
 
     return new Promise<string | undefined>(resolve => {
         const quickPick = vscode.window.createQuickPick();
-        quickPick.title = '连接到 TestAgent Cloud 服务';
+        quickPick.title = '连接到 云端沙箱 服务';
         quickPick.placeholder = '选择已配置的连接，或者输入 [user@]hostname[:port]';
         quickPick.items = hostItems;
 
         quickPick.onDidChangeValue(value => {
             const typed = value.trim();
             quickPick.items = typed && !configuredHosts.includes(typed)
-                ? [{ label: typed, description: '连接到此 TestAgent Cloud 服务' }, ...hostItems]
+                ? [{ label: typed, description: '连接到此 云端沙箱 服务' }, ...hostItems]
                 : hostItems;
         });
 
@@ -99,7 +99,7 @@ async function promptForHost(): Promise<string | undefined> {
 }
 
 export function openRemoteSSHWindow(host: string, reuseWindow: boolean): Thenable<unknown> {
-    const defaultPath = vscode.workspace.getConfiguration('testagnet.remote').get<string>('defaultPath', '');
+    const defaultPath = vscode.workspace.getConfiguration('tscode.remote').get<string>('defaultPath', '');
     if (defaultPath) {
         return openRemoteSSHLocationWindow(host, defaultPath, reuseWindow);
     }

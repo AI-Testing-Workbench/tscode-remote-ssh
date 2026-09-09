@@ -60,7 +60,7 @@ interface RemoteStatusResult {
 
 const API_URL_ERROR: ContainerSyncError = {
     code: 'api_url_missing',
-    message: '未配置后端 TestAgent Cloud 管理服务的 API 地址',
+    message: '未配置后端 云端沙箱 管理服务的 API 地址',
 };
 
 const USER_ID_ERROR: ContainerSyncError = {
@@ -77,7 +77,7 @@ export function getHostFromEndpoint(endpoint: string | null | undefined): string
     return parseContainerEndpoint(endpoint)?.host;
 }
 
-export const DEFAULT_CONTAINER_HOST_NAME = 'TestAgent Cloud 服务';
+export const DEFAULT_CONTAINER_HOST_NAME = '云端沙箱 服务';
 
 export function getContainerHostName(
     giteeUser: string | null | undefined,
@@ -145,7 +145,7 @@ export class ContainerSync {
         }
 
         this.inFlight = this.performSync()
-            .catch(error => this.resultWithError(toSyncError(error, 'sync_failed', 'TestAgent Cloud 服务同步失败')))
+            .catch(error => this.resultWithError(toSyncError(error, 'sync_failed', '云端沙箱 服务同步失败')))
             .then(result => {
                 if (!this.disposed) {
                     try {
@@ -307,7 +307,7 @@ export class ContainerSync {
                 ? this.userApiFactory(settings.backendApiUrl)
                 : this.userApi ?? throwMissingUserApi();
         } catch (error) {
-            return this.resultWithError(toSyncError(error, 'api_error', 'TestAgent Cloud 服务同步 API 未配置'));
+            return this.resultWithError(toSyncError(error, 'api_error', '云端沙箱 服务同步 API 未配置'));
         }
 
         let catalog: { remoteIds: string[]; remoteStatuses: Map<string, RemoteStatusResult> };
@@ -417,7 +417,7 @@ export class ContainerSync {
             this.reportInvalidEndpoint(response.container_id, response.endpoint);
             return {
                 response,
-                error: { code: 'invalid_endpoint', message: 'TestAgent Cloud 服务 endpoint 必须是 IP:Port' },
+                error: { code: 'invalid_endpoint', message: '云端沙箱 服务 endpoint 必须是 IP:Port' },
             } as const;
         }
         this.clearInvalidEndpointNotifications(response.container_id);
@@ -506,7 +506,7 @@ export class ContainerSync {
             const hostName = entry?.hostName ?? assignment?.hostName ?? remoteStatus?.parsedEndpoint?.host;
             const port = entry?.port ?? assignment?.port ?? remoteStatus?.parsedEndpoint?.port;
             const endpointError = !entry && response && !hostName
-                ? { code: 'endpoint_missing', message: 'TestAgent Cloud 服务状态未返回可用 endpoint' }
+                ? { code: 'endpoint_missing', message: '云端沙箱 服务状态未返回可用 endpoint' }
                 : undefined;
             return {
                 containerId,

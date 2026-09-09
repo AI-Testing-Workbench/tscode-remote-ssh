@@ -136,7 +136,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
 
         // It looks like default values are not loaded yet when resolving a remote,
         // so let's hardcode the default values here
-        const remoteSSHconfig = vscode.workspace.getConfiguration('testagnet.remote');
+        const remoteSSHconfig = vscode.workspace.getConfiguration('tscode.remote');
         const enableDynamicForwarding = remoteSSHconfig.get<boolean>('enableDynamicForwarding', true)!;
         const enableAgentForwarding = remoteSSHconfig.get<boolean>('enableAgentForwarding', true)!;
         const defaultExtensions = remoteSSHconfig.get<string[]>('defaultExtensions', []);
@@ -145,7 +145,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const connectTimeout = remoteSSHconfig.get<number>('connectTimeout', 60)!;
 
         return vscode.window.withProgress({
-            title: `正在连接至 TestAgent Cloud 服务...`,
+            title: `正在连接至 云端沙箱 服务...`,
             location: vscode.ProgressLocation.Notification,
             cancellable: false
         }, async () => {
@@ -313,7 +313,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                         label: '${path}',
                         separator: '/',
                         tildify: true,
-                        workspaceSuffix: 'TestAgent Cloud 服务'
+                        workspaceSuffix: '云端沙箱 服务'
                     }
                 });
 
@@ -339,7 +339,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     const closeRemote = '关闭连接';
                     const retry = '重试';
                     const copyLog = '复制日志';
-                    const result = await vscode.window.showErrorMessage(`连接至 TestAgent Cloud 服务 "${sshDest.hostname}" 时失败，\n请重试或者复制日志并联系支持人员。`, { modal: true }, retry, copyLog, closeRemote);
+                    const result = await vscode.window.showErrorMessage(`连接至 云端沙箱 服务 "${sshDest.hostname}" 时失败，\n请重试或者复制日志并联系支持人员。`, { modal: true }, retry, copyLog, closeRemote);
                     if (result === closeRemote) {
                         await vscode.commands.executeCommand('workbench.action.remote.close');
                     } else if (result === retry) {

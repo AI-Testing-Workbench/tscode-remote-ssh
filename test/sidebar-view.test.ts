@@ -55,7 +55,7 @@ describe('SidebarViewProvider', () => {
                 syncedContainer('pending-1', 'pending', true),
                 syncedContainer('error-1', 'unknown', true, undefined, {
                     code: 'status_failed',
-                    message: 'TestAgent Cloud 服务状态查询失败',
+                    message: '云端沙箱 服务状态查询失败',
                 }),
                 syncedContainer('missing-1', 'missing', false, '2026-09-01T00:00:00.000Z'),
             ],
@@ -91,7 +91,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
         expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
-        expect(view.webview.html).toContain('<h1 class="page-title">TestAgent Cloud 服务管理面板</h1>');
+        expect(view.webview.html).toContain('<h1 class="page-title">云端沙箱</h1>');
         expect(view.webview.html).not.toContain('REMOTE WORKSPACE');
         expect(view.webview.html).not.toContain('YOUR SERVICES');
         expect(view.webview.html).not.toContain('>TC<');
@@ -191,7 +191,7 @@ describe('SidebarViewProvider', () => {
 
         await provider.resolveWebviewView(view as never);
 
-        expect(view.webview.html).toContain('当前已连接至 TestAgent Cloud 服务中');
+        expect(view.webview.html).toContain('当前已连接至 云端沙箱 服务中');
         expect(view.webview.html).toContain('.cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border: 2px solid var(--warning);');
         expect(view.webview.html).toContain('.cloud-card p { margin: 0 0 8px; color: var(--warning);');
         expect(view.webview.html).toContain('.cloud-card .action-button { width: 100%; max-width: 160px; max-height: 28px; padding: 0 12px; }');
@@ -231,14 +231,14 @@ describe('SidebarViewProvider', () => {
         const provider = createProvider({ view, getCloudMode });
 
         await provider.resolveWebviewView(view as never);
-        expect(view.webview.html).not.toContain('当前已连接至 TestAgent Cloud 服务中');
+        expect(view.webview.html).not.toContain('当前已连接至 云端沙箱 服务中');
 
         cloudMode = true;
         view.fireVisibility(true);
         await flushMessages();
 
         expect(getCloudMode).toHaveBeenCalledTimes(2);
-        expect(view.webview.html).toContain('当前已连接至 TestAgent Cloud 服务中');
+        expect(view.webview.html).toContain('当前已连接至 云端沙箱 服务中');
         expect(view.webview.html).not.toContain('data-action="refresh"');
     });
 
@@ -253,7 +253,7 @@ describe('SidebarViewProvider', () => {
         await provider.refreshCloudMode();
 
         expect(getCloudMode).toHaveBeenCalledTimes(2);
-        expect(view.webview.html).toContain('当前已连接至 TestAgent Cloud 服务中');
+        expect(view.webview.html).toContain('当前已连接至 云端沙箱 服务中');
     });
 
     it('renders a centered error without normal controls when configuration is invalid', async () => {
@@ -267,7 +267,7 @@ describe('SidebarViewProvider', () => {
 
         await provider.resolveWebviewView(view as never);
 
-        expect(view.webview.html).toContain('未配置后端 TestAgent Cloud 管理服务的 API 地址');
+        expect(view.webview.html).toContain('未配置后端 云端沙箱 管理服务的 API 地址');
         expect(view.webview.html).toContain('error-page');
         const errorStyle = view.webview.html.match(/\.error-page \{[^}]+\}/)?.[0] ?? '';
         expect(errorStyle).toContain('min-height: calc(100vh - 40px)');
@@ -584,13 +584,13 @@ describe('SidebarViewProvider', () => {
         expect(sync.refresh).toHaveBeenCalledOnce();
         expect(vscode.window.withProgress).toHaveBeenCalledWith(
             {
-                title: '正在创建TestAgent Cloud 服务...',
+                title: '正在创建云端沙箱 服务...',
                 location: vscode.ProgressLocation.Notification,
                 cancellable: false,
             },
             expect.any(Function),
         );
-        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('TestAgent Cloud 服务创建成功');
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('云端沙箱 服务创建成功');
     });
 
     it('extracts Gitee fields from a repository URL and only asks for the branch', async () => {
@@ -640,7 +640,7 @@ describe('SidebarViewProvider', () => {
         expect(publicApi.createContainer).toHaveBeenCalledWith({ authorize_general_account: false });
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-without-gitee',
-            host: 'TestAgent Cloud 服务',
+            host: '云端沙箱 服务',
             hostName: '10.0.0.6',
             port: 2222,
         }, { skipKnownHostsCheck: true, userName: 'root' });

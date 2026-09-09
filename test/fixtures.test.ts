@@ -132,7 +132,7 @@ for (const file of files.value) {
         ...fixtureFiles,
         '/data/vscodium/extensions/open-remote-ssh/src/scripts/server-setup.sh': SERVER_SETUP,
       });
-      vscode.setConfigurationValue('testagnet.remote', 'configFile', '/etc/ssh/ssh_config');
+      vscode.setConfigurationValue('tscode.remote', 'configFile', '/etc/ssh/ssh_config');
       vscode.window.setPassword(server.password);
 
       if (client.hosts) {

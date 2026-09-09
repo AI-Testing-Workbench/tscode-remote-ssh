@@ -39,7 +39,7 @@ describe('openRemoteSSHWindow', () => {
 
     it('opens the configured remote folder or workspace', async () => {
         const remotePath = '/workspaces/project.code-workspace';
-        vscode.setConfigurationValue('testagnet.remote', 'defaultPath', remotePath);
+        vscode.setConfigurationValue('tscode.remote', 'defaultPath', remotePath);
 
         await expect(openRemoteSSHWindow('dev', true)).resolves.toBeUndefined();
 
@@ -82,7 +82,7 @@ describe('openRemoteSSHWindow', () => {
         await connectToContainer('dev', refreshSidebar);
 
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-            '当前窗口已打开工作区，请选择连接 TestAgent Cloud 服务的方式',
+            '当前窗口已打开工作区，请选择连接 云端沙箱 服务的方式',
             '当前窗口打开',
             '新建窗口打开',
         );
@@ -116,16 +116,16 @@ describe('openRemoteSSHWindow', () => {
         expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
     });
 
-    it('lists only TestAgent Cloud services from the dedicated config', async () => {
+    it('lists only 云端沙箱 services from the dedicated config', async () => {
         const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-command-'));
         temporaryDirectories.push(directory);
         const configPath = path.join(directory, 'config');
         await fs.writeFile(configPath, [
-            'Host "TestAgent Cloud Service"',
+            'Host "云端沙箱 Service"',
             '\tHostName 10.0.0.1',
             '\tContainerId service-1',
             '',
-            'Host "Expired TestAgent Cloud Service"',
+            'Host "Expired 云端沙箱 Service"',
             '\tHostName 10.0.0.2',
             '\tContainerId expired-service',
             '\tExpiresAt 2026-09-01T00:00:00.000Z',
@@ -134,18 +134,18 @@ describe('openRemoteSSHWindow', () => {
             '\tHostName ordinary.example.test',
             '',
         ].join('\n'), 'utf8');
-        vscode.setConfigurationValue('testagnet.remote', 'configFile', configPath);
+        vscode.setConfigurationValue('tscode.remote', 'configFile', configPath);
         const configured = new ContainerConfig(configPath);
         const document = await configured.read();
         expect(configured.list(document.config)).toEqual([
             {
                 containerId: 'service-1',
-                host: 'TestAgent Cloud Service',
+                host: '云端沙箱 Service',
                 hostName: '10.0.0.1',
             },
             {
                 containerId: 'expired-service',
-                host: 'Expired TestAgent Cloud Service',
+                host: 'Expired 云端沙箱 Service',
                 hostName: '10.0.0.2',
                 expiresAt: '2026-09-01T00:00:00.000Z',
             },
@@ -174,7 +174,7 @@ describe('openRemoteSSHWindow', () => {
         const pending = promptOpenRemoteSSHWindow(false);
         await vi.waitFor(() => expect(vscode.window.createQuickPick).toHaveBeenCalledOnce());
 
-        expect(quickPick.items).toEqual([{ label: 'TestAgent Cloud Service' }]);
+        expect(quickPick.items).toEqual([{ label: '云端沙箱 Service' }]);
         hideListener?.();
         await pending;
         expect(vscode.commands.executeCommand).not.toHaveBeenCalled();

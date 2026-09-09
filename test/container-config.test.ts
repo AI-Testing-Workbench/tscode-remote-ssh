@@ -197,7 +197,7 @@ describe('ContainerConfig', () => {
     it('quotes service hosts containing spaces when normalizing an existing block', async () => {
         const store = await createStore();
         const initial = [
-            'Host TestAgent Cloud Service',
+            'Host 云端沙箱 Service',
             '\tContainerId container-spaced-host',
             '',
         ].join('\n');
@@ -206,11 +206,11 @@ describe('ContainerConfig', () => {
         const document = await store.read();
         expect(store.list(document.config)).toEqual([{
             containerId: 'container-spaced-host',
-            host: 'TestAgent Cloud Service',
+            host: '云端沙箱 Service',
         }]);
         expect(await store.write(document)).toBe(true);
 
-        expect(await fs.readFile(store.filePath, 'utf8')).toContain('Host "TestAgent Cloud Service"');
+        expect(await fs.readFile(store.filePath, 'utf8')).toContain('Host "云端沙箱 Service"');
     });
 
     it('does not add or remove known-host settings when disabled', async () => {

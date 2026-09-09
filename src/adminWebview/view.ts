@@ -42,7 +42,7 @@ function renderStatusPage(state: AdminPanelState): string {
     }
 
     const title = state.status === 'forbidden' ? '无权访问管理员页面' : '管理员页面加载失败';
-    const message = state.error ?? '后端 TestAgent Cloud 管理服务暂时不可用';
+    const message = state.error ?? '后端 云端沙箱 管理服务暂时不可用';
     return `<main class="status-page"><div class="status-card error-card">
         <span class="status-icon" aria-hidden="true">!</span>
         <h1>${escapeHtml(title)}</h1>
@@ -230,7 +230,7 @@ function renderContainersTab(
                 </div>
                 <div class="form-row two-fields branch-row">
                     <label>码云分支<input data-field="gitee_branch" data-persist-key="create.gitee_branch" type="text" placeholder="master"></label>
-                    <label class="check-button form-check"><input data-field="authorize_general_account" data-persist-key="create.authorize_general_account" type="checkbox">授权使用 TestAgent Cloud 通用码云账户</label>
+                    <label class="check-button form-check"><input data-field="authorize_general_account" data-persist-key="create.authorize_general_account" type="checkbox">授权使用 云端沙箱 通用码云账户</label>
                 </div>
                 <div class="form-row single-field">
                     <label>有效期 (小时)<input data-field="expiration_hours" data-persist-key="create.expiration_hours" type="number" min="0" step="1" placeholder="0 表示该容器永不过期"></label>
