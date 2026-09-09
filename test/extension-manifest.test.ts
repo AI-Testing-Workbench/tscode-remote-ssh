@@ -83,4 +83,17 @@ describe('extension manifest', () => {
             when: '!remoteName && !virtualWorkspace',
         }));
     });
+
+    it('declares the guarded administrator panel command', () => {
+        expect(manifest.contributes.commands.map(({ command }) => command)).toContain('openremotessh.openAdmin');
+        expect(manifest.activationEvents).toContain('onCommand:openremotessh.openAdmin');
+    });
+
+    it('declares activation events for every contributed command and provider', () => {
+        for (const { command } of manifest.contributes.commands) {
+            expect(manifest.activationEvents).toContain(`onCommand:${command}`);
+        }
+        expect(manifest.activationEvents).toContain('onResolveRemoteAuthority:ssh-remote');
+        expect(manifest.activationEvents).toContain('onView:sshHosts');
+    });
 });

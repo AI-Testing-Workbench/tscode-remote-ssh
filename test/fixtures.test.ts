@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import fse from '@zokugun/fs-extra-plus/sync';
 import { xtry } from '@zokugun/xtry/sync';
 import { vol } from 'memfs';
@@ -16,8 +17,13 @@ import { getMappedPort } from './utils/get-mapped-port';
 import { waitForSSHReady } from './utils/wait-for-ssh-ready';
 import { prepareAlpineServerRuntime, prepareServerPath } from './utils/prepare-server';
 
-const ROOT = fse.join('.', 'test', 'fixtures', 'default');
-const SERVER_SETUP = fse.readFile('./src/scripts/server-setup.sh', 'utf8').value!;
+const TEST_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(TEST_DIRECTORY, 'fixtures', 'default');
+const serverSetup = fse.readFile(path.resolve(TEST_DIRECTORY, '../src/scripts/server-setup.sh'), 'utf8');
+if (serverSetup.fails) {
+  throw serverSetup.error;
+}
+const SERVER_SETUP = serverSetup.value;
 
 type ClientOptions = {
   files: Record<string, string>;
@@ -173,22 +179,26 @@ for (const file of files.value) {
       const logger = new Log('Remote - SSH') as unknown as SourceLog;
       const extContext = new vscode.ExtensionContext() as unknown as import('vscode').ExtensionContext;
       const remoteSSHResolver = new RemoteSSHResolver(extContext, logger);
-      const remoteContext = new vscode.RemoteAuthorityResolverContext();
-      const authority = getRemoteAuthority('test');
-      const resultPromise = remoteSSHResolver.resolve(authority, remoteContext);
+      try {
+        const remoteContext = new vscode.RemoteAuthorityResolverContext();
+        const authority = getRemoteAuthority('test');
+        const resultPromise = remoteSSHResolver.resolve(authority, remoteContext);
 
-      if (server.removeServer) {
-        await expect(resultPromise).rejects.toThrow('Remote server script not found or empty');
-        return;
+        if (server.removeServer) {
+          await expect(resultPromise).rejects.toThrow('Remote server script not found or empty');
+          return;
+        }
+
+        const result = await resultPromise;
+
+        expect(result).toBeDefined();
+        if (!('host' in result)) {
+          throw new Error('Expected a resolved authority');
+        }
+        expect(result.host).to.eql('127.0.0.1');
+      } finally {
+        remoteSSHResolver.dispose();
       }
-
-      const result = await resultPromise;
-
-      expect(result).toBeDefined();
-      if (!('host' in result)) {
-        throw new Error('Expected a resolved authority');
-      }
-      expect(result.host).to.eql('127.0.0.1');
     }, 60_000);
   });
 }

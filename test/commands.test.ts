@@ -10,7 +10,8 @@ const temporaryDirectories: string[] = [];
 
 describe('openRemoteSSHWindow', () => {
     beforeEach(() => {
-        vscode.commands.executeCommand.mockClear();
+        vscode.commands.executeCommand.mockReset();
+        vscode.commands.executeCommand.mockResolvedValue(undefined);
         vscode.window.showInformationMessage.mockReset();
         vscode.Uri.from.mockClear();
         vscode.resetConfiguration();
@@ -26,8 +27,8 @@ describe('openRemoteSSHWindow', () => {
         }
     });
 
-    it('opens an empty remote window when no default path is configured', () => {
-        openRemoteSSHWindow('dev', false);
+    it('opens an empty remote window when no default path is configured', async () => {
+        await expect(openRemoteSSHWindow('dev', false)).resolves.toBeUndefined();
 
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'vscode.newWindow',
@@ -36,11 +37,11 @@ describe('openRemoteSSHWindow', () => {
         expect(vscode.Uri.from).not.toHaveBeenCalled();
     });
 
-    it('opens the configured remote folder or workspace', () => {
+    it('opens the configured remote folder or workspace', async () => {
         const remotePath = '/workspaces/project.code-workspace';
         vscode.setConfigurationValue('testagnet.remote', 'defaultPath', remotePath);
 
-        openRemoteSSHWindow('dev', true);
+        await expect(openRemoteSSHWindow('dev', true)).resolves.toBeUndefined();
 
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'vscode.openFolder',
@@ -51,6 +52,13 @@ describe('openRemoteSSHWindow', () => {
             'vscode.newWindow',
             expect.anything()
         );
+    });
+
+    it('propagates a remote window command failure', async () => {
+        const failure = new Error('window command failed');
+        vscode.commands.executeCommand.mockRejectedValueOnce(failure);
+
+        await expect(openRemoteSSHWindow('dev', false)).rejects.toBe(failure);
     });
 
     it('connects in the current window and refreshes the sidebar without an open workspace', async () => {

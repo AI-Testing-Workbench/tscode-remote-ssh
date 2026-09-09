@@ -15,7 +15,7 @@ import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } fr
 import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
 import { type PublicUserContainerApi } from './api/publicApi';
-import { type UserRestApi } from './api/restClient';
+import { formatRestClientError, type UserRestApi } from './api/restClient';
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
 
@@ -64,7 +64,7 @@ export class SidebarSyncState {
 
 export interface SidebarViewOptions {
     state: SidebarSyncState;
-    sync: Pick<ContainerSync, 'refresh'>;
+    sync: Pick<ContainerSync, 'refresh'> & Partial<Pick<ContainerSync, 'refreshAfterMutation' | 'runMutation' | 'markContainerDeleted' | 'clearContainerDeleted'>>;
     config: ContainerConfig;
     publicApi: PublicUserContainerApi;
     userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
@@ -86,7 +86,7 @@ export interface SidebarViewOptions {
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
     private readonly state: SidebarSyncState;
-    private readonly sync: Pick<ContainerSync, 'refresh'>;
+    private readonly sync: Pick<ContainerSync, 'refresh'> & Partial<Pick<ContainerSync, 'refreshAfterMutation' | 'runMutation' | 'markContainerDeleted' | 'clearContainerDeleted'>>;
     private readonly config: ContainerConfig;
     private readonly publicApi: PublicUserContainerApi;
     private readonly userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
@@ -105,6 +105,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         options: vscode.QuickPickOptions & { canPickMany: true },
     ) => Thenable<string[] | undefined>;
     private readonly stateSubscription: { dispose: () => void };
+    private readonly optimisticallyRemovedContainerIds = new Set<string>();
 
     private webviewView: vscode.WebviewView | undefined;
     private messageSubscription: vscode.Disposable | undefined;
@@ -112,6 +113,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private viewVisibilitySubscription: vscode.Disposable | undefined;
     private adminCheckInFlight: Promise<void> | undefined;
     private createInFlight: Promise<void> | undefined;
+    private readonly containerOperationCounts = new Map<string, number>();
     private pageError: ContainerSyncError | undefined;
     private pageReady = false;
     private adminAllowed = false;
@@ -134,7 +136,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.onDisconnect = options.onDisconnect;
         this.showInputBox = options.showInputBox ?? (inputOptions => vscode.window.showInputBox(inputOptions));
         this.showQuickPick = options.showQuickPick ?? ((items, quickPickOptions) => vscode.window.showQuickPick(items, quickPickOptions));
-        this.stateSubscription = this.state.subscribe(() => this.render());
+        this.stateSubscription = this.state.subscribe(() => this.handleSyncStateUpdated());
     }
 
     public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
@@ -218,6 +220,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.messageSubscription = undefined;
         this.viewDisposeSubscription = undefined;
         this.viewVisibilitySubscription = undefined;
+        this.containerOperationCounts.clear();
+        this.optimisticallyRemovedContainerIds.clear();
         this.webviewView = undefined;
     }
 
@@ -331,6 +335,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const result = this.state.getState();
+        const containers = result.containers.filter(container => !this.optimisticallyRemovedContainerIds.has(container.containerId));
         const error = this.pageError ?? result.error;
         if (error) {
             this.setWebviewHtml(renderErrorHtml(error.message));
@@ -342,9 +347,51 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         this.setWebviewHtml(renderSidebarHtml(
-            result.containers,
+            containers,
             this.adminAllowed,
+            new Set(this.containerOperationCounts.keys()),
         ));
+    }
+
+    private handleSyncStateUpdated(): void {
+        const result = this.state.getState();
+        for (const containerId of this.optimisticallyRemovedContainerIds) {
+            if (!result.containers.some(container => container.containerId === containerId)) {
+                this.optimisticallyRemovedContainerIds.delete(containerId);
+            }
+        }
+        this.render();
+    }
+
+    private optimisticallyRemoveContainer(containerId: string): void {
+        this.optimisticallyRemovedContainerIds.add(containerId);
+        this.render();
+    }
+
+    private restoreOptimisticallyRemovedContainer(containerId: string): void {
+        if (this.optimisticallyRemovedContainerIds.delete(containerId)) {
+            this.render();
+        }
+    }
+
+    private refreshAfterMutation(): Promise<ContainerSyncResult> {
+        return this.sync.refreshAfterMutation
+            ? this.sync.refreshAfterMutation()
+            : this.sync.refresh();
+    }
+
+    private runMutation<T>(operation: () => Promise<T>): Promise<T> {
+        return this.sync.runMutation
+            ? this.sync.runMutation(operation)
+            : operation();
+    }
+
+    private markContainerDeleted(containerId: string): void {
+        this.sync.markContainerDeleted?.(containerId);
+    }
+
+    private clearContainerDeleted(containerId: string): void {
+        this.sync.clearContainerDeleted?.(containerId);
     }
 
     private setWebviewHtml(html: string): void {
@@ -418,6 +465,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (container.error) {
             throw new Error(`服务 "${container.containerId}" 当前不可连接：${container.error.message}`);
         }
+        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0) {
+            throw new Error(`服务 "${container.containerId}" 正在执行操作，暂时无法连接`);
+        }
+        if (container.status.toLowerCase() !== 'running') {
+            throw new Error(`服务 "${container.containerId}" 当前状态为“${getStatusLabel(container)}”，仅运行中的服务可以连接`);
+        }
         if (!container.host) {
             throw new Error(`服务 "${container.containerId}" 没有可用的连接端口`);
         }
@@ -435,8 +488,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!containerId) {
             throw new Error('缺少容器 ID');
         }
-        await action(containerId);
-        await this.sync.refresh();
+        if (container.status.toLowerCase() === 'failed') {
+            throw new Error(`服务 "${container.containerId}" 处于失败状态，不能重启`);
+        }
+        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0) {
+            throw new Error(`服务 "${container.containerId}" 正在执行操作，请稍后重试`);
+        }
+        this.beginContainerOperation(containerId);
+        try {
+            await this.runMutation(() => action(containerId));
+            await this.refreshAfterMutation();
+        } finally {
+            this.endContainerOperation(containerId);
+            this.render();
+        }
     }
 
     private async deleteContainer(containerId: string | undefined): Promise<void> {
@@ -447,24 +512,46 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!container || !container.remote) {
             throw new Error('服务已被删除，无法执行此操作');
         }
-        await this.publicApi.deleteContainer(containerId);
-        await this.removeContainerFromConfig(containerId);
-        await this.sync.refresh();
+        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0) {
+            throw new Error(`服务 "${container.containerId}" 正在执行操作，请稍后重试`);
+        }
+        this.beginContainerOperation(containerId);
+        this.markContainerDeleted(containerId);
+        this.optimisticallyRemoveContainer(containerId);
+        try {
+            await this.runMutation(async () => {
+                await this.publicApi.deleteContainer(containerId);
+                await this.removeContainerFromConfig(containerId);
+            });
+            await this.refreshAfterMutation();
+        } catch (error) {
+            this.clearContainerDeleted(containerId);
+            this.restoreOptimisticallyRemovedContainer(containerId);
+            throw error;
+        } finally {
+            this.endContainerOperation(containerId);
+            this.render();
+        }
     }
 
     private async removeHistory(containerId: string | undefined): Promise<void> {
         if (!containerId) {
             throw new Error('缺少容器 ID');
         }
-        await this.removeContainerFromConfig(containerId);
-        await this.sync.refresh();
+        const removed = await this.runMutation(() => this.removeContainerFromConfig(containerId));
+        if (removed) {
+            this.optimisticallyRemoveContainer(containerId);
+        }
+        await this.refreshAfterMutation();
     }
 
-    private async removeContainerFromConfig(containerId: string): Promise<void> {
+    private async removeContainerFromConfig(containerId: string): Promise<boolean> {
         const document = await this.config.read();
-        if (this.config.removeContainer(document.config, containerId)) {
+        const removed = this.config.removeContainer(document.config, containerId);
+        if (removed) {
             await this.config.write(document);
         }
+        return removed;
     }
 
     private async performCreateContainer(): Promise<void> {
@@ -529,46 +616,51 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             location: vscode.ProgressLocation.Notification,
             cancellable: false,
         }, async () => {
-            const created = await this.publicApi.createContainer({
-                ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
-                ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
-                ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
-                ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
-                authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
-            });
-            if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
-                this.showError('响应中缺少有效的 container_id');
-                return false;
-            }
+            const createdSuccessfully = await this.runMutation(async () => {
+                const created = await this.publicApi.createContainer({
+                    ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
+                    ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
+                    ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
+                    ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
+                    authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
+                });
+                if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
+                    this.showError('响应中缺少有效的 container_id');
+                    return false;
+                }
 
-            const settings = this.getSettings();
-            const userName = getEffectiveRemoteUserName(settings.userName);
-            const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
-            if (!endpoint) {
-                this.showError(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
-                return false;
-            }
+                const settings = this.getSettings();
+                const userName = getEffectiveRemoteUserName(settings.userName);
+                const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
+                if (!endpoint) {
+                    this.showError(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                    return false;
+                }
 
-            const document = await this.config.read();
-            const existingEntries = this.config.list(document.config)
-                .filter(entry => entry.containerId !== created.container_id);
-            const usedNames = new Set(existingEntries.map(entry => entry.host).filter(Boolean));
-            const host = getUniqueHostName(
-                getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
-                usedNames,
-            );
-            this.config.upsertContainer(document.config, {
-                containerId: created.container_id,
-                host,
-                hostName: endpoint.host,
-                port: endpoint.port,
-            }, {
-                skipKnownHostsCheck: settings.skipKnownHostsCheck,
-                userName,
+                const document = await this.config.read();
+                const existingEntries = this.config.list(document.config)
+                    .filter(entry => entry.containerId !== created.container_id);
+                const usedNames = new Set(existingEntries.map(entry => entry.host).filter(Boolean));
+                const host = getUniqueHostName(
+                    getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
+                    usedNames,
+                );
+                this.config.upsertContainer(document.config, {
+                    containerId: created.container_id,
+                    host,
+                    hostName: endpoint.host,
+                    port: endpoint.port,
+                }, {
+                    skipKnownHostsCheck: settings.skipKnownHostsCheck,
+                    userName,
+                });
+                await this.config.write(document);
+                return true;
             });
-            await this.config.write(document);
-            await this.sync.refresh();
-            return true;
+            if (createdSuccessfully) {
+                await this.refreshAfterMutation();
+            }
+            return createdSuccessfully;
         });
         if (createdSuccessfully) {
             this.showCreateSuccess();
@@ -579,7 +671,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!containerId) {
             return undefined;
         }
+        if (this.optimisticallyRemovedContainerIds.has(containerId)) {
+            return undefined;
+        }
         return this.state.getState().containers.find(container => container.containerId === containerId);
+    }
+
+    private beginContainerOperation(containerId: string): void {
+        this.containerOperationCounts.set(containerId, (this.containerOperationCounts.get(containerId) ?? 0) + 1);
+        this.render();
+    }
+
+    private endContainerOperation(containerId: string): void {
+        const count = this.containerOperationCounts.get(containerId) ?? 0;
+        if (count <= 1) {
+            this.containerOperationCounts.delete(containerId);
+        } else {
+            this.containerOperationCounts.set(containerId, count - 1);
+        }
     }
 
     private safeIsDisconnected(): boolean {
@@ -591,11 +700,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private showError(error: unknown): void {
-        const message = typeof error === 'string'
-            ? error
-            : error instanceof Error && error.message
-                ? error.message
-                : 'TestAgent Cloud 服务操作失败';
+        const message = formatRestClientError(error);
         void vscode.window.showErrorMessage(message, { modal: true });
     }
 
@@ -644,15 +749,19 @@ function renderIcon(icon: SidebarIcon): string {
     return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SIDEBAR_ICONS[icon]}</svg>`;
 }
 
-function renderSidebarHtml(containers: SyncedContainer[], showAdmin: boolean): string {
+function renderSidebarHtml(
+    containers: SyncedContainer[],
+    showAdmin: boolean,
+    inFlightContainerIds: ReadonlySet<string>,
+): string {
     const cards = containers.length
-        ? containers.map(renderContainerCard).join('')
+        ? containers.map(container => renderContainerCard(container, inFlightContainerIds.has(container.containerId))).join('')
         : `<div class="empty-state">
                 ${renderIcon('cloud')}
                 <strong>还没有 TestAgent Cloud 服务</strong>
                 <span>请使用 测小智TestAgent 插件进行创建</span>
             </div>`;
-    const adminButton = showAdmin ? renderToolbarButton('openAdmin', '管理员页面', 'admin') : '';
+    const adminButton = showAdmin ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin') : '';
     const configButton = showAdmin ? renderToolbarButton('openConfig', '打开配置文件', 'config') : '';
     return renderDocument(`
         <main class="sidebar">
@@ -673,7 +782,7 @@ function renderToolbarButton(action: string, label: string, icon: SidebarIcon): 
     return `<button class="icon-button" data-action="${action}" title="${escapeHtml(label)}">${renderIcon(icon)}</button>`;
 }
 
-function renderContainerCard(container: SyncedContainer): string {
+function renderContainerCard(container: SyncedContainer, operationInFlight: boolean): string {
     const statusClass = getStatusClass(container);
     const statusLabel = getStatusLabel(container);
     const usage = renderUsage(container);
@@ -681,8 +790,13 @@ function renderContainerCard(container: SyncedContainer): string {
     const containerId = escapeHtml(container.containerId);
     const host = escapeHtml(container.host || '未配置 Host');
     const canOperate = container.remote;
-    const canConnect = canOperate && !container.error && !!container.host;
-    const disabledOperation = canOperate ? '' : ' disabled';
+    const canConnect = canOperate
+        && container.status.toLowerCase() === 'running'
+        && !container.error
+        && !!container.host
+        && !operationInFlight;
+    const disabledOperation = canOperate && !operationInFlight ? '' : ' disabled';
+    const disabledRestart = canOperate && container.status.toLowerCase() !== 'failed' && !operationInFlight ? '' : ' disabled';
     const disabledConnect = canConnect ? '' : ' disabled';
     const error = container.error
         ? `<div class="card-error">${escapeHtml(container.error.message)}</div>`
@@ -694,8 +808,8 @@ function renderContainerCard(container: SyncedContainer): string {
             </div>`
         : '';
     return `
-        <article class="container-card" data-container-id="${containerId}">
-            <div class="service-heading" data-container-id="${containerId}">
+        <article class="container-card" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}">
+            <div class="service-heading" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}">
                 <strong class="service-name">${host}</strong>
                 <div class="service-status">
                     <span class="status-dot ${statusClass}"></span>
@@ -705,8 +819,8 @@ function renderContainerCard(container: SyncedContainer): string {
             </div>
             ${error}
             <div class="card-actions">
-                <button class="action-button action-primary" data-action="connect" data-container-id="${containerId}"${disabledConnect}>${renderIcon('connect')}连接</button>
-                <button class="action-button" data-action="restart" data-container-id="${containerId}"${disabledOperation}>${renderIcon('restart')}重启</button>
+                <button class="action-button action-primary" data-action="connect" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}"${disabledConnect}>${renderIcon('connect')}连接</button>
+                <button class="action-button" data-action="restart" data-container-id="${containerId}"${disabledRestart}>${renderIcon('restart')}重启</button>
                 <button class="action-button" data-action="delete" data-container-id="${containerId}"${disabledOperation}>${renderIcon('delete')}销毁</button>
             </div>
             ${expiration}
@@ -880,7 +994,7 @@ function renderDocument(body: string): string {
         .status-label { white-space: nowrap; }
         .status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--vscode-charts-yellow); }
         .status-dot.running { background: var(--vscode-testing-iconPassed, #3fb950); }
-        .status-dot.stopped, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
+        .status-dot.stopped, .status-dot.failed, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
         .status-dot.missing { background: var(--vscode-descriptionForeground); }
         .usage-separator { color: var(--on-surface-variant); font-weight: 700; }
         .usage-metric { white-space: nowrap; }
@@ -963,6 +1077,9 @@ function getStatusClass(container: SyncedContainer): string {
     if (container.status.toLowerCase() === 'stopped') {
         return 'stopped';
     }
+    if (container.status.toLowerCase() === 'failed') {
+        return 'failed';
+    }
     return 'unknown';
 }
 
@@ -975,6 +1092,14 @@ function getStatusLabel(container: SyncedContainer): string {
             return '运行中';
         case 'stopped':
             return '已停止';
+        case 'failed':
+            return '已失败';
+        case 'starting':
+            return '启动中';
+        case 'stopping':
+            return '停止中';
+        case 'restarting':
+            return '重启中';
         case 'pending':
             return '准备中';
         default:

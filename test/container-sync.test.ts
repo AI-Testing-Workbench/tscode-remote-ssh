@@ -442,7 +442,7 @@ describe('ContainerSync', () => {
             getContainerIds,
             getContainer: vi.fn(),
         }, {
-            backendApiUrl: '',
+            backendApiUrl: 'http://api.example.test',
             statusSyncInterval: 2.5,
             debug: false,
         });
@@ -451,12 +451,15 @@ describe('ContainerSync', () => {
         sync.start();
         expect(setIntervalSpy).toHaveBeenCalledOnce();
         expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2500);
-        await vi.waitFor(() => expect(getContainerIds).not.toHaveBeenCalled());
+        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledOnce());
+
+        await vi.advanceTimersByTimeAsync(2500);
+        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledTimes(2));
 
         sync.dispose();
         expect(clearIntervalSpy).toHaveBeenCalledOnce();
         await vi.advanceTimersByTimeAsync(10_000);
-        expect(getContainerIds).not.toHaveBeenCalled();
+        expect(getContainerIds).toHaveBeenCalledTimes(2);
     });
 
     it('does not notify the sidebar after an in-flight sync is disposed', async () => {
@@ -493,34 +496,6 @@ describe('ContainerSync', () => {
         expect(onSync).not.toHaveBeenCalled();
     });
 
-    it('uses the configured interval once, runs an immediate check, and clears it on dispose', async () => {
-        vi.useFakeTimers();
-        const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
-        const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
-        const store = await createStore();
-        const getContainerIds = vi.fn(async () => ({ container_ids: [] }));
-        const sync = createSync(store, {
-            getContainerIds,
-            getContainer: vi.fn(),
-        }, {
-            backendApiUrl: '',
-            statusSyncInterval: 2.5,
-            debug: false,
-        });
-
-        sync.start();
-        sync.start();
-        expect(setIntervalSpy).toHaveBeenCalledOnce();
-        expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2500);
-        await Promise.resolve();
-        expect(getContainerIds).not.toHaveBeenCalled();
-
-        sync.dispose();
-        expect(clearIntervalSpy).toHaveBeenCalledOnce();
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(getContainerIds).not.toHaveBeenCalled();
-    });
-
     it('makes manual refresh use the same in-flight sync promise', async () => {
         const store = await createStore();
         const sync = createSync(store, {
@@ -531,6 +506,78 @@ describe('ContainerSync', () => {
         const first = sync.sync();
         expect(sync.refresh()).toBe(first);
         await first;
+    });
+
+    it('runs a fresh sync after an in-flight sync for a mutation', async () => {
+        const store = await createStore();
+        const resolvers: Array<(value: { container_ids: string[] }) => void> = [];
+        const getContainerIds = vi.fn(() => new Promise<{ container_ids: string[] }>(resolve => {
+            resolvers.push(resolve);
+        }));
+        const sync = createSync(store, {
+            getContainerIds,
+            getContainer: vi.fn(),
+        });
+
+        const first = sync.sync();
+        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledOnce());
+        const forced = sync.refreshAfterMutation();
+        expect(sync.refreshAfterMutation()).toBe(forced);
+        expect(forced).not.toBe(first);
+
+        resolvers.shift()?.({ container_ids: [] });
+        await vi.waitFor(() => expect(getContainerIds).toHaveBeenCalledTimes(2));
+        resolvers.shift()?.({ container_ids: [] });
+        await first;
+        await forced;
+    });
+
+    it('blocks synchronization while a mutation owns the config boundary', async () => {
+        const store = await createStore();
+        const getContainerIds = vi.fn(async () => ({ container_ids: [] }));
+        const sync = createSync(store, {
+            getContainerIds,
+            getContainer: vi.fn(),
+        });
+        let releaseMutation: (() => void) | undefined;
+        let mutationStarted = false;
+        const mutation = sync.runMutation(async () => {
+            mutationStarted = true;
+            await new Promise<void>(resolve => {
+                releaseMutation = resolve;
+            });
+        });
+        const waitingSync = sync.sync();
+
+        await vi.waitFor(() => expect(mutationStarted).toBe(true));
+        expect(getContainerIds).not.toHaveBeenCalled();
+        releaseMutation?.();
+        await mutation;
+        await waitingSync;
+        expect(getContainerIds).toHaveBeenCalledOnce();
+    });
+
+    it('suppresses a stale remote ID after local deletion until the cloud confirms removal', async () => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, { containerId: 'deleted-1', host: 'deleted-host' });
+        store.removeContainer(document.config, 'deleted-1');
+        await store.write(document);
+
+        let remoteIds = ['deleted-1'];
+        const sync = createSync(store, {
+            getContainerIds: vi.fn(async () => ({ container_ids: remoteIds })),
+            getContainer: vi.fn(),
+        });
+        sync.markContainerDeleted('deleted-1');
+
+        const stale = await sync.sync();
+        expect(stale.containers).toEqual([]);
+        expect(store.list((await store.read()).config)).toEqual([]);
+
+        remoteIds = [];
+        const confirmed = await sync.sync();
+        expect(confirmed.containers).toEqual([]);
     });
 });
 

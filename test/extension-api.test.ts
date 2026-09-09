@@ -20,8 +20,18 @@ describe('public user container API', () => {
             userApiFactory,
         });
 
-        await api.createContainer({ gitee_repository: 'repo' });
-        await api.getContainerIds({ gitee_user: 'Alice' });
+        await api.createContainer({
+            gitee_user: 'Alice',
+            gitee_repository: 'repo',
+            gitee_branch: 'main',
+            gitee_url: 'https://gitee.com',
+            authorize_general_account: true,
+        });
+        await api.getContainerIds({
+            gitee_user: 'Alice',
+            gitee_repository: 'repo',
+            gitee_branch: 'main',
+        });
         await api.getContainer('container-1');
         await api.startContainer('container-1');
         await api.stopContainer('container-1');
@@ -39,13 +49,24 @@ describe('public user container API', () => {
         ]);
         expect((api as unknown as Record<string, unknown>).checkAdmin).toBeUndefined();
         expect(userApi.createContainer).toHaveBeenCalledWith({
+            gitee_user: 'Alice',
             gitee_repository: 'repo',
+            gitee_branch: 'main',
+            gitee_url: 'https://gitee.com',
+            authorize_general_account: true,
             user_id: 'user-1',
         });
         expect(userApi.getContainerIds).toHaveBeenCalledWith({
             gitee_user: 'Alice',
+            gitee_repository: 'repo',
+            gitee_branch: 'main',
             user_id: 'user-1',
         });
+        expect(userApi.getContainer).toHaveBeenCalledWith('container-1');
+        expect(userApi.startContainer).toHaveBeenCalledWith('container-1');
+        expect(userApi.stopContainer).toHaveBeenCalledWith('container-1');
+        expect(userApi.restartContainer).toHaveBeenCalledWith('container-1');
+        expect(userApi.deleteContainer).toHaveBeenCalledWith('container-1');
         expect(userApiFactory).toHaveBeenCalledTimes(7);
         expect(userIdProvider.getCurrentUserId).toHaveBeenCalledTimes(7);
     });

@@ -22,6 +22,7 @@ function setConfigurationValue(section: string, key: string, value: unknown) {
 
 function resetConfiguration() {
     configurationValues.clear();
+    $password = '';
     workspace.workspaceFolders = undefined;
     workspace.workspaceFile = undefined;
 }
@@ -106,6 +107,12 @@ const window = {
     }),
     createTreeView: vi.fn(() => ({ dispose: vi.fn() })),
     registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
+    createWebviewPanel: vi.fn(),
+    showOpenDialog: vi.fn(),
+};
+
+const ViewColumn = {
+    Active: -1,
 };
 
 const Uri = {
@@ -120,7 +127,7 @@ const workspace = {
             const settingKey = `${section}.${key}`;
             return configurationValues.has(settingKey)
                 ? configurationValues.get(settingKey)
-                : key === 'configFile' ? '~/.local/share/testagent' : defaultValue;
+                : defaultValue;
         }),
         update: vi.fn(() => Promise.resolve())
     })),
@@ -140,6 +147,7 @@ export {
     resetConfiguration,
     setConfigurationValue,
     Uri,
+    ViewColumn,
     window,
     version,
     workspace,

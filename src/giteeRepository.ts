@@ -4,8 +4,8 @@ export interface ParsedGiteeRepository {
     url: string;
 }
 
-const HTTPS_REPOSITORY_PATTERN = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/?$/i;
-const SSH_REPOSITORY_PATTERN = /^(git@[^:\s]+:)([^/\s]+)\/([^/\s]+)\/?$/i;
+const HTTPS_REPOSITORY_PATTERN = /^https?:\/\/([^/\s?#]+)\/([^/\s?#]+)\/([^/\s?#]+)(?:\/[^?\s]*)?(?:[?#][^\s]*)?$/i;
+const SSH_REPOSITORY_PATTERN = /^(git@[^:\s]+:)([^/\s]+)\/([^/\s?#]+)(?:\/[^?#\s]*)?(?:[?#][^\s]*)?$/i;
 
 export function parseGiteeRepositoryUrl(input: string): ParsedGiteeRepository | undefined {
     const value = input.trim();

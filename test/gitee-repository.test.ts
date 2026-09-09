@@ -21,6 +21,12 @@ describe('Gitee repository input', () => {
                 repository: 'testagent-cloud-remote-ssh',
                 url: 'http://github.com',
             });
+        expect(parseGiteeRepositoryUrl('https://github.com/JustWorkingAndWorking/testagent-cloud-remote-ssh/tree/main?tab=readme'))
+            .toEqual({
+                user: 'JustWorkingAndWorking',
+                repository: 'testagent-cloud-remote-ssh',
+                url: 'https://github.com',
+            });
     });
 
     it('extracts the SSH repository fields with or without the git suffix', () => {

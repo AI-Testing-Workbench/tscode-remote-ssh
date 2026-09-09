@@ -32,19 +32,31 @@ export function prepareAlpineServerRuntime(containerName: string, username: stri
 export async function prepareServerPath(connection: SSHConnection): Promise<void> {
     const serverRoot = '$HOME/.vscodium-server';
     const fixedServerPath = `${serverRoot}/bin/${DISTRO_COMMIT}`;
+    const successMarker = 'TESTAGENT_SERVER_PATH_READY';
     const command = [
+        'set -eu',
         `if [ ! -s "${fixedServerPath}/bin/codium-server" ]; then`,
         `  rm -rf "${fixedServerPath}"`,
+        '  candidate_dir=',
         `  for candidate in "${serverRoot}"/bin/*/bin/codium-server; do`,
         '    if [ -s "$candidate" ]; then',
         '      candidate_dir="$(dirname "$(dirname "$candidate")")"',
-        `      ln -s "$candidate_dir" "${fixedServerPath}"`,
         '      break',
         '    fi',
         '  done',
+        '  if [ -z "$candidate_dir" ]; then',
+        '    echo "No prepared remote server was found" >&2',
+        '    exit 1',
+        '  fi',
+        `  ln -s "$candidate_dir" "${fixedServerPath}"`,
         'fi',
+        `test -s "${fixedServerPath}/bin/codium-server"`,
+        `printf '%s\\n' '${successMarker}'`,
     ].join('\n');
 
     const encodedCommand = Buffer.from(command).toString('base64');
-    await connection.exec(`echo ${encodedCommand} | base64 -d | bash -l`);
+    const result = await connection.exec(`echo ${encodedCommand} | base64 -d | bash -l`);
+    if (!result.stdout.includes(successMarker)) {
+        throw new Error(`Remote server path preparation failed: ${result.stderr || 'unknown error'}`);
+    }
 }

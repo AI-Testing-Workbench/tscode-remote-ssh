@@ -17,11 +17,11 @@ export async function waitForSSHReady(username: string, password: string, port: 
 
         try {
             await conn.connect();
-            await conn.close();
-
             return;
         } catch {
             await sleep(1000);
+        } finally {
+            await conn.close().catch(() => undefined);
         }
     }
 

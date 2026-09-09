@@ -1,4 +1,3 @@
-import * as fsSync from 'node:fs';
 import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -37,11 +36,8 @@ describe('SSH config path setting', () => {
     });
 
     it('uses the dedicated default when configFile is not overridden', () => {
-        const defaultPath = path.resolve(os.homedir(), '.local', 'share', 'testagent');
-        const expectedPath = fsSync.existsSync(defaultPath) && fsSync.statSync(defaultPath).isDirectory()
-            ? path.join(defaultPath, 'config')
-            : defaultPath;
-        expect(getConfiguredContainerConfigPath()).toBe(expectedPath);
+        const defaultPath = path.resolve(os.homedir(), '.local', 'share', 'testagent', 'config');
+        expect(getConfiguredContainerConfigPath()).toBe(defaultPath);
         expect(DEFAULT_CONTAINER_CONFIG_SETTING).toBe('~/.local/share/testagent/config');
     });
 

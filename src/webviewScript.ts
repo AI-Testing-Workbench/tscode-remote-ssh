@@ -12,21 +12,46 @@ const startLoading = actionButton => {
     actionButton.setAttribute('aria-busy', 'true');
     return true;
 };
+const blocksConnection = action => action === 'restart' || action === 'start' || action === 'stop' || action === 'delete';
+const updateConnectionButtons = (containerId, locked) => {
+    if (!containerId) return;
+    document.querySelectorAll('[data-action="connect"]').forEach(connectButton => {
+        if (connectButton.getAttribute('data-container-id') !== containerId) return;
+        if (locked) {
+            connectButton.setAttribute('disabled', '');
+            connectButton.setAttribute('aria-busy', 'true');
+        } else if (connectButton.getAttribute('data-connectable') === 'true' && !connectButton.classList.contains('is-loading')) {
+            connectButton.removeAttribute('disabled');
+            connectButton.removeAttribute('aria-busy');
+        }
+    });
+};
 document.querySelectorAll('[data-action]').forEach(actionButton => {
     actionButton.addEventListener('click', () => {
         if (!startLoading(actionButton)) return;
-        post(actionButton.getAttribute('data-action'), actionButton.getAttribute('data-container-id'));
+        const action = actionButton.getAttribute('data-action');
+        const containerId = actionButton.getAttribute('data-container-id');
+        if (blocksConnection(action)) updateConnectionButtons(containerId, true);
+        post(action, containerId);
     });
 });
-document.querySelectorAll('.service-heading').forEach(serviceHeading => {
-    serviceHeading.addEventListener('dblclick', () => {
-        post('connect', serviceHeading.getAttribute('data-container-id'));
+document.querySelectorAll('.container-card[data-container-id]').forEach(containerCard => {
+    containerCard.addEventListener('dblclick', () => {
+        if (containerCard.getAttribute('data-connectable') !== 'true') return;
+        const containerId = containerCard.getAttribute('data-container-id');
+        const connectButton = Array.from(document.querySelectorAll('[data-action="connect"]'))
+            .find(button => button.getAttribute('data-container-id') === containerId);
+        if (!connectButton || !startLoading(connectButton)) return;
+        post('connect', containerId);
     });
 });
 window.addEventListener('message', event => {
     const message = event.data;
     if (!message || typeof message !== 'object') return;
     if (message.command === 'operationComplete') {
+        if (blocksConnection(message.action) && typeof message.containerId === 'string') {
+            updateConnectionButtons(message.containerId, false);
+        }
         document.querySelectorAll('[data-action]').forEach(actionButton => {
             if (!actionButton.classList.contains('is-loading')) return;
             if (actionButton.getAttribute('data-action') !== message.action) return;

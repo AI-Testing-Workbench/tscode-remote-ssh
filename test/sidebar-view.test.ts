@@ -31,6 +31,7 @@ describe('SidebarSyncState', () => {
 
 describe('SidebarViewProvider', () => {
     beforeEach(() => {
+        vscode.commands.executeCommand.mockReset();
         vscode.window.showErrorMessage.mockReset();
         vscode.window.showInformationMessage.mockReset();
         vscode.window.withProgress.mockReset();
@@ -47,6 +48,7 @@ describe('SidebarViewProvider', () => {
             containers: [
                 syncedContainer('running-1', 'running', true),
                 syncedContainer('stopped-1', 'stopped', true),
+                syncedContainer('failed-1', 'failed', true),
                 syncedContainer('pending-1', 'pending', true),
                 syncedContainer('error-1', 'unknown', true, undefined, {
                     code: 'status_failed',
@@ -69,13 +71,21 @@ describe('SidebarViewProvider', () => {
         });
         expect(view.webview.html).toContain('status-dot running');
         expect(view.webview.html).toContain('status-dot stopped');
+        expect(view.webview.html).toContain('<span class="status-dot failed"></span>\n                    <span class="status-label">失败</span>');
         expect(view.webview.html).toContain('status-dot unknown');
         expect(view.webview.html).toContain('status-dot error');
         expect(view.webview.html).toContain('status-dot missing');
         expect(view.webview.html).toContain('<span class="status-label">准备中</span>');
-        expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.error');
+        expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.failed, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
         expect(view.webview.html).toContain('post(\'connect\'');
+        expect(view.webview.html).toMatch(/<article class="container-card" data-container-id="running-1" data-connectable="true">/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="true">/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="stopped-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="failed-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="pending-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="restart" data-container-id="failed-1" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
         expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(view.webview.html).toContain('<h1 class="page-title">TestAgent Cloud 服务管理面板</h1>');
@@ -165,6 +175,29 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(userApiFactory).not.toHaveBeenCalled();
+    });
+
+    it('dispatches cloud disconnect without touching container APIs or config', async () => {
+        const view = createWebviewView();
+        const onDisconnect = vi.fn();
+        const publicApi = createPublicApi();
+        const config = createConfig();
+        const provider = createProvider({
+            cloudMode: true,
+            view,
+            onDisconnect,
+            publicApi,
+            config,
+        });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'disconnect' });
+        await flushMessages();
+
+        expect(onDisconnect).toHaveBeenCalledOnce();
+        expect(publicApi.deleteContainer).not.toHaveBeenCalled();
+        expect(config.write).not.toHaveBeenCalled();
+        expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
     });
 
     it('rechecks cloud mode when the sidebar becomes visible again', async () => {
@@ -269,6 +302,88 @@ describe('SidebarViewProvider', () => {
         expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('workbench.action.remote.close');
     });
 
+    it('allows connection only for running services', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [
+                syncedContainer('running-1', 'running', true),
+                syncedContainer('stopped-1', 'stopped', true),
+                syncedContainer('failed-1', 'failed', true),
+                syncedContainer('pending-1', 'pending', true),
+            ],
+            changed: false,
+        });
+        const onConnect = vi.fn();
+        const provider = createProvider({ state, onConnect });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        for (const containerId of ['running-1', 'stopped-1', 'failed-1', 'pending-1']) {
+            view.fireMessage({ command: 'connect', containerId });
+            await flushMessages();
+        }
+
+        expect(onConnect).toHaveBeenCalledOnce();
+        expect(onConnect).toHaveBeenCalledWith('host-running-1');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not restart a failed service', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('failed-1', 'failed', true)],
+            changed: false,
+        });
+        const publicApi = createPublicApi();
+        const provider = createProvider({ state, publicApi });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'restart', containerId: 'failed-1' });
+        await flushMessages();
+
+        expect(publicApi.restartContainer).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '服务 "failed-1" 处于失败状态，不能重启',
+            { modal: true },
+        );
+    });
+
+    it('blocks connection while a container restart is in progress', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('running-1', 'running', true)],
+            changed: false,
+        });
+        const publicApi = createPublicApi();
+        let releaseRestart: (() => void) | undefined;
+        const restart = new Promise<void>(resolve => {
+            releaseRestart = resolve;
+        });
+        publicApi.restartContainer = vi.fn(() => restart);
+        const onConnect = vi.fn();
+        const provider = createProvider({ state, publicApi, onConnect });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'restart', containerId: 'running-1' });
+        await vi.waitFor(() => expect(publicApi.restartContainer).toHaveBeenCalledOnce());
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="false" disabled>/);
+
+        view.fireMessage({ command: 'connect', containerId: 'running-1' });
+        await flushMessages();
+
+        expect(onConnect).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('正在执行操作'),
+            { modal: true },
+        );
+
+        releaseRestart?.();
+        await flushMessages();
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="true">/);
+    });
+
     it('removes the local config entry after deleting a remote service', async () => {
         const state = new SidebarSyncState();
         state.update({
@@ -277,7 +392,14 @@ describe('SidebarViewProvider', () => {
         });
         const config = createConfig();
         const publicApi = createPublicApi();
-        const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
+        const staleResult = { containers: [syncedContainer('container-1', 'running', true)], changed: false };
+        const sync = {
+            refresh: vi.fn(async () => ({ containers: [], changed: false })),
+            refreshAfterMutation: vi.fn(async () => {
+                state.update(staleResult);
+                return staleResult;
+            }),
+        };
         const provider = createProvider({ state, config, publicApi, sync });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
@@ -288,7 +410,8 @@ describe('SidebarViewProvider', () => {
         expect(publicApi.deleteContainer).toHaveBeenCalledWith('container-1');
         expect(config.removeContainer).toHaveBeenCalledWith(expect.anything(), 'container-1');
         expect(config.write).toHaveBeenCalledOnce();
-        expect(sync.refresh).toHaveBeenCalledOnce();
+        expect(sync.refreshAfterMutation).toHaveBeenCalledOnce();
+        expect(view.webview.html).not.toContain('container-1');
     });
 
     it('shows the administrator entry only after /user/check grants access', async () => {
@@ -359,7 +482,7 @@ describe('SidebarViewProvider', () => {
             status: 'pending',
             endpoint: '10.0.0.5:2222',
         }));
-        const values = ['alice', 'repo', 'main', 'https://gitee.com'];
+        const values = ['https://gitee.com/alice/repo.git', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => ['授权使用 TestAgent 码云通用账户']);
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
@@ -376,10 +499,8 @@ describe('SidebarViewProvider', () => {
             gitee_branch: 'main',
             authorize_general_account: true,
         });
-        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '完整码云仓库地址或者码云用户名' }));
-        expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云仓库名' }));
-        expect(showInputBox).toHaveBeenNthCalledWith(3, expect.objectContaining({ prompt: '码云分支 (可选)' }));
-        expect(showInputBox).toHaveBeenNthCalledWith(4, expect.objectContaining({ prompt: '码云地址前缀' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址 (支持 HTTP 与 GIT 协议，可选)' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云分支 (可选)' }));
         expect(showQuickPick).toHaveBeenCalledWith(['授权使用 TestAgent 码云通用账户'], expect.objectContaining({ canPickMany: true }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
@@ -453,19 +574,19 @@ describe('SidebarViewProvider', () => {
         }, { skipKnownHostsCheck: true, userName: 'root' });
     });
 
-    it('requires a repository when the Gitee username is provided', async () => {
+    it('rejects a manually entered Gitee username', async () => {
         const publicApi = createPublicApi();
-        const values = ['alice', '   '];
+        const values = ['alice'];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => []);
         const provider = createProvider({ publicApi, showInputBox, showQuickPick });
 
         await provider.createContainerFromPrompt();
 
-        expect(showInputBox).toHaveBeenCalledTimes(2);
+        expect(showInputBox).toHaveBeenCalledOnce();
         expect(showQuickPick).not.toHaveBeenCalled();
         expect(publicApi.createContainer).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云仓库名不能为空', { modal: true });
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云仓库地址格式无效', { modal: true });
     });
 
     it('does not write configuration when the create response has an invalid endpoint', async () => {
@@ -476,7 +597,7 @@ describe('SidebarViewProvider', () => {
             status: 'pending',
             endpoint: 'example.com:22',
         }));
-        const values = ['alice', 'repo', 'main', 'https://gitee.com'];
+        const values = ['https://gitee.com/alice/repo', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => []);
         const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
@@ -519,6 +640,45 @@ describe('Webview script', () => {
         expect(WEBVIEW_SCRIPT).toContain('startLoading');
         expect(WEBVIEW_SCRIPT).toContain('operationComplete');
     });
+
+    it('connects when the service card itself is double-clicked', () => {
+        const messages: unknown[] = [];
+        const card = createScriptElement({
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const connectButton = createScriptElement({
+            'data-action': 'connect',
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const document = {
+            querySelectorAll: (selector: string): ScriptElement[] => {
+                if (selector === '[data-action]') {
+                    return [connectButton];
+                }
+                if (selector === '.container-card[data-container-id]') {
+                    return [card];
+                }
+                if (selector === '[data-action="connect"]') {
+                    return [connectButton];
+                }
+                return [];
+            },
+        };
+
+        new Script(WEBVIEW_SCRIPT).runInNewContext({
+            acquireVsCodeApi: () => ({ postMessage: (message: unknown) => messages.push(message) }),
+            document,
+            window: { addEventListener: () => undefined },
+        });
+
+        card.fire('dblclick', { target: card });
+
+        expect(messages).toEqual([{ command: 'connect', containerId: 'container-1' }]);
+        expect(connectButton.hasAttribute('disabled')).toBe(true);
+        expect(connectButton.classList.contains('is-loading')).toBe(true);
+    });
 });
 
 function syncedContainer(
@@ -539,6 +699,39 @@ function syncedContainer(
         ...(expiresAt ? { expiresAt } : {}),
         ...(error ? { error } : {}),
         ...(usage ?? {}),
+    };
+}
+
+interface ScriptElement {
+    addEventListener(type: string, listener: (event: { target: ScriptElement }) => void): void;
+    classList: {
+        add(value: string): void;
+        contains(value: string): boolean;
+    };
+    fire(type: string, event: { target: ScriptElement }): void;
+    getAttribute(name: string): string | null;
+    hasAttribute(name: string): boolean;
+    removeAttribute(name: string): void;
+    setAttribute(name: string, value: string): void;
+}
+
+function createScriptElement(initialAttributes: Record<string, string>): ScriptElement {
+    const attributes = new Map(Object.entries(initialAttributes));
+    const classes = new Set<string>();
+    const listeners = new Map<string, (event: { target: ScriptElement }) => void>();
+    return {
+        classList: {
+            add: value => classes.add(value),
+            contains: value => classes.has(value),
+        },
+        fire: (type, event) => listeners.get(type)?.(event),
+        getAttribute: name => attributes.get(name) ?? null,
+        hasAttribute: name => attributes.has(name),
+        removeAttribute: name => { attributes.delete(name); },
+        setAttribute: (name, value) => { attributes.set(name, value); },
+        addEventListener: (type: string, listener: (event: { target: ScriptElement }) => void) => {
+            listeners.set(type, listener);
+        },
     };
 }
 
@@ -568,7 +761,13 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
 
 interface ProviderTestOptions {
     state: SidebarSyncState;
-    sync: { refresh: () => Promise<ContainerSyncResult> };
+    sync: {
+        refresh: () => Promise<ContainerSyncResult>;
+        refreshAfterMutation?: () => Promise<ContainerSyncResult>;
+        runMutation?: <T>(operation: () => Promise<T>) => Promise<T>;
+        markContainerDeleted?: (containerId: string) => void;
+        clearContainerDeleted?: (containerId: string) => void;
+    };
     config: ContainerConfig;
     publicApi: PublicUserContainerApi;
     userIdProvider: { getCurrentUserId: () => Promise<string> };

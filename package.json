@@ -85,6 +85,7 @@
 	},
 	"activationEvents": [
 		"onCommand:openremotessh.createContainer",
+		"onCommand:openremotessh.openAdmin",
 		"onCommand:openremotessh.openEmptyWindow",
 		"onCommand:openremotessh.openEmptyWindowInCurrentWindow",
 		"onCommand:openremotessh.openConfigFile",
@@ -216,6 +217,11 @@
 			{
 				"command": "openremotessh.createContainer",
 				"title": "创建新的 TestAgent Cloud 服务...",
+				"category": "TestAgent Cloud"
+			},
+			{
+				"command": "openremotessh.openAdmin",
+				"title": "打开管理员页面",
 				"category": "TestAgent Cloud"
 			},
 			{

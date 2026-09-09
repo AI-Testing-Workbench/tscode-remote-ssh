@@ -106,8 +106,11 @@ export class ContainerSync {
     private readonly onInvalidEndpoint: ((endpoint: InvalidContainerEndpoint) => void) | undefined;
 
     private inFlight: Promise<ContainerSyncResult> | undefined;
+    private mutationRefresh: Promise<ContainerSyncResult> | undefined;
+    private mutationGate: Promise<void> | undefined;
     private timer: ReturnType<typeof setInterval> | undefined;
     private disposed = false;
+    private readonly locallyDeletedContainerIds = new Set<string>();
     private readonly invalidEndpointNotifications = new Set<string>();
 
     constructor(options: ContainerSyncOptions) {
@@ -124,6 +127,9 @@ export class ContainerSync {
     public sync(): Promise<ContainerSyncResult> {
         if (this.disposed) {
             return Promise.resolve(this.disposedResult());
+        }
+        if (this.mutationGate) {
+            return this.mutationGate.then(() => this.sync());
         }
         if (this.inFlight) {
             return this.inFlight;
@@ -151,6 +157,71 @@ export class ContainerSync {
         return this.sync();
     }
 
+    public refreshAfterMutation(): Promise<ContainerSyncResult> {
+        if (this.disposed) {
+            return Promise.resolve(this.disposedResult());
+        }
+        if (this.mutationRefresh) {
+            return this.mutationRefresh;
+        }
+
+        const waitForCurrentSync = Promise.all([
+            this.mutationGate ?? Promise.resolve(),
+            this.inFlight?.then(() => undefined, () => undefined) ?? Promise.resolve(),
+        ]);
+        const trackedRefresh = waitForCurrentSync
+            .then(() => this.sync())
+            .finally(() => {
+                if (this.mutationRefresh === trackedRefresh) {
+                    this.mutationRefresh = undefined;
+                }
+            });
+        this.mutationRefresh = trackedRefresh;
+        return trackedRefresh;
+    }
+
+    public markContainerDeleted(containerId: string): void {
+        this.locallyDeletedContainerIds.add(containerId);
+    }
+
+    public clearContainerDeleted(containerId: string): void {
+        this.locallyDeletedContainerIds.delete(containerId);
+    }
+
+    public runMutation<T>(operation: () => Promise<T>): Promise<T> {
+        const previousGate = this.mutationGate ?? Promise.resolve();
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>(resolve => {
+            release = resolve;
+        });
+        const operationPromise = previousGate.then(async () => {
+            const currentSync = this.inFlight;
+            if (currentSync) {
+                await currentSync.then(() => undefined, () => undefined);
+            }
+            return operation();
+        });
+        const trackedGate = operationPromise.then(
+            () => {
+                release();
+                return gate;
+            },
+            () => {
+                release();
+                return gate;
+            },
+        );
+        const lifecycleReference: { promise?: Promise<void> } = {};
+        const lifecycle = trackedGate.finally(() => {
+            if (this.mutationGate === lifecycleReference.promise) {
+                this.mutationGate = undefined;
+            }
+        });
+        lifecycleReference.promise = lifecycle;
+        this.mutationGate = lifecycle;
+        return operationPromise;
+    }
+
     public start(): void {
         if (this.disposed || this.timer) {
             return;
@@ -166,6 +237,9 @@ export class ContainerSync {
 
     public dispose(): void {
         this.disposed = true;
+        this.mutationRefresh = undefined;
+        this.mutationGate = undefined;
+        this.locallyDeletedContainerIds.clear();
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = undefined;
@@ -223,7 +297,13 @@ export class ContainerSync {
         }
 
         const remoteIds = uniqueContainerIds(containerIdsResponse.container_ids);
-        const remoteStatuses = await this.getRemoteStatuses(userApi, remoteIds, settings.debug);
+        for (const containerId of this.locallyDeletedContainerIds) {
+            if (!remoteIds.includes(containerId)) {
+                this.locallyDeletedContainerIds.delete(containerId);
+            }
+        }
+        const visibleRemoteIds = remoteIds.filter(containerId => !this.locallyDeletedContainerIds.has(containerId));
+        const remoteStatuses = await this.getRemoteStatuses(userApi, visibleRemoteIds, settings.debug);
         if (this.disposed) {
             return this.disposedResult();
         }
@@ -235,9 +315,9 @@ export class ContainerSync {
             : this.config.ensureUserName(document.config, userName);
         changed = this.config.setSkipKnownHostsCheck(document.config, settings.skipKnownHostsCheck) || changed;
         const localById = indexEntries(localEntries);
-        const hostAssignments = this.assignHostNames(remoteIds, remoteStatuses, localEntries);
+        const hostAssignments = this.assignHostNames(visibleRemoteIds, remoteStatuses, localEntries);
 
-        for (const containerId of remoteIds) {
+        for (const containerId of visibleRemoteIds) {
             const localEntry = localById.get(containerId);
             const assignment = hostAssignments.get(containerId);
 
@@ -284,7 +364,7 @@ export class ContainerSync {
         }
 
         return {
-            containers: this.buildStates(document.config, remoteIds, remoteStatuses, hostAssignments),
+            containers: this.buildStates(document.config, visibleRemoteIds, remoteStatuses, hostAssignments),
             changed,
         };
     }
