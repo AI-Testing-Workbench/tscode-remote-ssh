@@ -506,7 +506,7 @@ function containerStatusLabel(status: string, deleted: boolean): string {
         case 'stopping': return '停止中';
         case 'restarting': return '重启中';
         case 'deleting': return '操作中';
-        case 'restoring': return '操作中';
+        case 'restoring': return '恢复中';
         case 'unknown': return '未知状态';
         default: return status || '未知状态';
     }
