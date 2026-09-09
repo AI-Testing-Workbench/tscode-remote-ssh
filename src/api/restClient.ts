@@ -36,6 +36,7 @@ import {
 } from './models';
 
 export const DEFAULT_REST_TIMEOUT_MS = 15_000;
+export const DEFAULT_LIFECYCLE_TIMEOUT_MS = 60_000;
 export const DEFAULT_LONG_RUNNING_TIMEOUT_MS = 20 * 60_000;
 export const ADMIN_OPERATOR_USER_ID_HEADER = 'X-Operator-User-ID';
 
@@ -70,19 +71,13 @@ export function formatRestClientError(error: unknown, fallback = 'TestAgent Clou
     }
 
     if (error.kind === 'http' || error.kind === 'response') {
-        const metadata = [
-            error.code ? `错误码: ${error.code}` : '',
-            error.statusCode ? `HTTP 状态码 ${error.statusCode}` : '',
-        ].filter(Boolean).join('，');
+        const metadata = formatErrorMetadata(error.code, error.statusCode);
         return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n${error.message}${metadata ? ` (${metadata})` : ''}`;
     }
     if (error.kind === 'network') {
         const apiError = getApiError(error.cause);
         if (apiError) {
-            const metadata = [
-                `错误码: ${apiError.code}`,
-                error.statusCode ? `HTTP 状态码 ${error.statusCode}` : '',
-            ].filter(Boolean).join('，');
+            const metadata = formatErrorMetadata(apiError.code, error.statusCode);
             return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}\n${apiError.message}${metadata ? ` (${metadata})` : ''}`;
         }
         return `后端 TestAgent Cloud 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}`;
@@ -315,10 +310,10 @@ export class RestClient {
             getContainerIds: query => this.requestJson<ContainerIdsResponse>('GET', '/user/containers', { query }),
             getContainer: containerId => this.requestJson<ContainerStatusResponse>('GET', this.containerPath('/user/containers', containerId)),
             checkAdmin: request => this.requestJson<AdminCheckResponse>('POST', '/user/check', { jsonBody: request }),
-            startContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'start')),
-            stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'stop')),
-            restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'restart')),
-            deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'delete')),
+            startContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'stop'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'restart'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
         };
 
         this.admin = {
@@ -338,13 +333,13 @@ export class RestClient {
             deleteOrphanContainers: request => this.requestNoContent('POST', '/admin/containers/orphans/delete', { jsonBody: request }),
             getContainer: containerId => this.requestJson<AdminContainerResponse>('GET', this.containerPath('/admin/containers', containerId)),
             getContainerLog: containerId => this.requestText('GET', `${this.containerPath('/admin/containers', containerId)}/log`),
-            startContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'start')),
-            stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'stop')),
-            restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restart')),
-            deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'delete')),
-            permanentDeleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'permanent-delete')),
+            startContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'stop'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restart'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            permanentDeleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'permanent-delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
             setExpiration: (containerId, request) => this.requestJson<ExpirationResponse>('POST', this.actionPath('/admin/containers', containerId, 'expiration'), { jsonBody: request }),
-            restoreContainer: (containerId, request) => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restore'), { jsonBody: request }),
+            restoreContainer: (containerId, request) => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restore'), { jsonBody: request, timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
             getState: () => this.requestJson<AdminStateResponse>('GET', '/admin/state'),
             getContainerLimit: () => this.requestJson<ContainerLimitResponse>('GET', '/admin/containers/limit'),
             setContainerLimit: request => this.requestJson<ContainerLimitResponse>('POST', '/admin/containers/limit', { jsonBody: request }),
@@ -480,7 +475,7 @@ export class RestClient {
                 throw new RestClientError(
                     'network',
                     REST_ERROR_CODES.TIMEOUT,
-                    formatTimeoutMessage(path),
+                    formatTimeoutMessage(path, options.timeoutMs ?? this.timeoutMs),
                     undefined,
                     error,
                 );
@@ -513,7 +508,7 @@ export class RestClient {
                 throw new RestClientError(
                     'network',
                     REST_ERROR_CODES.TIMEOUT,
-                    formatTimeoutMessage(path),
+                    formatTimeoutMessage(path, options.timeoutMs ?? this.timeoutMs, response.statusCode),
                     response.statusCode,
                     apiError,
                 );
@@ -675,11 +670,42 @@ function isRequestTimeoutError(error: unknown): boolean {
         || message.includes('timedout');
 }
 
-function formatTimeoutMessage(path: string): string {
+function formatTimeoutMessage(path: string, timeoutMs: number, statusCode?: number): string {
     const operation = path === '/admin/images/upload'
         ? '上传镜像'
-        : path === '/user/containers' || path === '/admin/containers'
-            ? '创建容器'
-            : '后端服务请求';
-    return `${operation}超时，将自动进行重试...`;
+        : isContainerActionPath(path, '/start')
+            ? '启动 TestAgent Cloud 服务'
+            : isContainerActionPath(path, '/stop')
+                ? '停止 TestAgent Cloud 服务'
+                : isContainerActionPath(path, '/restart')
+                    ? '重启 TestAgent Cloud 服务'
+                    : isContainerActionPath(path, '/restore')
+                        ? '恢复 TestAgent Cloud 服务'
+                        : isContainerActionPath(path, '/delete') || isContainerActionPath(path, '/permanent-delete')
+                            ? '删除 TestAgent Cloud 服务'
+                            : '后端 TestAgent Cloud 管理服务请求';
+    const duration = formatTimeoutDuration(timeoutMs);
+    const responseDetail = statusCode
+        ? `，HTTP 状态码 ${statusCode}，仍未收到响应`
+        : '仍未收到响应';
+    return `${operation}超时 (已等待 ${duration}${responseDetail})，正在重试中...`;
+}
+
+function isContainerActionPath(path: string, suffix: string): boolean {
+    return path.includes('/containers/') && path.endsWith(suffix);
+}
+
+function formatTimeoutDuration(timeoutMs: number): string {
+    const seconds = Math.max(1, Math.round(timeoutMs / 1_000));
+    if (seconds % 60 === 0) {
+        return `${seconds / 60} 分钟`;
+    }
+    return `${seconds} 秒`;
+}
+
+function formatErrorMetadata(code: string | undefined, statusCode: number | undefined): string {
+    return [
+        code ? `错误码: ${code}` : '',
+        statusCode ? `HTTP 状态码 ${statusCode}` : '',
+    ].filter(Boolean).join('，');
 }

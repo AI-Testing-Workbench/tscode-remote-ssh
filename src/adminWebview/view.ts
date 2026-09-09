@@ -339,6 +339,7 @@ function renderContainerRow(container: AdminContainerResponse): string {
     const deleted = container.business_deleted;
     const status = deleted ? 'business_deleted' : container.status.toLowerCase();
     const statusStyle = statusClass(status);
+    const transitioning = isContainerTransitioning(status);
     const rowClasses = ['resource-row', 'container-row', 'searchable', `status-border-${statusStyle}`, deleted ? 'deleted-row' : ''].filter(Boolean).join(' ');
     const lifecycle = deleted
         ? { label: '删除时间', value: formatDateTime(container.deleted_at) || '未删除' }
@@ -356,7 +357,7 @@ function renderContainerRow(container: AdminContainerResponse): string {
     ].join(' ');
     return `<article class="${rowClasses}" data-patch-key="container:${escapeAttribute(container.container_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-sort-container_id="${escapeAttribute(container.container_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
         <div class="container-card-heading">
-            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}">${escapeHtml(containerStatusLabel(container.status, deleted))}</span></div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
+            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted))}</span></div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
             <button class="small-button log-button" type="button" data-action="getContainerLog" data-container-id="${escapeAttribute(container.container_id)}">日志</button>
         </div>
         <div class="container-details">
@@ -380,7 +381,7 @@ function renderContainerRow(container: AdminContainerResponse): string {
         <div class="container-actions">
             ${deleted
                 ? `<div class="container-operation-row"><button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="permanent-delete">永久删除</button></div><div class="container-expiration-row"><input class="inline-number" data-field="expirationHours" data-persist-key="container.${escapeAttribute(container.container_id)}.expirationHours" type="number" min="0" step="1" placeholder="有效期 (小时)"><button class="small-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="restore">立即恢复</button></div>`
-                : `<div class="container-operation-row">${containerActionButton(container, 'start', '启动')}${containerActionButton(container, 'stop', '停止')}${containerActionButton(container, 'restart', '重启')}<button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="delete">业务删除</button><button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="permanent-delete">永久删除</button></div><div class="container-expiration-row"><input class="inline-number" data-field="expirationHours" data-persist-key="container.${escapeAttribute(container.container_id)}.expirationHours" type="number" min="0" step="1" placeholder="有效期 (小时)"><button class="small-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="expiration">设置有效期</button></div>`}
+                : `<div class="container-operation-row">${containerActionButton(container, 'start', '启动')}${containerActionButton(container, 'stop', '停止')}${containerActionButton(container, 'restart', '重启')}<button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="delete"${transitioning ? ' disabled' : ''}>业务删除</button><button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="permanent-delete"${transitioning ? ' disabled' : ''}>永久删除</button></div><div class="container-expiration-row"><input class="inline-number" data-field="expirationHours" data-persist-key="container.${escapeAttribute(container.container_id)}.expirationHours" type="number" min="0" step="1" placeholder="有效期 (小时)"${transitioning ? ' disabled' : ''}><button class="small-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="expiration"${transitioning ? ' disabled' : ''}>设置有效期</button></div>`}
         </div>
     </article>`;
 }
@@ -403,7 +404,8 @@ function renderLogModal(): string {
 
 function containerActionButton(container: AdminContainerResponse, action: string, label: string): string {
     const status = container.status.toLowerCase();
-    const disabled = action === 'start' && (status === 'running' || status === 'pending')
+    const disabled = isContainerTransitioning(status)
+        || action === 'start' && (status === 'running' || status === 'pending')
         || action === 'stop' && (status === 'stopped' || status === 'failed')
         || action === 'restart' && status === 'failed';
     return `<button class="small-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
@@ -447,6 +449,11 @@ function containerStatusLabel(status: string, deleted: boolean): string {
         case 'stopped': return '已停止';
         case 'failed': return '已失败';
         case 'pending': return '准备中';
+        case 'starting': return '启动中';
+        case 'stopping': return '停止中';
+        case 'restarting': return '重启中';
+        case 'deleting': return '操作中';
+        case 'restoring': return '操作中';
         case 'unknown': return '未知状态';
         default: return status || '未知状态';
     }
@@ -462,8 +469,18 @@ function statusClass(status: string): string {
         case 'default': return 'primary';
         case 'unknown': return 'error';
         case 'business_deleted': return 'error';
+        case 'pending':
+        case 'starting':
+        case 'stopping':
+        case 'restarting':
+        case 'deleting': return 'warning';
+        case 'restoring': return 'warning';
         default: return 'neutral';
     }
+}
+
+function isContainerTransitioning(status: string): boolean {
+    return ['pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring'].includes(status.toLowerCase());
 }
 
 function formatGitee(container: AdminContainerResponse): string {
@@ -608,6 +625,7 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .danger-tag { border-color: var(--danger); color: var(--danger); }
 .status-chip.success { border-color: currentColor; color: var(--success); }
 .status-chip.warning { border-color: currentColor; color: var(--warning); }
+.status-chip.status-transitioning { animation: operation-pulse 1.2s ease-in-out infinite; }
 .status-chip.error { border-color: currentColor; color: var(--danger); }
 .status-chip.primary { border-color: currentColor; color: var(--primary-hover); }
 .status-chip.neutral { border-color: var(--outline); color: var(--muted); }
@@ -770,6 +788,7 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .spinner { display: inline-block; width: 24px; height: 24px; margin-bottom: 18px; border: 3px solid var(--outline); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes panel-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes operation-pulse { 50% { opacity: .52; } }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }

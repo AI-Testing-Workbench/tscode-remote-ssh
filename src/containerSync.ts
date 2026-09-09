@@ -6,6 +6,10 @@ import {
     parseContainerEndpoint,
     ParsedContainerEndpoint,
 } from './containerEndpoint';
+import {
+    ContainerOperationRegistry,
+    ContainerOperationState,
+} from './containerOperations';
 import { getEffectiveRemoteUserName, getRemoteSettings, RemoteSettings } from './settings';
 import { UserIdProvider } from './user';
 
@@ -43,6 +47,7 @@ export interface ContainerSyncOptions {
     now?: () => Date;
     onSync?: (result: ContainerSyncResult) => void;
     onInvalidEndpoint?: (endpoint: InvalidContainerEndpoint) => void;
+    operationRegistry?: ContainerOperationRegistry;
 }
 
 interface RemoteStatusResult {
@@ -104,6 +109,7 @@ export class ContainerSync {
     private readonly now: () => Date;
     private readonly onSync: ((result: ContainerSyncResult) => void) | undefined;
     private readonly onInvalidEndpoint: ((endpoint: InvalidContainerEndpoint) => void) | undefined;
+    private readonly operationRegistry: ContainerOperationRegistry | undefined;
 
     private inFlight: Promise<ContainerSyncResult> | undefined;
     private mutationRefresh: Promise<ContainerSyncResult> | undefined;
@@ -122,6 +128,7 @@ export class ContainerSync {
         this.now = options.now ?? (() => new Date());
         this.onSync = options.onSync;
         this.onInvalidEndpoint = options.onInvalidEndpoint;
+        this.operationRegistry = options.operationRegistry;
     }
 
     public sync(): Promise<ContainerSyncResult> {
@@ -144,6 +151,7 @@ export class ContainerSync {
                     } catch {
                         // A sidebar listener must not turn a successful sync into an unhandled rejection.
                     }
+                    this.reconcileOperations(result);
                 }
                 return result;
             })
@@ -186,6 +194,24 @@ export class ContainerSync {
 
     public clearContainerDeleted(containerId: string): void {
         this.locallyDeletedContainerIds.delete(containerId);
+    }
+
+    public async reconcileContainerOperation(operation: ContainerOperationState): Promise<boolean> {
+        if (this.disposed) {
+            return false;
+        }
+
+        const result = await this.refreshAfterMutation();
+        const current = this.operationRegistry?.get(operation.containerId);
+        if (!current || current.action !== operation.action) {
+            return true;
+        }
+        if (!this.isOperationConfirmed(current, result)) {
+            return false;
+        }
+
+        this.operationRegistry?.complete(operation.containerId);
+        return true;
     }
 
     public runMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -375,6 +401,9 @@ export class ContainerSync {
         allowDebugProxy: boolean,
     ): Promise<Map<string, RemoteStatusResult>> {
         const results: Array<readonly [string, RemoteStatusResult]> = await Promise.all(containerIds.map(async (containerId): Promise<readonly [string, RemoteStatusResult]> => {
+            if (this.operationRegistry?.get(containerId)?.phase === 'processing') {
+                return [containerId, {}] as const;
+            }
             try {
                 const response = await userApi.getContainer(containerId);
                 const parsedEndpoint = parseContainerEndpoint(response.endpoint, { allowDebugProxy });
@@ -392,6 +421,52 @@ export class ContainerSync {
             }
         }));
         return new Map(results);
+    }
+
+    private reconcileOperations(result: ContainerSyncResult): void {
+        if (!this.operationRegistry || result.error) {
+            return;
+        }
+
+        for (const operation of this.operationRegistry.list()) {
+            if (operation.phase !== 'reconciling' || !this.isOperationConfirmed(operation, result)) {
+                continue;
+            }
+            this.operationRegistry.complete(operation.containerId);
+        }
+    }
+
+    private isOperationConfirmed(operation: ContainerOperationState, result: ContainerSyncResult): boolean {
+        if (result.error) {
+            return false;
+        }
+
+        const container = result.containers.find(item => item.containerId === operation.containerId);
+        if (!container) {
+            return true;
+        }
+        if (operation.action !== 'restore' && (!container.remote || container.status === 'missing')) {
+            return true;
+        }
+        if (operation.action === 'restore' && (!container.remote || container.status === 'missing')) {
+            return false;
+        }
+        if (container.error) {
+            return false;
+        }
+
+        const status = container.status.toLowerCase();
+        switch (operation.action) {
+            case 'stop':
+                return status === 'stopped';
+            case 'start':
+            case 'restart':
+            case 'restore':
+                return status === 'running';
+            case 'delete':
+            case 'permanent-delete':
+                return false;
+        }
     }
 
     private removeExcessHistory(config: import('ssh-config').default, historyLimit: number): boolean {

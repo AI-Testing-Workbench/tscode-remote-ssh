@@ -12,6 +12,7 @@ import {UserIdProvider} from './user';
 import {createPublicUserContainerApi, type TestAgentRemoteApi} from './api/publicApi';
 import SSHDestination from './ssh/sshDestination';
 import {AdminPanel} from './adminPanel';
+import {ContainerOperationRegistry} from './containerOperations';
 
 let activeContainerSync: ContainerSync | undefined;
 let activeSidebarView: SidebarViewProvider | undefined;
@@ -29,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const sidebarSyncState = new SidebarSyncState();
     const userIdProvider = new UserIdProvider();
     const publicApi = createPublicUserContainerApi({ userIdProvider });
-    const adminPanel = new AdminPanel({ userIdProvider });
+    const operationRegistry = new ContainerOperationRegistry();
     const config = new ContainerConfig();
     const getCloudMode = async (): Promise<boolean> => {
         const localCloudMode = refreshCloudMode(cloudModeOptions);
@@ -57,6 +58,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         config,
         userIdProvider,
         userApiFactory,
+        operationRegistry,
         onSync: result => sidebarSyncState.update(result),
         onInvalidEndpoint: ({ containerId, endpoint }) => {
             void vscode.window.showErrorMessage(
@@ -64,6 +66,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
                 { modal: true },
             );
         },
+    });
+    const adminPanel = new AdminPanel({
+        userIdProvider,
+        operationRegistry,
+        onContainerOperation: operation => containerSync.reconcileContainerOperation(operation),
     });
     activeContainerSync = containerSync;
     const sidebarView = new SidebarViewProvider({
@@ -73,6 +80,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         publicApi,
         userIdProvider,
         userApiFactory,
+        operationRegistry,
         cloudMode,
         getCloudMode,
         onOpenConfig: async () => {
@@ -90,6 +98,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     activeSidebarSyncState = sidebarSyncState;
     activeAdminPanel = adminPanel;
     context.subscriptions.push(
+        operationRegistry,
         containerSync,
         sidebarSyncState,
         sidebarView,

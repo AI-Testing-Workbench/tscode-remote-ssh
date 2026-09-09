@@ -8,7 +8,16 @@ import {
     ImageDeleteRequest,
     UploadImageFileInput,
 } from './api/models';
-import { AdminRestApi, formatRestClientError, RestClient, UserRestApi } from './api/restClient';
+import { AdminRestApi, formatRestClientError, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
+import {
+    ContainerOperationAction,
+    ContainerOperationEvent,
+    ContainerOperationRegistry,
+    ContainerOperationState,
+    getContainerOperationName,
+    getContainerOperationStatus,
+    isContainerOperationAction,
+} from './containerOperations';
 import { getRemoteSettings, RemoteSettings } from './settings';
 import { UserIdProvider } from './user';
 import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository';
@@ -17,6 +26,7 @@ import { AdminPanelState, AdminTab } from './adminWebview/types';
 
 export const ADMIN_PANEL_VIEW_TYPE = 'testagentRemote.adminPanel';
 export const ADMIN_PANEL_TITLE = '管理员页面';
+const OPERATION_RECONCILIATION_TIMEOUT_MS = 60_000;
 
 type UserIdSource = Pick<UserIdProvider, 'getCurrentUserId'>;
 type ShowOpenDialog = (options?: vscode.OpenDialogOptions) => Thenable<vscode.Uri[] | undefined>;
@@ -28,6 +38,8 @@ export interface AdminPanelOptions {
     getSettings?: () => RemoteSettings;
     userApiFactory?: (baseUrl: string) => UserRestApi;
     adminApiFactory?: AdminApiFactory;
+    operationRegistry?: ContainerOperationRegistry;
+    onContainerOperation?: (operation: ContainerOperationState) => Promise<boolean>;
     showOpenDialog?: ShowOpenDialog;
 }
 
@@ -36,11 +48,15 @@ export class AdminPanel implements vscode.Disposable {
     private readonly getSettings: () => RemoteSettings;
     private readonly userApiFactory: (baseUrl: string) => UserRestApi;
     private readonly adminApiFactory: AdminApiFactory;
+    private readonly operationRegistry: ContainerOperationRegistry | undefined;
+    private readonly onContainerOperation: ((operation: ContainerOperationState) => Promise<boolean>) | undefined;
     private readonly showOpenDialog: ShowOpenDialog;
 
     private panel: vscode.WebviewPanel | undefined;
     private selectedImageFile: { fsPath: string; filename: string } | undefined;
     private panelDisposables: vscode.Disposable[] = [];
+    private readonly operationSubscription: { dispose: () => void };
+    private readonly reconciliationTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private refreshTimer: ReturnType<typeof setTimeout> | undefined;
     private refreshPromise: Promise<void> | undefined;
     private loadPromise: Promise<void> | undefined;
@@ -60,7 +76,10 @@ export class AdminPanel implements vscode.Disposable {
         this.getSettings = options.getSettings ?? getRemoteSettings;
         this.userApiFactory = options.userApiFactory ?? ((baseUrl: string) => new RestClient(baseUrl).user);
         this.adminApiFactory = options.adminApiFactory ?? ((baseUrl: string, operatorUserId: string) => new RestClient(baseUrl, { operatorUserId }).admin);
+        this.operationRegistry = options.operationRegistry;
+        this.onContainerOperation = options.onContainerOperation;
         this.showOpenDialog = options.showOpenDialog ?? (dialogOptions => vscode.window.showOpenDialog(dialogOptions));
+        this.operationSubscription = this.operationRegistry?.subscribe(event => this.handleContainerOperationEvent(event)) ?? { dispose: () => undefined };
     }
 
     public open(): Promise<void> {
@@ -131,6 +150,8 @@ export class AdminPanel implements vscode.Disposable {
         this.messageQueue = Promise.resolve();
         this.selectedImageFile = undefined;
         this.disposePanelResources();
+        this.clearReconciliationTimers();
+        this.operationSubscription.dispose();
         panel?.dispose();
     }
 
@@ -337,7 +358,7 @@ export class AdminPanel implements vscode.Disposable {
         this.pendingAdminUpdate = !this.webviewReady;
         void panel.webview.postMessage({
             command: 'adminUpdate',
-            html: renderAdminContent(this.state),
+            html: renderAdminContent(this.getRenderedState()),
         }).then(() => undefined, () => {
             if (this.isActive(panel, generation)) {
                 this.webviewReady = false;
@@ -495,28 +516,86 @@ export class AdminPanel implements vscode.Disposable {
             }
         }
 
+        if (isContainerOperationAction(action)) {
+            const operation = this.operationRegistry?.begin(containerId, action, 'admin');
+            if (this.operationRegistry && !operation) {
+                throw new Error(`容器 "${containerId}" 正在执行操作，请稍后重试`);
+            }
+
+            try {
+                await vscode.window.withProgress({
+                    title: `正在${getContainerOperationName(action)} TestAgent Cloud 服务`,
+                    location: vscode.ProgressLocation.Notification,
+                    cancellable: false,
+                }, async progress => {
+                    progress.report({ message: `容器 ${containerId}` });
+                    await this.executeLifecycleAction(adminApi, containerId, action, message);
+                });
+
+                if (operation) {
+                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling');
+                    if (reconciling) {
+                        this.scheduleReconciliationTimeout(reconciling);
+                        const confirmed = await this.reconcileContainerOperation(reconciling);
+                        if (!confirmed) {
+                            void vscode.window.showInformationMessage(
+                                `TestAgent Cloud 服务 "${containerId}" 已提交${getContainerOperationName(action)}，正在确认状态`,
+                            );
+                        }
+                    }
+                }
+                return true;
+            } catch (error) {
+                if (operation && isRequestTimeoutError(error)) {
+                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling');
+                    if (reconciling) {
+                        this.scheduleReconciliationTimeout(reconciling);
+                        void this.reconcileContainerOperation(reconciling);
+                    }
+                    void vscode.window.showInformationMessage(
+                        `TestAgent Cloud 服务 "${containerId}" 的${getContainerOperationName(action)}请求已等待 1 分钟，正在进行重试...`,
+                    );
+                    return true;
+                }
+                if (operation) {
+                    this.operationRegistry?.complete(containerId, 'failed');
+                }
+                throw error;
+            }
+        }
+
         switch (action) {
-            case 'start':
-                await adminApi.startContainer(containerId);
-                return true;
-            case 'stop':
-                await adminApi.stopContainer(containerId);
-                return true;
-            case 'restart':
-                await adminApi.restartContainer(containerId);
-                return true;
-            case 'delete':
-                await adminApi.deleteContainer(containerId);
-                return true;
-            case 'permanent-delete':
-                await adminApi.permanentDeleteContainer(containerId);
-                return true;
             case 'expiration':
                 await adminApi.setExpiration(containerId, toExpirationRequest(message));
                 return true;
+        }
+    }
+
+    private async executeLifecycleAction(
+        adminApi: AdminRestApi,
+        containerId: string,
+        action: ContainerOperationAction,
+        message: Record<string, unknown>,
+    ): Promise<void> {
+        switch (action) {
+            case 'start':
+                await adminApi.startContainer(containerId);
+                return;
+            case 'stop':
+                await adminApi.stopContainer(containerId);
+                return;
+            case 'restart':
+                await adminApi.restartContainer(containerId);
+                return;
+            case 'delete':
+                await adminApi.deleteContainer(containerId);
+                return;
+            case 'permanent-delete':
+                await adminApi.permanentDeleteContainer(containerId);
+                return;
             case 'restore':
                 await adminApi.restoreContainer(containerId, toExpirationRequest(message));
-                return true;
+                return;
         }
     }
 
@@ -549,6 +628,99 @@ export class AdminPanel implements vscode.Disposable {
             .then(() => undefined, () => undefined);
     }
 
+    private handleContainerOperationEvent(event: ContainerOperationEvent): void {
+        const panel = this.panel;
+        if (event.type === 'completed') {
+            this.clearReconciliationTimer(event.operation.containerId);
+            if (event.operation.source === 'admin' && event.outcome === 'succeeded') {
+                void vscode.window.showInformationMessage(
+                    `TestAgent Cloud 服务 "${event.operation.containerId}" 已${getContainerOperationName(event.operation.action)}`,
+                );
+            }
+            if (event.operation.source === 'admin' && event.outcome === 'failed' && event.operation.phase === 'reconciling') {
+                void vscode.window.showWarningMessage(
+                    `TestAgent Cloud 服务 "${event.operation.containerId}" 的${getContainerOperationName(event.operation.action)}结果暂时无法确认，请刷新后再试`,
+                );
+            }
+            if (panel && this.state.status === 'ready') {
+                void this.refresh(panel, this.generation, false, true);
+            }
+            return;
+        }
+        if (panel && this.state.status === 'ready') {
+            this.postAdminUpdate(panel, this.generation);
+        }
+    }
+
+    private getRenderedState(): AdminPanelState {
+        if (!this.operationRegistry) {
+            return this.state;
+        }
+        return {
+            ...this.state,
+            containers: this.state.containers.map(container => {
+                const operation = this.operationRegistry?.get(container.container_id);
+                if (!operation || container.business_deleted && operation.action !== 'restore') {
+                    return container;
+                }
+                return {
+                    ...container,
+                    ...(operation.action === 'restore' ? { business_deleted: false, deleted_at: null } : {}),
+                    status: getContainerOperationStatus(operation.action),
+                };
+            }),
+        };
+    }
+
+    private async reconcileContainerOperation(operation: ContainerOperationState): Promise<boolean> {
+        if (!this.operationRegistry) {
+            return true;
+        }
+        if (!this.onContainerOperation) {
+            this.operationRegistry.complete(operation.containerId);
+            return true;
+        }
+        try {
+            const confirmed = await this.onContainerOperation(operation);
+            if (confirmed) {
+                this.operationRegistry.complete(operation.containerId);
+                return true;
+            }
+        } catch {
+            // The regular ContainerSync timer will retry reconciliation.
+        }
+        return false;
+    }
+
+    private scheduleReconciliationTimeout(operation: ContainerOperationState): void {
+        this.clearReconciliationTimer(operation.containerId);
+        const timer = setTimeout(() => {
+            this.reconciliationTimers.delete(operation.containerId);
+            const current = this.operationRegistry?.get(operation.containerId);
+            if (!current || current.phase !== 'reconciling' || current.action !== operation.action) {
+                return;
+            }
+            this.operationRegistry?.complete(operation.containerId, 'failed');
+        }, OPERATION_RECONCILIATION_TIMEOUT_MS);
+        this.reconciliationTimers.set(operation.containerId, timer);
+    }
+
+    private clearReconciliationTimer(containerId: string): void {
+        const timer = this.reconciliationTimers.get(containerId);
+        if (!timer) {
+            return;
+        }
+        clearTimeout(timer);
+        this.reconciliationTimers.delete(containerId);
+    }
+
+    private clearReconciliationTimers(): void {
+        for (const timer of this.reconciliationTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.reconciliationTimers.clear();
+    }
+
     private showPageError(error: unknown): void {
         this.state.status = error instanceof AdminAccessDeniedError ? 'forbidden' : 'error';
         this.state.error = getErrorMessage(error);
@@ -563,7 +735,7 @@ export class AdminPanel implements vscode.Disposable {
         }
         this.webviewReady = false;
         this.pendingAdminUpdate = false;
-        panel.webview.html = renderAdminPage(this.state, createNonce(), panel.webview.cspSource);
+        panel.webview.html = renderAdminPage(this.getRenderedState(), createNonce(), panel.webview.cspSource);
     }
 
     private setLogOpen(panel: vscode.WebviewPanel, generation: number, open: boolean): void {
@@ -926,6 +1098,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getErrorMessage(error: unknown): string {
     return formatRestClientError(error);
+}
+
+function isRequestTimeoutError(error: unknown): boolean {
+    return error instanceof RestClientError && error.code === REST_ERROR_CODES.TIMEOUT;
 }
 
 function createNonce(): string {

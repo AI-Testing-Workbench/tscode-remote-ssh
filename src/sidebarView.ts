@@ -9,6 +9,12 @@ import {
     type ContainerSyncResult,
     type SyncedContainer,
 } from './containerSync';
+import {
+    ContainerOperationAction,
+    ContainerOperationOutcome,
+    ContainerOperationRegistry,
+    getContainerOperationStatus,
+} from './containerOperations';
 import { parseContainerEndpoint } from './containerEndpoint';
 import { parseGiteeRepositoryUrl } from './giteeRepository';
 import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } from './settings';
@@ -77,6 +83,7 @@ export interface SidebarViewOptions {
     onOpenAdmin?: () => void | Promise<void>;
     onConnect?: (host: string) => void | Promise<void>;
     onDisconnect?: () => void | Promise<void>;
+    operationRegistry?: ContainerOperationRegistry;
     showInputBox?: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
     showQuickPick?: (
         items: readonly string[],
@@ -99,12 +106,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly onOpenAdmin: (() => void | Promise<void>) | undefined;
     private readonly onConnect: ((host: string) => void | Promise<void>) | undefined;
     private readonly onDisconnect: (() => void | Promise<void>) | undefined;
+    private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
     private readonly showQuickPick: (
         items: readonly string[],
         options: vscode.QuickPickOptions & { canPickMany: true },
     ) => Thenable<string[] | undefined>;
     private readonly stateSubscription: { dispose: () => void };
+    private readonly operationSubscription: { dispose: () => void };
     private readonly optimisticallyRemovedContainerIds = new Set<string>();
 
     private webviewView: vscode.WebviewView | undefined;
@@ -134,9 +143,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.onOpenAdmin = options.onOpenAdmin;
         this.onConnect = options.onConnect;
         this.onDisconnect = options.onDisconnect;
+        this.operationRegistry = options.operationRegistry;
         this.showInputBox = options.showInputBox ?? (inputOptions => vscode.window.showInputBox(inputOptions));
         this.showQuickPick = options.showQuickPick ?? ((items, quickPickOptions) => vscode.window.showQuickPick(items, quickPickOptions));
         this.stateSubscription = this.state.subscribe(() => this.handleSyncStateUpdated());
+        this.operationSubscription = this.operationRegistry?.subscribe(() => this.render()) ?? { dispose: () => undefined };
     }
 
     public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
@@ -214,6 +225,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
         this.disposed = true;
         this.stateSubscription.dispose();
+        this.operationSubscription.dispose();
         this.messageSubscription?.dispose();
         this.viewDisposeSubscription?.dispose();
         this.viewVisibilitySubscription?.dispose();
@@ -335,9 +347,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const result = this.state.getState();
-        const containers = result.containers.filter(container => !this.optimisticallyRemovedContainerIds.has(container.containerId));
+        const containers = result.containers
+            .filter(container => !this.optimisticallyRemovedContainerIds.has(container.containerId))
+            .map(container => this.applyOperationOverlay(container));
+        const activeOperationIds = new Set([
+            ...this.containerOperationCounts.keys(),
+            ...(this.operationRegistry?.list().map(operation => operation.containerId) ?? []),
+        ]);
+        const hasActiveOperation = activeOperationIds.size > 0;
         const error = this.pageError ?? result.error;
-        if (error) {
+        if (error && !hasActiveOperation) {
             this.setWebviewHtml(renderErrorHtml(error.message));
             return;
         }
@@ -349,7 +368,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.setWebviewHtml(renderSidebarHtml(
             containers,
             this.adminAllowed,
-            new Set(this.containerOperationCounts.keys()),
+            activeOperationIds,
         ));
     }
 
@@ -392,6 +411,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
     private clearContainerDeleted(containerId: string): void {
         this.sync.clearContainerDeleted?.(containerId);
+    }
+
+    private applyOperationOverlay(container: SyncedContainer): SyncedContainer {
+        const operation = this.operationRegistry?.get(container.containerId);
+        if (!operation) {
+            return container;
+        }
+        return {
+            ...container,
+            remote: true,
+            status: getContainerOperationStatus(operation.action),
+            error: undefined,
+        };
     }
 
     private setWebviewHtml(html: string): void {
@@ -439,7 +471,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     await this.connectContainer(containerId);
                     return;
                 case 'restart':
-                    await this.runContainerAction(containerId, id => this.publicApi.restartContainer(id));
+                    await this.runContainerAction(containerId, 'restart', id => this.publicApi.restartContainer(id));
                     return;
                 case 'delete':
                     await this.deleteContainer(containerId);
@@ -465,7 +497,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (container.error) {
             throw new Error(`服务 "${container.containerId}" 当前不可连接：${container.error.message}`);
         }
-        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0) {
+        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
             throw new Error(`服务 "${container.containerId}" 正在执行操作，暂时无法连接`);
         }
         if (container.status.toLowerCase() !== 'running') {
@@ -479,6 +511,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
     private async runContainerAction(
         containerId: string | undefined,
+        operationAction: ContainerOperationAction,
         action: (containerId: string) => Promise<void>,
     ): Promise<void> {
         const container = this.findContainer(containerId);
@@ -491,14 +524,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (container.status.toLowerCase() === 'failed') {
             throw new Error(`服务 "${container.containerId}" 处于失败状态，不能重启`);
         }
-        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0) {
+        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
             throw new Error(`服务 "${container.containerId}" 正在执行操作，请稍后重试`);
         }
+        this.claimContainerOperation(containerId, operationAction);
         this.beginContainerOperation(containerId);
+        let succeeded = false;
         try {
             await this.runMutation(() => action(containerId));
             await this.refreshAfterMutation();
+            succeeded = true;
         } finally {
+            this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed');
             this.endContainerOperation(containerId);
             this.render();
         }
@@ -512,23 +549,27 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!container || !container.remote) {
             throw new Error('服务已被删除，无法执行此操作');
         }
-        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0) {
+        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
             throw new Error(`服务 "${container.containerId}" 正在执行操作，请稍后重试`);
         }
+        this.claimContainerOperation(containerId, 'delete');
         this.beginContainerOperation(containerId);
         this.markContainerDeleted(containerId);
         this.optimisticallyRemoveContainer(containerId);
+        let succeeded = false;
         try {
             await this.runMutation(async () => {
                 await this.publicApi.deleteContainer(containerId);
                 await this.removeContainerFromConfig(containerId);
             });
             await this.refreshAfterMutation();
+            succeeded = true;
         } catch (error) {
             this.clearContainerDeleted(containerId);
             this.restoreOptimisticallyRemovedContainer(containerId);
             throw error;
         } finally {
+            this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed');
             this.endContainerOperation(containerId);
             this.render();
         }
@@ -680,6 +721,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private beginContainerOperation(containerId: string): void {
         this.containerOperationCounts.set(containerId, (this.containerOperationCounts.get(containerId) ?? 0) + 1);
         this.render();
+    }
+
+    private claimContainerOperation(containerId: string, action: ContainerOperationAction): void {
+        if (this.operationRegistry && !this.operationRegistry.begin(containerId, action, 'sidebar')) {
+            throw new Error(`服务 "${containerId}" 正在执行操作，请稍后重试`);
+        }
+    }
+
+    private releaseContainerOperation(containerId: string, outcome: ContainerOperationOutcome): void {
+        this.operationRegistry?.complete(containerId, outcome);
     }
 
     private endContainerOperation(containerId: string): void {
@@ -994,7 +1045,8 @@ function renderDocument(body: string): string {
         .status-label { white-space: nowrap; }
         .status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--vscode-charts-yellow); }
         .status-dot.running { background: var(--vscode-testing-iconPassed, #3fb950); }
-        .status-dot.stopped, .status-dot.failed, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
+         .status-dot.stopped, .status-dot.failed, .status-dot.error { background: var(--vscode-testing-iconFailed, #f14c4c); }
+         .status-dot.pending { background: var(--vscode-charts-yellow, #e5c07b); animation: status-pulse 1.2s ease-in-out infinite; }
         .status-dot.missing { background: var(--vscode-descriptionForeground); }
         .usage-separator { color: var(--on-surface-variant); font-weight: 700; }
         .usage-metric { white-space: nowrap; }
@@ -1036,7 +1088,8 @@ function renderDocument(body: string): string {
         .error-page p { max-width: 100%; margin: 0; overflow-wrap: anywhere; }
         .loading { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--on-surface-variant); }
         .loading-indicator { width: 24px; height: 24px; border: 3px solid var(--surface-container-high); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+         @keyframes spin { to { transform: rotate(360deg); } }
+         @keyframes status-pulse { 50% { opacity: .35; transform: scale(.72); } }
         @media (max-width: 360px) {
             body { padding: 12px 10px 20px; }
             .app-bar { gap: 7px; margin-bottom: 12px; }
@@ -1066,7 +1119,7 @@ function stripWebviewNonces(html: string): string {
 
 function getStatusClass(container: SyncedContainer): string {
     if (container.error) {
-        return 'error';
+        return container.status.toLowerCase() === 'unknown' ? 'unknown error' : 'error';
     }
     if (!container.remote || container.status === 'missing') {
         return 'missing';
@@ -1079,6 +1132,9 @@ function getStatusClass(container: SyncedContainer): string {
     }
     if (container.status.toLowerCase() === 'failed') {
         return 'failed';
+    }
+    if (['pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring'].includes(container.status.toLowerCase())) {
+        return 'pending';
     }
     return 'unknown';
 }
@@ -1100,6 +1156,10 @@ function getStatusLabel(container: SyncedContainer): string {
             return '停止中';
         case 'restarting':
             return '重启中';
+        case 'deleting':
+            return '操作中';
+        case 'restoring':
+            return '操作中';
         case 'pending':
             return '准备中';
         default:

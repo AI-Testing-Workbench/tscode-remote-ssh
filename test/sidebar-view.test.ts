@@ -2,6 +2,7 @@ import { Script } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContainerConfig } from '../src/containerConfig';
 import { ContainerSyncResult, SyncedContainer } from '../src/containerSync';
+import { ContainerOperationRegistry } from '../src/containerOperations';
 import { PublicUserContainerApi } from '../src/api/publicApi';
 import { UserRestApi } from '../src/api/restClient';
 import { SidebarSyncState, SidebarViewProvider } from '../src/sidebarView';
@@ -73,7 +74,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('status-dot stopped');
         expect(view.webview.html).toContain('<span class="status-dot failed"></span>\n                    <span class="status-label">失败</span>');
         expect(view.webview.html).toContain('status-dot unknown');
-        expect(view.webview.html).toContain('status-dot error');
+        expect(view.webview.html).toContain('status-dot unknown error');
         expect(view.webview.html).toContain('status-dot missing');
         expect(view.webview.html).toContain('<span class="status-label">准备中</span>');
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.failed, .status-dot.error');
@@ -120,6 +121,27 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('script-src \'nonce-');
         expect(view.webview.html).not.toContain('data-action="openAdmin"');
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
+    });
+
+    it('overlays an administrator lifecycle operation and hides a transient sync error', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('container-1', 'running', true)],
+            changed: false,
+            error: { code: 'request_timeout', message: '状态查询超时' },
+        });
+        const operationRegistry = new ContainerOperationRegistry();
+        operationRegistry.begin('container-1', 'stop', 'admin');
+        const view = createWebviewView();
+        const provider = createProvider({ state, operationRegistry });
+
+        await provider.resolveWebviewView(view as never);
+
+        expect(view.webview.html).toContain('status-dot pending');
+        expect(view.webview.html).toContain('<span class="status-label">停止中</span>');
+        expect(view.webview.html).not.toContain('状态查询超时');
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="container-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toContain('status-pulse');
     });
 
     it('renders usage separators, threshold colors, and remaining expiration time', async () => {
@@ -754,6 +776,7 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
         onOpenAdmin: options.onOpenAdmin,
         onConnect: options.onConnect,
         onDisconnect: options.onDisconnect,
+        operationRegistry: options.operationRegistry,
         showInputBox: options.showInputBox,
         showQuickPick: options.showQuickPick,
     });
@@ -781,6 +804,7 @@ interface ProviderTestOptions {
     onOpenAdmin: () => void | Promise<void>;
     onConnect: (host: string) => void | Promise<void>;
     onDisconnect: () => void | Promise<void>;
+    operationRegistry?: ContainerOperationRegistry;
     showInputBox: (options: import('vscode').InputBoxOptions) => Thenable<string | undefined>;
     showQuickPick: (
         items: readonly string[],

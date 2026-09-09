@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ContainerConfig } from '../src/containerConfig';
 import { ContainerSync, getHostFromEndpoint, getUniqueHostName } from '../src/containerSync';
+import { ContainerOperationRegistry } from '../src/containerOperations';
 import { RestClientError, UserRestApi } from '../src/api/restClient';
 
 const temporaryDirectories: string[] = [];
@@ -579,6 +580,68 @@ describe('ContainerSync', () => {
         const confirmed = await sync.sync();
         expect(confirmed.containers).toEqual([]);
     });
+
+    it('keeps an external lifecycle operation active until a fresh sync confirms the target state', async () => {
+        const store = await createStore();
+        let status = 'running';
+        const registry = new ContainerOperationRegistry();
+        const getContainer = vi.fn(async () => ({
+            container_id: 'container-1',
+            status,
+            endpoint: '10.0.0.1:22',
+            gitee_user: '',
+            gitee_repository: '',
+        }));
+        const sync = createSync(store, {
+            getContainerIds: vi.fn(async () => ({ container_ids: ['container-1'] })),
+            getContainer,
+        }, {}, registry);
+        registry.begin('container-1', 'stop', 'admin');
+
+        await sync.sync();
+        expect(registry.get('container-1')).toMatchObject({ phase: 'processing', action: 'stop' });
+        expect(getContainer).not.toHaveBeenCalled();
+
+        registry.setPhase('container-1', 'reconciling');
+
+        status = 'stopped';
+        await sync.sync();
+        expect(getContainer).toHaveBeenCalledOnce();
+        expect(registry.get('container-1')).toBeUndefined();
+    });
+
+    it('does not confirm restore until a previously deleted local service returns remotely', async () => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, {
+            containerId: 'container-restore',
+            host: 'restore-host',
+            expiresAt: '2026-09-01T00:00:00.000Z',
+        });
+        await store.write(document);
+
+        let remoteIds: string[] = [];
+        const registry = new ContainerOperationRegistry();
+        const sync = createSync(store, {
+            getContainerIds: vi.fn(async () => ({ container_ids: remoteIds })),
+            getContainer: vi.fn(async () => ({
+                container_id: 'container-restore',
+                status: 'running',
+                endpoint: '10.0.0.9:22',
+                gitee_user: '',
+                gitee_repository: '',
+            })),
+        }, {}, registry);
+        registry.begin('container-restore', 'restore', 'admin');
+        registry.setPhase('container-restore', 'reconciling');
+
+        await sync.sync();
+        expect(registry.get('container-restore')).toBeDefined();
+
+        remoteIds = ['container-restore'];
+        await sync.sync();
+        expect(registry.get('container-restore')).toBeUndefined();
+    });
 });
 
 describe('getHostFromEndpoint', () => {
@@ -601,6 +664,7 @@ function createSync(
     store: ContainerConfig,
     api: Pick<UserRestApi, 'getContainerIds' | 'getContainer'>,
     settings: Partial<ReturnType<NonNullable<ContainerSyncOptionsForTest['getSettings']>>> = {},
+    operationRegistry?: ContainerOperationRegistry,
 ): ContainerSync {
     return new ContainerSync({
         config: store,
@@ -616,6 +680,7 @@ function createSync(
             disableClientValidation: true,
             ...settings,
         }),
+        operationRegistry,
         now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 }

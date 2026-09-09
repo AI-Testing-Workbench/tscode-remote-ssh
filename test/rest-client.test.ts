@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     ADMIN_OPERATOR_USER_ID_HEADER,
     buildMultipartBody,
+    DEFAULT_LIFECYCLE_TIMEOUT_MS,
     DEFAULT_LONG_RUNNING_TIMEOUT_MS,
     DEFAULT_REST_TIMEOUT_MS,
     formatRestClientError,
@@ -136,6 +137,11 @@ describe('RestClient', () => {
         expect(requests[8].timeoutMs).toBe(DEFAULT_LONG_RUNNING_TIMEOUT_MS);
         expect(requests[9].timeoutMs).toBe(DEFAULT_REST_TIMEOUT_MS);
         expect(requests[15].timeoutMs).toBe(DEFAULT_LONG_RUNNING_TIMEOUT_MS);
+        expect(requests[4].timeoutMs).toBe(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+        expect(requests[5].timeoutMs).toBe(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+        expect(requests[21].timeoutMs).toBe(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+        expect(requests[25].timeoutMs).toBe(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+        expect(requests[27].timeoutMs).toBe(DEFAULT_LIFECYCLE_TIMEOUT_MS);
         expect(multipartBody).toContain('name="auto_push"');
         expect(multipartBody).toContain('name="file"; filename="image.tar"');
         expect(multipartBody).toContain('tar');

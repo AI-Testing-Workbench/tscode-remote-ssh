@@ -4,8 +4,9 @@ import { AdminPanel } from '../src/adminPanel';
 import { ADMIN_WEBVIEW_SCRIPT } from '../src/adminWebview/script';
 import { renderAdminPage } from '../src/adminWebview/view';
 import type { AdminPanelState } from '../src/adminWebview/types';
-import { RestClientError, type AdminRestApi, type UserRestApi } from '../src/api/restClient';
+import { REST_ERROR_CODES, RestClientError, type AdminRestApi, type UserRestApi } from '../src/api/restClient';
 import * as vscode from './mocks/vscode';
+import { ContainerOperationRegistry } from '../src/containerOperations';
 
 const activePanels: AdminPanel[] = [];
 
@@ -16,6 +17,7 @@ describe('AdminPanel', () => {
         vscode.window.showOpenDialog.mockReset();
         vscode.window.showWarningMessage.mockReset();
         vscode.window.showErrorMessage.mockReset();
+        vscode.window.showInformationMessage.mockReset();
     });
 
     afterEach(() => {
@@ -130,6 +132,79 @@ describe('AdminPanel', () => {
 
         expect(adminApi.restartContainer).not.toHaveBeenCalled();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "container-1" 处于失败状态，不能重启');
+    });
+
+    it('keeps a timed-out administrator lifecycle operation in reconciliation', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.stopContainer = vi.fn(async () => {
+            throw new RestClientError('network', REST_ERROR_CODES.TIMEOUT, '停止 TestAgent Cloud 服务超时');
+        });
+        const operationRegistry = new ContainerOperationRegistry();
+        const reconcile = vi.fn(async () => false);
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            operationRegistry,
+            onContainerOperation: reconcile,
+        });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'containers' });
+        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'stop' });
+
+        expect(adminApi.stopContainer).toHaveBeenCalledWith('container-1');
+        expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+            containerId: 'container-1',
+            action: 'stop',
+            phase: 'reconciling',
+        }));
+        expect(operationRegistry.get('container-1')).toMatchObject({ action: 'stop', phase: 'reconciling' });
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining('1 分钟'));
+        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'adminUpdate',
+            html: expect.stringContaining('停止中'),
+        }));
+        expect(vscode.window.withProgress).toHaveBeenCalledWith(expect.objectContaining({
+            title: '正在停止 TestAgent Cloud 服务',
+            location: vscode.ProgressLocation.Notification,
+            cancellable: false,
+        }), expect.any(Function));
+    });
+
+    it('shows restore progress and keeps a deleted service in a restoring transition', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        vi.mocked(adminApi.listContainers).mockResolvedValue({ containers: [{
+            ...sampleContainer(),
+            status: 'business_deleted',
+            business_deleted: true,
+            deleted_at: '2026-09-05T01:02:03Z',
+        }] });
+        const operationRegistry = new ContainerOperationRegistry();
+        const reconcile = vi.fn(async () => false);
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            operationRegistry,
+            onContainerOperation: reconcile,
+        });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'containers' });
+        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'restore', expirationHours: '24' });
+
+        expect(adminApi.restoreContainer).toHaveBeenCalledWith('container-1', { expiration_hours: 24 });
+        expect(operationRegistry.get('container-1')).toMatchObject({ action: 'restore', phase: 'reconciling' });
+        expect(vscode.window.withProgress).toHaveBeenCalledWith(expect.objectContaining({
+            title: '正在恢复 TestAgent Cloud 服务',
+            location: vscode.ProgressLocation.Notification,
+            cancellable: false,
+        }), expect.any(Function));
+        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'adminUpdate',
+            html: expect.stringContaining('恢复中'),
+        }));
     });
 
     it('switches tabs and scopes search to the active resource dataset', async () => {
