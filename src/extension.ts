@@ -11,10 +11,12 @@ import {SidebarSyncState, SidebarViewProvider} from './sidebarView';
 import {UserIdProvider} from './user';
 import {createPublicUserContainerApi, type TestAgentRemoteApi} from './api/publicApi';
 import SSHDestination from './ssh/sshDestination';
+import {AdminPanel} from './adminPanel';
 
 let activeContainerSync: ContainerSync | undefined;
 let activeSidebarView: SidebarViewProvider | undefined;
 let activeSidebarSyncState: SidebarSyncState | undefined;
+let activeAdminPanel: AdminPanel | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<TestAgentRemoteApi> {
     const logger = new Log('TestAgent - Remote');
@@ -27,6 +29,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const sidebarSyncState = new SidebarSyncState();
     const userIdProvider = new UserIdProvider();
     const publicApi = createPublicUserContainerApi({ userIdProvider });
+    const adminPanel = new AdminPanel({ userIdProvider });
     const config = new ContainerConfig();
     const getCloudMode = async (): Promise<boolean> => {
         const localCloudMode = refreshCloudMode(cloudModeOptions);
@@ -76,7 +79,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
             await openSSHConfigFile();
         },
         onOpenAdmin: () => {
-            void vscode.window.showInformationMessage('管理员页面将在后续版本开放。');
+            void adminPanel.open();
         },
         onConnect: host => connectToContainer(host, () => activeSidebarView?.refreshCloudMode()),
         onDisconnect: async () => {
@@ -85,10 +88,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     });
     activeSidebarView = sidebarView;
     activeSidebarSyncState = sidebarSyncState;
+    activeAdminPanel = adminPanel;
     context.subscriptions.push(
         containerSync,
         sidebarSyncState,
         sidebarView,
+        adminPanel,
         vscode.window.registerWebviewViewProvider('sshHosts', sidebarView, {
             webviewOptions: { retainContextWhenHidden: true },
         }),
@@ -113,6 +118,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.showLog', () => logger.show()));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.refreshContainers', () => containerSync.refresh()));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.createContainer', () => sidebarView.createContainerFromPrompt()));
+    context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openAdmin', () => adminPanel.open()));
 
     return publicApi;
 }
@@ -133,4 +139,6 @@ export function deactivate() {
     activeSidebarSyncState = undefined;
     activeContainerSync?.dispose();
     activeContainerSync = undefined;
+    activeAdminPanel?.dispose();
+    activeAdminPanel = undefined;
 }
