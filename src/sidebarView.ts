@@ -273,6 +273,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         try {
             settings = this.getSettings();
         } catch (error) {
+            console.error('侧边栏页面准备失败', error);
             this.pageError = toSidebarError(error, 'settings_error', '读取 云端沙箱 服务设置失败');
             this.render();
             return;
@@ -324,7 +325,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     this.adminAllowed = response.admin;
                     this.render();
                 }
-            } catch {
+            } catch (error) {
+                console.error('侧边栏管理员权限检查失败', error);
                 if (!this.disposed) {
                     this.adminAllowed = false;
                     this.render();
@@ -760,13 +762,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private safeIsDisconnected(): boolean {
         try {
             return this.isDisconnected();
-        } catch {
+        } catch (error) {
+            console.error('侧边栏断开状态检查失败', error);
             return false;
         }
     }
 
     private showError(error: unknown): void {
         const message = formatRestClientError(error);
+        console.error('侧边栏操作失败', error);
         void vscode.window.showErrorMessage(message, { modal: true });
     }
 
@@ -788,9 +792,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return false;
         }
         try {
-            void webview.postMessage(message);
+            void webview.postMessage(message).then(undefined, error => {
+                console.error('侧边栏消息发送失败', error);
+            });
             return true;
-        } catch {
+        } catch (error) {
+            console.error('侧边栏消息发送失败', error);
             return false;
         }
     }

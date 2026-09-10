@@ -2,6 +2,13 @@ export const ADMIN_WEBVIEW_SCRIPT = String.raw`
 /* global acquireVsCodeApi, document, window */
 const vscode = acquireVsCodeApi();
 
+window.addEventListener('error', event => {
+    console.error('管理员页面脚本错误', event.error || event.message);
+});
+window.addEventListener('unhandledrejection', event => {
+    console.error('管理员页面未处理的 Promise 错误', event.reason);
+});
+
 const tabKind = tab => tab === 'images' ? 'images' : tab === 'containers' ? 'containers' : tab === 'whitelist' ? 'whitelist' : 'adminUsers';
 
 const getSavedState = () => {

@@ -22,6 +22,11 @@ export class Log {
 
     public error(message: string, data?: unknown): void {
         this.logLevel('Error', message, data);
+        if (data === undefined) {
+            console.error(message);
+        } else {
+            console.error(message, data);
+        }
     }
 
     public logLevel(level: LogLevel, message: string, data?: unknown): void {

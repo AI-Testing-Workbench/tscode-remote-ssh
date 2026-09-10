@@ -1,9 +1,10 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { Log } from '../src/common/logger';
 import * as vscode from './mocks/vscode';
 
 it('copies the current output to the clipboard', async () => {
     vscode.env.clipboard.writeText.mockClear();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     const logger = new Log('TestAgent - Remote');
     logger.info('first log line');
@@ -14,4 +15,6 @@ it('copies the current output to the clipboard', async () => {
     expect(vscode.env.clipboard.writeText).toHaveBeenCalledOnce();
     expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('first log line'));
     expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('second log line'));
+    expect(consoleError).toHaveBeenCalledWith('second log line', { reason: 'test' });
+    consoleError.mockRestore();
 });

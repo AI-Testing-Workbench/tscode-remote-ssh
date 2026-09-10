@@ -756,7 +756,8 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .form-row { display: grid; gap: 12px; margin-bottom: 13px; }
 .single-field { grid-template-columns: minmax(0, 1fr); }
 .two-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.branch-row { width: 100%; grid-template-columns: minmax(0, 3fr) minmax(190px, 1fr); }
+.branch-row { width: 100%; grid-template-columns: minmax(0, 1fr) auto; }
+.branch-row .form-check { width: fit-content; max-width: 100%; justify-self: start; white-space: normal; }
 .gitee-option-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 13px; }
 .mode-radio { display: flex; flex-direction: row; align-items: center; gap: 7px; min-height: 35px; color: var(--text); cursor: pointer; }
 .gitee-fields { min-width: 0; }

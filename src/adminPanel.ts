@@ -166,6 +166,7 @@ export class AdminPanel implements vscode.Disposable {
         this.messageQueue = this.messageQueue
             .then(() => this.handleMessage(panel, generation, message))
             .catch(error => {
+                console.error('管理员面板消息处理失败', error);
                 if (this.isActive(panel, generation)) {
                     void vscode.window.showErrorMessage(getErrorMessage(error));
                 }
@@ -259,6 +260,7 @@ export class AdminPanel implements vscode.Disposable {
                 await this.refresh(panel, generation, false, true);
             }
         } catch (error) {
+            console.error('管理员面板操作失败', error);
             if (this.isActive(panel, generation)) {
                 void vscode.window.showErrorMessage(getErrorMessage(error));
             }
@@ -301,7 +303,7 @@ export class AdminPanel implements vscode.Disposable {
             }
             return this.adminApiFactory(settings.backendApiUrl, userId);
         } catch (error) {
-            this.logger?.error('管理员面板权限校验失败', { baseUrl, error });
+            logAdminError(this.logger, '管理员面板权限校验失败', error, { baseUrl, error });
             if (showError && this.isActive(panel, generation)) {
                 this.showPageError(error);
             }
@@ -355,7 +357,7 @@ export class AdminPanel implements vscode.Disposable {
                     }
                 }
             } catch (error) {
-                this.logger?.error('管理员面板数据刷新失败', { error });
+                logAdminError(this.logger, '管理员面板数据刷新失败', error, { error });
                 if ((showLoading || allowDuringOperation) && this.isActive(panel, generation)) {
                     this.showPageError(error);
                 }
@@ -378,7 +380,10 @@ export class AdminPanel implements vscode.Disposable {
         void panel.webview.postMessage({
             command: 'adminUpdate',
             html: renderAdminContent(this.getRenderedState()),
-        }).then(() => undefined, () => {
+        }).then(() => undefined, error => {
+            if (this.isActive(panel, generation)) {
+                console.error('管理员面板更新消息发送失败', error);
+            }
             if (this.isActive(panel, generation)) {
                 this.webviewReady = false;
                 this.pendingAdminUpdate = true;
@@ -708,7 +713,8 @@ export class AdminPanel implements vscode.Disposable {
                 this.operationRegistry.complete(operation.containerId);
                 return true;
             }
-        } catch {
+        } catch (error) {
+            console.error('管理员面板操作状态确认失败', error);
             // The regular ContainerSync timer will retry reconciliation.
         }
         return false;
@@ -801,7 +807,8 @@ export class AdminPanel implements vscode.Disposable {
         let intervalSeconds: number;
         try {
             intervalSeconds = this.getSettings().statusSyncInterval;
-        } catch {
+        } catch (error) {
+            console.error('读取管理员页面刷新设置失败', error);
             return;
         }
         if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
@@ -907,7 +914,7 @@ async function loadAdminData(adminApi: AdminRestApi, logger?: PanelLogger): Prom
         try {
             return await operation();
         } catch (error) {
-            logger?.error(`管理员面板数据加载失败：${label}`, { elapsedMs: Date.now() - startedAt, error });
+            logAdminError(logger, `管理员面板数据加载失败：${label}`, error, { elapsedMs: Date.now() - startedAt, error });
             throw error;
         }
     };
@@ -1148,6 +1155,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getErrorMessage(error: unknown): string {
     return formatRestClientError(error);
+}
+
+function logAdminError(logger: PanelLogger | undefined, message: string, error: unknown, data: unknown): void {
+    if (logger) {
+        logger.error(message, data);
+        return;
+    }
+    console.error(message, error);
 }
 
 function isRequestTimeoutError(error: unknown): boolean {

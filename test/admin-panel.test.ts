@@ -151,6 +151,7 @@ describe('AdminPanel', () => {
     it('shows the backend error below the error summary', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         const adminApi = createAdminApi();
         adminApi.startContainer = vi.fn(async () => {
             throw new RestClientError('http', 'container_not_ready', '容器当前不可启动', 409);
@@ -164,6 +165,8 @@ describe('AdminPanel', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '后端 云端沙箱 服务请求失败\n请联系支持团队解决\n容器当前不可启动 (错误码: container_not_ready，HTTP 状态码 409)',
         );
+        expect(consoleError).toHaveBeenCalledWith('管理员面板操作失败', expect.any(Error));
+        consoleError.mockRestore();
     });
 
     it('does not restart a failed container', async () => {
@@ -391,7 +394,8 @@ describe('AdminPanel', () => {
         expect(operationRow).toBeGreaterThan(containerRowStart);
         expect(expirationRow).toBeGreaterThan(operationRow);
         expect(containerHtml).toContain('</div>\n            <button class="small-button log-button"');
-        expect(containerHtml).toContain('.branch-row { width: 100%;');
+        expect(containerHtml).toContain('.branch-row { width: 100%; grid-template-columns: minmax(0, 1fr) auto; }');
+        expect(containerHtml).toContain('.branch-row .form-check { width: fit-content; max-width: 100%; justify-self: start; white-space: normal; }');
 
         const deletedHtml = renderAdminPage({
             ...state,
