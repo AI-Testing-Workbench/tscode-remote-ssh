@@ -125,6 +125,20 @@ describe('SidebarViewProvider', () => {
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
     });
 
+    it('renders an empty state without a creation instruction when no containers exist', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [], changed: false });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+
+        await provider.resolveWebviewView(view as never);
+
+        expect(view.webview.html).toContain('class="empty-state"');
+        expect(view.webview.html).toContain('还没有 云端沙箱 服务');
+        expect(view.webview.html).toContain('当前没有可用的容器');
+        expect(view.webview.html).not.toContain('请使用 测小智TestAgent 插件进行创建');
+    });
+
     it('overlays an administrator lifecycle operation and hides a transient sync error', async () => {
         const state = new SidebarSyncState();
         state.update({

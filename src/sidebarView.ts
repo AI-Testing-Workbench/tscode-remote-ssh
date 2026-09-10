@@ -828,7 +828,13 @@ function renderSidebarHtml(
     showAdmin: boolean,
     inFlightContainerIds: ReadonlySet<string>,
 ): string {
-    const cards = containers.map(container => renderContainerCard(container, inFlightContainerIds.has(container.containerId))).join('');
+    const cards = containers.length
+        ? containers.map(container => renderContainerCard(container, inFlightContainerIds.has(container.containerId))).join('')
+        : `<div class="empty-state">
+                ${renderIcon('cloud')}
+                <strong>还没有 云端沙箱 服务</strong>
+                <span>当前没有可用的容器</span>
+            </div>`;
     const adminButton = showAdmin ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin') : '';
     const configButton = showAdmin ? renderToolbarButton('openConfig', '打开配置文件', 'config') : '';
     return renderDocument(`
@@ -1135,7 +1141,10 @@ function renderDocument(body: string): string {
         .history-remove { width: 26px; min-height: 26px; display: grid; place-items: center; flex: 0 0 26px; padding: 0; border: 0; border-radius: 50%; color: var(--error); background: transparent; }
         .history-remove:hover { border: 0; color: var(--error); background: var(--surface-container-high); }
         .history-remove .icon { width: 15px; height: 15px; }
-        .loading, .cloud-card { text-align: center; }
+        .empty-state, .loading, .cloud-card { text-align: center; }
+        .empty-state { display: flex; align-items: center; flex-direction: column; gap: 5px; padding: 38px 18px; border: 1px dashed var(--outline); border-radius: 12px; color: var(--on-surface-variant); }
+        .empty-state .icon { width: 30px; height: 30px; margin-bottom: 7px; color: var(--primary); }
+        .empty-state strong { color: var(--on-surface); font-size: 14px; }
         .cloud-card { min-height: 150px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; padding: 14px; border: 2px solid var(--warning); border-radius: 16px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
         .cloud-icon { width: 84px; height: 84px; display: grid; place-items: center; border-radius: 12px; color: var(--warning); background: var(--surface-container-high); }
         .cloud-icon .icon { width: 54px; height: 54px; }
