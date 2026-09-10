@@ -2,7 +2,7 @@
 	"name": "tscode-remote-ssh",
 	"displayName": "TSCode Remote",
 	"description": "连接至远端沙箱",
-	"version": "1.0.3",
+	"version": "1.0.0",
 	"publisher": "test-tech",
 	"engines": {
 		"vscode": "^1.70.2"
