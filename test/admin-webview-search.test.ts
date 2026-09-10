@@ -245,7 +245,7 @@ describe('Admin Webview search', () => {
         expect(rows[1].hidden).toBe(false);
         expect(controls?.getAttribute('data-page')).toBe('1');
         expect(emptySearch.hidden).toBe(true);
-        expect(indicator.textContent).toBe('第 1/1 页 · 1 项');
+        expect(indicator.textContent).toBe('第 1/1 页 · 共1 个条目');
 
         searchInput.value = 'does-not-exist';
         document.dispatch('input', searchInput);
@@ -253,6 +253,6 @@ describe('Admin Webview search', () => {
         expect(rows.every(row => row.hidden)).toBe(true);
         expect(items.hidden).toBe(true);
         expect(emptySearch.hidden).toBe(false);
-        expect(indicator.textContent).toBe('第 1/1 页 · 0 项');
+        expect(indicator.textContent).toBe('第 1/1 页 · 共0 个条目');
     });
 });

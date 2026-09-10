@@ -265,7 +265,7 @@ describe('RestClient', () => {
             auto_push: false,
         })).rejects.toMatchObject({
             code: 'request_timeout',
-            message: '上传镜像超时（已等待 20 分钟仍未收到响应），后端可能仍在处理，请稍后检查结果，避免重复提交',
+            message: '上传镜像超时 (已等待 20 分钟仍未收到响应)，正在重试中...',
         });
     });
 
@@ -279,7 +279,7 @@ describe('RestClient', () => {
         const error = await client.admin.listImages().catch(value => value);
         expect(error).toMatchObject({
             code: 'request_timeout',
-            message: '后端 云端沙箱 管理服务请求超时（已等待 15 秒，HTTP 504，仍未收到响应），后端可能仍在处理，请稍后检查结果，避免重复提交',
+            message: '后端 云端沙箱 管理服务请求超时 (已等待 15 秒，HTTP 状态码 504，仍未收到响应)，正在重试中...',
             statusCode: 504,
             cause: {
                 code: 'backend_timeout',
@@ -288,8 +288,9 @@ describe('RestClient', () => {
         });
         expect(formatRestClientError(error)).toBe(
             '后端 云端沙箱 服务请求失败\n'
-            + '错误详情：后端 云端沙箱 管理服务请求超时（已等待 15 秒，HTTP 504，仍未收到响应），后端可能仍在处理，请稍后检查结果，避免重复提交\n'
-            + '返回错误：服务仍在处理（错误码：backend_timeout，HTTP 504）',
+            + '请联系支持团队解决\n'
+            + '错误详情: 后端 云端沙箱 管理服务请求超时 (已等待 15 秒，HTTP 状态码 504，仍未收到响应)，正在重试中...\n'
+            + '服务仍在处理 (错误码: backend_timeout，HTTP 状态码 504)',
         );
     });
 

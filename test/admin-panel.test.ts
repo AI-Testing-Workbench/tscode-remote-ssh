@@ -162,7 +162,7 @@ describe('AdminPanel', () => {
         await flushMessages();
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            '后端 云端沙箱 服务请求失败\n返回错误：容器当前不可启动（错误码：container_not_ready，HTTP 409）',
+            '后端 云端沙箱 服务请求失败\n请联系支持团队解决\n容器当前不可启动 (错误码: container_not_ready，HTTP 状态码 409)',
         );
     });
 
@@ -178,7 +178,7 @@ describe('AdminPanel', () => {
         await flushMessages();
 
         expect(adminApi.restartContainer).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "container-1" 处于失败状态，不能重启');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('容器 "container-1" 处于失败状态，不能重启');
     });
 
     it('keeps a timed-out administrator lifecycle operation in reconciliation', async () => {
@@ -250,7 +250,7 @@ describe('AdminPanel', () => {
         }), expect.any(Function));
         expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'adminUpdate',
-            html: expect.stringContaining('恢复中'),
+            html: expect.stringContaining('操作中'),
         }));
     });
 
@@ -294,8 +294,8 @@ describe('AdminPanel', () => {
         const html = renderAdminPage(state, 'nonce', 'vscode-resource://test');
 
         expect(html.indexOf('<div class="stats-grid service-stats">')).toBeLessThan(html.indexOf('<div class="stats-grid people-stats">'));
-        expect(html.indexOf('服务总数')).toBeLessThan(html.indexOf('孤儿容器'));
-        expect(html.indexOf('孤儿容器')).toBeLessThan(html.indexOf('白名单服务'));
+        expect(html.indexOf('全部容器总数')).toBeLessThan(html.indexOf('孤儿容器'));
+        expect(html.indexOf('孤儿容器')).toBeLessThan(html.indexOf('白名单容器总数'));
         expect(html.indexOf('<div class="stats-grid people-stats">')).toBeLessThan(html.indexOf('default-banner overview-card'));
         expect(html).toContain('镜像不存在');
         expect(html).toContain('3/4');
@@ -305,8 +305,8 @@ describe('AdminPanel', () => {
         expect(html).toContain('data-custom-select');
         expect(html).toContain('@keyframes panel-enter');
         expect(html).toContain('prefers-reduced-motion: reduce');
-        expect(html).toContain('CPU（当前值：2 核）');
-        expect(html).toContain('内存（当前值：4 Gi）');
+        expect(html).toContain('CPU (当前值: 2 核)');
+        expect(html).toContain('内存 (当前值: 4 Gi)');
         expect(html).not.toContain('当前使用');
         expect(html).not.toContain('default-separator');
         expect(html).not.toContain('status-dot');
@@ -315,10 +315,10 @@ describe('AdminPanel', () => {
         expect(html).toContain('容器管理');
         expect(html).not.toContain('SERVICES');
         expect(html).not.toContain('服务管理');
-        expect(html).toContain('value="none" type="radio" checked>不填写码云信息');
+        expect(html).toContain('value="none" type="radio" checked>无码云仓库绑定');
         expect(html).toContain('data-gitee-mode-panel="full"');
         expect(html).toContain('data-gitee-mode-panel="parts"');
-        expect(html).toContain('data-field="gitee_repository" data-persist-key="create.gitee_repository" type="text" placeholder="仓库名" disabled');
+        expect(html).toContain('data-field="gitee_repository" data-persist-key="create.gitee_repository" type="text" placeholder="XXX" disabled');
         expect(html).toContain('data-resource-items');
         expect(html).not.toContain('data-action="clearSearch"');
         expectPersistedFields(html, [
@@ -344,7 +344,7 @@ describe('AdminPanel', () => {
 
         const noDefaultHtml = renderAdminPage({ ...state, defaultImages: createDefaultImages(null, null) }, 'nonce', 'vscode-resource://test');
         expect(noDefaultHtml).toContain('default-banner overview-card danger');
-        expect(noDefaultHtml).toContain('danger-tag">未配置');
+        expect(noDefaultHtml).toContain('danger-tag">默认镜像未配置');
         expect(noDefaultHtml).toContain('.default-banner.danger { border-color: var(--danger);');
 
         const failedHtml = renderAdminPage({
@@ -353,7 +353,7 @@ describe('AdminPanel', () => {
         }, 'nonce', 'vscode-resource://test');
         expect(failedHtml).toContain('value="failed"');
         expect(failedHtml).toContain('data-filter-status="failed"');
-        expect(failedHtml).toContain('status-chip tag warning">失败</span>');
+        expect(failedHtml).toContain('status-chip tag warning">已失败</span>');
         const stoppedHtml = renderAdminPage({
             ...state,
             containers: [{ ...sampleContainer(), status: 'stopped' }],
@@ -370,12 +370,12 @@ describe('AdminPanel', () => {
         }, 'nonce', 'vscode-resource://test');
         expect(containerHtml).toContain('status-border-success');
         expect(containerHtml).toContain('data-select-menu');
-        expect(containerHtml).toContain('码云用户/仓库名 (分支)');
+        expect(containerHtml).toContain('码云信息');
         expect(containerHtml).toContain('alice/repo (main)');
-        expect(containerHtml).toContain('授权通用账户');
+        expect(containerHtml).toContain('授权使用通用码云账户');
         expect(containerHtml).toContain('否');
         expect(containerHtml).toContain('2026/09/04 08:00');
-        expect(containerHtml).toContain('预计删除时间');
+        expect(containerHtml).toContain('删除时间 (计划)');
         expect(containerHtml).toContain('2026/09/05 08:00');
         expect(containerHtml).toContain('detail-item usage-metric-low');
         const containerRowStart = containerHtml.indexOf('<article class="resource-row container-row');
@@ -441,7 +441,7 @@ describe('AdminPanel', () => {
             'image.registry.test:5000/testagent/app:v1.alsoRegistry',
         ]);
         const deleteImageButton = imageHtml.indexOf('data-action="deleteImage"');
-        const registryCheckbox = imageHtml.indexOf('>同步注册表</label>');
+        const registryCheckbox = imageHtml.indexOf('>同步推送至注册表 (镜像仓库)</label>');
         expect(deleteImageButton).toBeGreaterThanOrEqual(0);
         expect(registryCheckbox).toBeGreaterThan(deleteImageButton);
         expect(imageHtml).not.toContain('image-usage');
@@ -462,7 +462,7 @@ describe('AdminPanel', () => {
                 status: 'pushed',
             }],
         }, 'nonce', 'vscode-resource://test');
-        expect(defaultImageHtml).toMatch(/<label class="row-check check-button disabled"><input[^>]*disabled[^>]*>同步注册表<\/label>/);
+        expect(defaultImageHtml).toMatch(/<label class="row-check check-button disabled"><input[^>]*disabled[^>]*>同步推送至注册表 \(镜像仓库\)<\/label>/);
 
         const imageWithUsageHtml = renderAdminPage({
             ...state,
@@ -518,7 +518,7 @@ describe('AdminPanel', () => {
         });
 
         await adminPanel.open();
-        expect(panel.webview.html).toContain('尚未选择镜像文件');
+        expect(panel.webview.html).toContain('未选择镜像文件');
 
         await send(panel, { command: 'selectImageFile' });
 
@@ -555,7 +555,7 @@ describe('AdminPanel', () => {
             gitee_repository: 'repo',
         });
 
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('分别填写模式需要完整填写码云用户名、仓库名和网址前缀');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('需要完整填写码云用户名、仓库名和网址前缀');
         expect(adminApi.createContainer).not.toHaveBeenCalled();
     });
 
@@ -809,7 +809,7 @@ describe('AdminPanel', () => {
         expect(adminApi.deleteContainer).not.toHaveBeenCalled();
         expect(vi.mocked(adminApi.listContainers).mock.calls.length).toBe(requestsBeforeAction);
         expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-            '确定对服务「container-1」执行业务删除吗？',
+            '确定对容器「container-1」执行业务删除吗？',
             { modal: true },
             '业务删除',
         );

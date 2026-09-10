@@ -74,7 +74,7 @@ describe('SidebarViewProvider', () => {
         });
         expect(view.webview.html).toContain('status-dot running');
         expect(view.webview.html).toContain('status-dot stopped');
-        expect(view.webview.html).toContain('<span class="status-dot failed"></span>\n                    <span class="status-label">失败</span>');
+        expect(view.webview.html).toContain('<span class="status-dot failed"></span>\n                    <span class="status-label">已失败</span>');
         expect(view.webview.html).toContain('status-dot unknown');
         expect(view.webview.html).toContain('status-dot unknown error');
         expect(view.webview.html).toContain('status-dot missing');
@@ -192,8 +192,8 @@ describe('SidebarViewProvider', () => {
         await provider.resolveWebviewView(view as never);
 
         expect(view.webview.html).toContain('当前已连接至 云端沙箱 服务中');
-        expect(view.webview.html).toContain('.cloud-card { min-height: 270px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 30px 20px; border: 2px solid var(--warning);');
-        expect(view.webview.html).toContain('.cloud-card p { margin: 0 0 8px; color: var(--warning);');
+        expect(view.webview.html).toContain('.cloud-card { min-height: 150px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; padding: 14px; border: 2px solid var(--warning);');
+        expect(view.webview.html).toContain('.cloud-card p { margin: 0 0 6px; color: var(--warning);');
         expect(view.webview.html).toContain('.cloud-card .action-button { width: 100%; max-width: 160px; max-height: 28px; padding: 0 12px; }');
         expect(view.webview.html).toContain('data-action="disconnect"');
         expect(view.webview.html).not.toContain('data-action="refresh"');
