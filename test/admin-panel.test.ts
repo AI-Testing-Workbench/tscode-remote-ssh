@@ -914,6 +914,49 @@ describe('AdminPanel', () => {
         }));
     });
 
+    it('keeps checked image push states across automatic refreshes', async () => {
+        vi.useFakeTimers();
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const image = {
+            id: 'image-1',
+            full_name: 'registry.test:5000/testagent/app:v1',
+            registry: 'registry.test:5000',
+            namespace: 'testagent',
+            name: 'app',
+            version: 'v1',
+            created_at: '2026-09-04T00:00:00Z',
+            size: 1024,
+        };
+        adminApi.listImages = vi.fn(async () => ({ images: [{ ...image, status: 'not_pushed' }] }));
+        adminApi.checkImagePushStates = vi.fn(async () => ({ images: [{ ...image, status: 'pushed' }] }));
+        const adminPanel = createPanel({
+            getSettings: () => ({
+                backendApiUrl: 'https://api.example.test',
+                userName: 'root',
+                skipKnownHostsCheck: true,
+                historyLimit: 5,
+                statusSyncInterval: 1,
+                debug: false,
+                disableClientValidation: true,
+            }),
+            adminApiFactory: vi.fn(() => adminApi),
+        });
+
+        await adminPanel.open();
+        panel.fireMessage({ command: 'checkImagePushStates' });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(panel.webview.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+            command: 'adminUpdate',
+            html: expect.stringContaining('已推送'),
+        }));
+    });
+
     it('renders container type badges and the type filter on the containers tab', () => {
         const html = renderAdminPage({
             status: 'ready',

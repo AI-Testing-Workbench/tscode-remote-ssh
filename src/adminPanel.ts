@@ -8,6 +8,7 @@ import {
     ContainerTypeValue,
     ExpirationRequest,
     ImageDeleteRequest,
+    ImageListItem,
     UploadImageFileInput,
 } from './api/models';
 import { AdminRestApi, formatRestClientError, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
@@ -340,10 +341,14 @@ export class AdminPanel implements vscode.Disposable {
                 if (!this.isActive(panel, generation)) {
                     return;
                 }
-                const dataChanged = hasAdminDataChanged(this.state, data);
+                const mergedData: AdminData = {
+                    ...data,
+                    images: mergeImagePushStates(this.state.images, data.images),
+                };
+                const dataChanged = hasAdminDataChanged(this.state, mergedData);
                 this.state = {
                     ...this.state,
-                    ...data,
+                    ...mergedData,
                     status: 'ready',
                     error: undefined,
                 };
@@ -960,6 +965,16 @@ function hasAdminDataChanged(previous: AdminPanelState, next: AdminData): boolea
         whitelistUsers: previous.whitelistUsers,
         adminUsers: previous.adminUsers,
     }) !== JSON.stringify(next);
+}
+
+function mergeImagePushStates(previous: ImageListItem[], next: ImageListItem[]): ImageListItem[] {
+    const checkedStates = new Map(previous
+        .filter(image => ['pushed', 'not_pushed'].includes(image.status.toLowerCase()))
+        .map(image => [image.full_name, image.status] as const));
+    return next.map(image => {
+        const checkedStatus = checkedStates.get(image.full_name);
+        return checkedStatus ? { ...image, status: checkedStatus } : image;
+    });
 }
 
 function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateContainerRequest {
