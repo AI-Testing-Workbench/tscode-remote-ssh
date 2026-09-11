@@ -1,6 +1,6 @@
 import { Script } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ContainerConfig } from '../src/containerConfig';
+import { ContainerConfig, ContainerConfigEntry } from '../src/containerConfig';
 import { ContainerSyncResult, SyncedContainer } from '../src/containerSync';
 import { ContainerOperationRegistry } from '../src/containerOperations';
 import { PublicUserContainerApi } from '../src/api/publicApi';
@@ -320,7 +320,7 @@ describe('SidebarViewProvider', () => {
         const publicApi = createPublicApi();
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
         const onConnect = vi.fn();
-        const provider = createProvider({ state, userApi, publicApi, sync, onConnect });
+        const provider = createProvider({ state, userApi, publicApi, sync, onConnect, config: createConfig([configuredContainer('container-1')]) });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -340,6 +340,54 @@ describe('SidebarViewProvider', () => {
         expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('workbench.action.remote.close');
     });
 
+    it('reads the current ContainerId config before connecting a service', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [
+                syncedContainer('slash-alias', 'running', true),
+                syncedContainer('space-alias', 'running', true),
+            ],
+            changed: false,
+        });
+        const onConnect = vi.fn();
+        const config = createConfig([
+            configuredContainer('slash-alias', 'alice/repo'),
+            configuredContainer('space-alias', 'TestAgent Cloud Service'),
+        ]);
+        const provider = createProvider({ state, config, onConnect });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'connect', containerId: 'slash-alias' });
+        view.fireMessage({ command: 'connect', containerId: 'space-alias' });
+        await flushMessages();
+
+        expect(onConnect).toHaveBeenNthCalledWith(1, 'alice/repo');
+        expect(onConnect).toHaveBeenNthCalledWith(2, 'TestAgent Cloud Service');
+    });
+
+    it('rejects a service when the current ContainerId endpoint is invalid', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('invalid-endpoint', 'running', true)],
+            changed: false,
+        });
+        const onConnect = vi.fn();
+        const config = createConfig([configuredContainer('invalid-endpoint', 'service alias', 'example.com')]);
+        const provider = createProvider({ state, config, onConnect });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'connect', containerId: 'invalid-endpoint' });
+        await flushMessages();
+
+        expect(onConnect).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '服务 "invalid-endpoint" 的 endpoint 无效，必须是 IP:Port',
+            { modal: true },
+        );
+    });
+
     it('allows connection only for running services', async () => {
         const state = new SidebarSyncState();
         state.update({
@@ -352,7 +400,16 @@ describe('SidebarViewProvider', () => {
             changed: false,
         });
         const onConnect = vi.fn();
-        const provider = createProvider({ state, onConnect });
+        const provider = createProvider({
+            state,
+            onConnect,
+            config: createConfig([
+                configuredContainer('running-1'),
+                configuredContainer('stopped-1'),
+                configuredContainer('failed-1'),
+                configuredContainer('pending-1'),
+            ]),
+        });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -400,7 +457,12 @@ describe('SidebarViewProvider', () => {
         });
         publicApi.restartContainer = vi.fn(() => restart);
         const onConnect = vi.fn();
-        const provider = createProvider({ state, publicApi, onConnect });
+        const provider = createProvider({
+            state,
+            publicApi,
+            onConnect,
+            config: createConfig([configuredContainer('running-1')]),
+        });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -915,15 +977,24 @@ function createPublicApi(): PublicUserContainerApi {
     };
 }
 
-function createConfig(): ContainerConfig {
+function createConfig(entries: ContainerConfigEntry[] = []): ContainerConfig {
     const document = { config: {}, originalText: '' };
     return {
         read: vi.fn(async () => document),
-        list: vi.fn(() => []),
+        list: vi.fn(() => entries),
         removeContainer: vi.fn(() => true),
         upsertContainer: vi.fn(() => true),
         write: vi.fn(async () => true),
     } as unknown as ContainerConfig;
+}
+
+function configuredContainer(
+    containerId: string,
+    host = `host-${containerId}`,
+    hostName = '127.0.0.1',
+    port = 22,
+): ContainerConfigEntry {
+    return { containerId, host, hostName, port };
 }
 
 function settings(backendApiUrl: string) {

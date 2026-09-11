@@ -125,7 +125,9 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
     }
 
     resolve(authority: string, context: vscode.RemoteAuthorityResolverContext): Thenable<vscode.ResolverResult> {
-        const [type, dest] = authority.split('+');
+        const separator = authority.indexOf('+');
+        const type = separator >= 0 ? authority.slice(0, separator) : authority;
+        const dest = separator >= 0 ? authority.slice(separator + 1) : '';
         if (type !== REMOTE_SSH_AUTHORITY) {
             throw new Error(`Invalid authority type for SSH resolver: ${type}`);
         }

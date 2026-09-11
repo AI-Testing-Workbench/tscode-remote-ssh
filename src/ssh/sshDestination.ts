@@ -41,8 +41,12 @@ export default class SSHDestination {
     // a remote session from the recently openend list the connection fails
     static parseEncoded(dest: string): SSHDestination {
         try {
-            const data = JSON.parse(Buffer.from(dest, 'hex').toString());
-            return new SSHDestination(data.hostName, data.user, data.port);
+            const data: unknown = JSON.parse(Buffer.from(dest, 'hex').toString());
+            if (typeof data === 'object' && data !== null && 'hostName' in data && typeof data.hostName === 'string') {
+                const user = 'user' in data && typeof data.user === 'string' ? data.user : undefined;
+                const port = 'port' in data && typeof data.port === 'number' ? data.port : undefined;
+                return new SSHDestination(data.hostName, user, port);
+            }
         } catch {
             // ignore
         }
@@ -51,6 +55,15 @@ export default class SSHDestination {
     }
 
     toEncodedString(): string {
-        return this.toString().replace(/[A-Z]/g, (ch) => `\\x${ch.charCodeAt(0).toString(16).toLowerCase()}`);
+        const value = this.toString();
+        if (/^[A-Za-z0-9._-]+(?::\d+)?$/.test(value)) {
+            return value.replace(/[A-Z]/g, (ch) => `\\x${ch.charCodeAt(0).toString(16).toLowerCase()}`);
+        }
+
+        return Buffer.from(JSON.stringify({
+            hostName: this.hostname,
+            ...(this.user !== undefined ? { user: this.user } : {}),
+            ...(this.port !== undefined ? { port: this.port } : {}),
+        }), 'utf8').toString('hex');
     }
 }

@@ -8,6 +8,7 @@ import { vol } from 'memfs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import SSHConnection from '../src/ssh/sshConnection';
+import SSHDestination from '../src/ssh/sshDestination';
 import { RemoteSSHResolver, SSHConfiguration, getRemoteAuthority } from './rewires/remote';
 import { Log } from './mocks/logger';
 import type { Log as SourceLog } from '../src/common/logger';
@@ -29,6 +30,10 @@ type ClientOptions = {
   files: Record<string, string>;
   /** When set, the hosts the SSH config is expected to declare. */
   hosts?: string[];
+  /** When set, add ContainerId-backed aliases and resolve them through the real resolver. */
+  containerAliases?: string[];
+  /** When set, resolve an alias whose ContainerId endpoint must be rejected. */
+  invalidContainerAlias?: string;
 };
 
 type ServerOptions = {
@@ -119,6 +124,24 @@ for (const file of files.value) {
       if (includedSSHConfig) {
         fixtureFiles['/etc/ssh/config.d/hosts'] = includedSSHConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
       }
+      const containerAliases = [
+        ...(client.containerAliases ?? []),
+        ...(client.invalidContainerAlias ? [client.invalidContainerAlias] : []),
+      ];
+      if (containerAliases.length) {
+        const containerConfig = containerAliases.map((alias, index) => {
+          const invalid = alias === client.invalidContainerAlias;
+          return [
+            `Host ${formatFixtureHost(alias)}`,
+            `  HostName ${invalid ? 'example.com' : '127.0.0.1'}`,
+            '  Port 2222',
+            `  User ${server.username}`,
+            `  Password ${server.password}`,
+            `  ContainerId fixture-container-${index}`,
+          ].join('\n');
+        }).join('\n\n');
+        fixtureFiles['/etc/ssh/ssh_config'] = `${fixtureFiles['/etc/ssh/ssh_config'] ?? ''}\n\n${containerConfig}\n`;
+      }
       if (client.hosts && sshConfig && includedSSHConfig) {
         const defaultSSHConfigPath = path.resolve(os.homedir(), '.ssh', 'config');
         fixtureFiles[defaultSSHConfigPath] = sshConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
@@ -196,9 +219,43 @@ for (const file of files.value) {
           throw new Error('Expected a resolved authority');
         }
         expect(result.host).to.eql('127.0.0.1');
+
+        for (const alias of client.containerAliases ?? []) {
+          const aliasResolver = new RemoteSSHResolver(extContext, logger);
+          try {
+            const aliasResult = await aliasResolver.resolve(
+              getRemoteAuthority(new SSHDestination(alias).toEncodedString()),
+              new vscode.RemoteAuthorityResolverContext(),
+            );
+
+            expect(aliasResult).toBeDefined();
+            if (!('host' in aliasResult)) {
+              throw new Error('Expected a resolved container authority');
+            }
+            expect(aliasResult.host).to.eql('127.0.0.1');
+          } finally {
+            aliasResolver.dispose();
+          }
+        }
+
+        if (client.invalidContainerAlias) {
+          const invalidResolver = new RemoteSSHResolver(extContext, logger);
+          try {
+            await expect(invalidResolver.resolve(
+              getRemoteAuthority(new SSHDestination(client.invalidContainerAlias).toEncodedString()),
+              new vscode.RemoteAuthorityResolverContext(),
+            )).rejects.toThrow('endpoint 无效，必须是 IP:Port');
+          } finally {
+            invalidResolver.dispose();
+          }
+        }
       } finally {
         remoteSSHResolver.dispose();
       }
     }, 60_000);
   });
+}
+
+function formatFixtureHost(host: string): string {
+  return /\s/.test(host) ? `"${host}"` : host;
 }

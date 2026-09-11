@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectToContainer, openRemoteSSHWindow, promptOpenRemoteSSHWindow } from '../src/commands';
 import { ContainerConfig } from '../src/containerConfig';
+import SSHDestination from '../src/ssh/sshDestination';
 import * as vscode from './mocks/vscode';
 
 const temporaryDirectories: string[] = [];
@@ -72,6 +73,22 @@ describe('openRemoteSSHWindow', () => {
             { remoteAuthority: 'ssh-remote+dev', reuseWindow: true },
         );
         expect(refreshSidebar).toHaveBeenCalledOnce();
+    });
+
+    it('encodes Host aliases with URI-unsafe characters before connecting', async () => {
+        for (const host of ['alice/repo', 'TestAgent Cloud Service']) {
+            await connectToContainer(host);
+        }
+
+        const remoteAuthorities = vscode.commands.executeCommand.mock.calls.map(([, options]) =>
+            (options as { remoteAuthority: string }).remoteAuthority,
+        );
+        expect(remoteAuthorities).toHaveLength(2);
+        for (const [index, host] of ['alice/repo', 'TestAgent Cloud Service'].entries()) {
+            const authority = remoteAuthorities[index];
+            expect(authority).toMatch(/^ssh-remote\+[0-9a-f]+$/);
+            expect(SSHDestination.parseEncoded(authority.slice('ssh-remote+'.length)).hostname).toBe(host);
+        }
     });
 
     it('asks how to connect when a workspace is already open', async () => {

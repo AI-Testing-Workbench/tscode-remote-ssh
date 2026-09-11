@@ -13,7 +13,7 @@ export async function promptOpenRemoteSSHWindow(reuseWindow: boolean) {
         return;
     }
 
-    const sshDest = new SSHDestination(host);
+    const sshDest = SSHDestination.parse(host);
     openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow);
 }
 
@@ -37,7 +37,7 @@ export async function connectToContainer(
         reuseWindow = choice === OPEN_IN_CURRENT_WINDOW;
     }
 
-    const sshDest = new SSHDestination(host);
+    const sshDest = SSHDestination.parse(host);
     await openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow);
     if (reuseWindow) {
         await refreshSidebar?.();

@@ -15,7 +15,7 @@ import {
     ContainerOperationRegistry,
     getContainerOperationStatus,
 } from './containerOperations';
-import { parseContainerEndpoint } from './containerEndpoint';
+import { formatContainerEndpoint, InvalidContainerEndpointError, parseContainerEndpoint } from './containerEndpoint';
 import { parseGiteeRepositoryUrl } from './giteeRepository';
 import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } from './settings';
 import { WEBVIEW_SCRIPT } from './webviewScript';
@@ -508,10 +508,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (container.status.toLowerCase() !== 'running') {
             throw new Error(`服务 "${container.containerId}" 当前状态为“${getStatusLabel(container)}”，仅运行中的服务可以连接`);
         }
-        if (!container.host) {
-            throw new Error(`服务 "${container.containerId}" 没有可用的连接端口`);
+        const document = await this.config.read();
+        const configuredEntry = this.config.list(document.config)
+            .find(entry => entry.containerId === container.containerId && !entry.expiresAt);
+        if (!configuredEntry?.host.trim()) {
+            throw new Error(`服务 "${container.containerId}" 没有可用的 Host 配置`);
         }
-        await this.onConnect?.(container.host);
+
+        const endpoint = configuredEntry.hostName && configuredEntry.port !== undefined
+            ? formatContainerEndpoint(configuredEntry.hostName, configuredEntry.port)
+            : undefined;
+        if (!parseContainerEndpoint(endpoint)) {
+            throw new InvalidContainerEndpointError(container.containerId, endpoint);
+        }
+
+        await this.onConnect?.(configuredEntry.host.trim());
     }
 
     private async openNovncUrl(containerId: string | undefined): Promise<void> {
