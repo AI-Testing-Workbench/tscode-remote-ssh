@@ -703,6 +703,7 @@ describe('SidebarViewProvider', () => {
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
             container_id: 'created-1',
+            service_id: 'service-created-1',
             status: 'pending',
             endpoint: '10.0.0.5:2222',
         }));
@@ -750,6 +751,7 @@ describe('SidebarViewProvider', () => {
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
             container_id: 'created-from-url',
+            service_id: 'service-created-from-url',
             status: 'pending',
             endpoint: '10.0.0.7:2222',
         }));
@@ -777,6 +779,7 @@ describe('SidebarViewProvider', () => {
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
             container_id: 'created-without-gitee',
+            service_id: 'service-created-without-gitee',
             status: 'pending',
             endpoint: '10.0.0.6:2222',
         }));
@@ -818,6 +821,7 @@ describe('SidebarViewProvider', () => {
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
             container_id: 'created-2',
+            service_id: 'service-created-2',
             status: 'pending',
             endpoint: 'example.com:22',
         }));
@@ -1019,7 +1023,7 @@ interface ProviderTestOptions {
 
 function createUserApi(admin: boolean): UserRestApi {
     return {
-        createContainer: vi.fn(async () => ({ container_id: 'container-1', status: 'pending' })),
+        createContainer: vi.fn(async () => ({ container_id: 'container-1', service_id: 'service-1', status: 'pending' })),
         getContainerIds: vi.fn(async () => ({ container_ids: [] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => ({
@@ -1038,7 +1042,7 @@ function createUserApi(admin: boolean): UserRestApi {
 
 function createPublicApi(): PublicUserContainerApi {
     return {
-        createContainer: vi.fn(async () => ({ container_id: 'container-1', status: 'pending' })),
+        createContainer: vi.fn(async () => ({ container_id: 'container-1', service_id: 'service-1', status: 'pending' })),
         getContainerIds: vi.fn(async () => ({ container_ids: [] })),
         getContainer: vi.fn(async () => ({
             container_id: 'container-1',

@@ -7,6 +7,7 @@ import { URL } from 'node:url';
 import {
     AdminContainerListResponse,
     AdminContainerResponse,
+    AdminCreateContainerResponse,
     AdminCreateContainerRequest,
     AdminCheckRequest,
     AdminCheckResponse,
@@ -23,6 +24,9 @@ import {
     ErrorResponse,
     ExpirationRequest,
     ExpirationResponse,
+    GitCredentialSubmitRequest,
+    GitReportResponse,
+    GitStateResponse,
     ImageDeleteRequest,
     ImageListResponse,
     ImageReferenceRequest,
@@ -41,7 +45,8 @@ import {
 export const DEFAULT_REST_TIMEOUT_MS = 15_000;
 export const DEFAULT_LIFECYCLE_TIMEOUT_MS = 60_000;
 export const DEFAULT_LONG_RUNNING_TIMEOUT_MS = 20 * 60_000;
-export const ADMIN_OPERATOR_USER_ID_HEADER = 'X-Operator-User-ID';
+export const OPERATOR_USER_ID_HEADER = 'X-Operator-User-ID';
+export const ADMIN_OPERATOR_USER_ID_HEADER = OPERATOR_USER_ID_HEADER;
 
 export const REST_ERROR_CODES = {
     API_URL_MISSING: 'api_url_missing',
@@ -124,6 +129,12 @@ export interface UserRestApi {
     deleteContainer(containerId: string): Promise<void>;
 }
 
+export interface GitRestApi {
+    getGitState(serviceId: string, operatorUserId: string): Promise<GitStateResponse>;
+    submitGitCredential(serviceId: string, operatorUserId: string, request: GitCredentialSubmitRequest): Promise<void>;
+    reportUserCancelled(serviceId: string, operatorUserId: string): Promise<GitReportResponse>;
+}
+
 export interface AdminRestApi {
     uploadImage(input: UploadImageRequest): Promise<void>;
     pushImage(request: ImageReferenceRequest): Promise<void>;
@@ -133,7 +144,7 @@ export interface AdminRestApi {
     getDefaultImage(type?: ContainerTypeValue): Promise<DefaultImageResponse>;
     setDefaultImage(request: SetDefaultImageRequest): Promise<void>;
     unsetDefaultImage(type?: ContainerTypeValue): Promise<void>;
-    createContainer(request: AdminCreateContainerRequest): Promise<AdminContainerResponse>;
+    createContainer(request: AdminCreateContainerRequest): Promise<AdminCreateContainerResponse>;
     listContainers(): Promise<AdminContainerListResponse>;
     listOrphanContainers(): Promise<OrphanContainerListResponse>;
     deleteOrphanContainers(request: OrphanContainerDeleteRequest): Promise<void>;
@@ -284,6 +295,7 @@ function validateMultipartFilename(filename: string): void {
 
 export class RestClient {
     public readonly user: UserRestApi;
+    public readonly git: GitRestApi;
     public readonly admin: AdminRestApi;
 
     private readonly baseUrl: string;
@@ -313,13 +325,42 @@ export class RestClient {
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
             }),
             getContainerIds: query => this.requestJson<ContainerIdsResponse>('GET', '/user/containers', { query }),
-            getContainerStatuses: query => this.requestJson<ContainerStatusListResponse>('GET', '/user/containers/status', { query }),
-            getContainer: containerId => this.requestJson<ContainerStatusResponse>('GET', this.containerPath('/user/containers', containerId)),
+            getContainerStatuses: async query => {
+                const response = await this.requestJson<ContainerStatusListResponse>('GET', '/user/containers/status', { query });
+                return {
+                    ...response,
+                    containers: response.containers.map(normalizeContainerStatus),
+                };
+            },
+            getContainer: async containerId => normalizeContainerStatus(
+                await this.requestJson<ContainerStatusResponse>('GET', this.containerPath('/user/containers', containerId)),
+            ),
             checkAdmin: request => this.requestJson<AdminCheckResponse>('POST', '/user/check', { jsonBody: request }),
             startContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
             stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'stop'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
             restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'restart'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
             deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+        };
+
+        this.git = {
+            getGitState: async (serviceId, operatorUserId) => this.requestJson<GitStateResponse>(
+                'GET',
+                this.gitPath(serviceId, 'state'),
+                { headers: this.gitOperatorHeaders(operatorUserId) },
+            ),
+            submitGitCredential: async (serviceId, operatorUserId, request) => this.requestNoContent(
+                'POST',
+                this.gitPath(serviceId, 'credential'),
+                { headers: this.gitOperatorHeaders(operatorUserId), jsonBody: request },
+            ),
+            reportUserCancelled: async (serviceId, operatorUserId) => this.requestJson<GitReportResponse>(
+                'POST',
+                this.gitPath(serviceId, 'report'),
+                {
+                    headers: this.gitOperatorHeaders(operatorUserId),
+                    jsonBody: { git_status: 'failed_user_cancelled' },
+                },
+            ),
         };
 
         this.admin = {
@@ -331,7 +372,7 @@ export class RestClient {
             getDefaultImage: type => this.requestJson<DefaultImageResponse>('GET', this.defaultImagePath(type)),
             setDefaultImage: request => this.requestNoContent('POST', '/admin/images/default', { jsonBody: request }),
             unsetDefaultImage: type => this.requestNoContent('POST', this.unsetDefaultImagePath(type)),
-            createContainer: request => this.requestJson<AdminContainerResponse>('POST', '/admin/containers', {
+            createContainer: request => this.requestJson<AdminCreateContainerResponse>('POST', '/admin/containers', {
                 jsonBody: request,
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
             }),
@@ -591,6 +632,22 @@ export class RestClient {
         return `${prefix}/${encodeURIComponent(containerId)}`;
     }
 
+    private gitPath(serviceId: string, resource: string): string {
+        return `/git/${encodeURIComponent(serviceId)}/${resource}`;
+    }
+
+    private gitOperatorHeaders(operatorUserId: string): Record<string, string> {
+        const normalizedUserId = operatorUserId.trim();
+        if (!normalizedUserId) {
+            throw new RestClientError(
+                'request',
+                REST_ERROR_CODES.REQUEST,
+                'Git API 操作用户 ID 不能为空',
+            );
+        }
+        return { [OPERATOR_USER_ID_HEADER]: normalizedUserId };
+    }
+
     private actionPath(prefix: string, containerId: string, action: string): string {
         return `${this.containerPath(prefix, containerId)}/${action}`;
     }
@@ -602,6 +659,13 @@ export class RestClient {
     private unsetDefaultImagePath(type?: ContainerTypeValue): string {
         return type ? `/admin/images/default/unset?type=${encodeURIComponent(type)}` : '/admin/images/default/unset';
     }
+}
+
+function normalizeContainerStatus(response: ContainerStatusResponse): ContainerStatusResponse {
+    return {
+        ...response,
+        git_fin_status: response.git_fin_status ?? 'pending',
+    };
 }
 
 function getApiError(value: unknown): ErrorResponse | undefined {

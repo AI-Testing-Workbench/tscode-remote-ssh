@@ -1,5 +1,20 @@
 export type ContainerTypeValue = 'testagent_cloud' | 'autotest_cloud';
 
+export type GitStatus =
+    | 'starting'
+    | 'credential_required'
+    | 'credential_rejected'
+    | 'processing'
+    | 'initialized'
+    | 'failed_timeout'
+    | 'failed_max_attempts'
+    | 'failed_unexpected_state'
+    | 'failed_git'
+    | 'failed_service'
+    | 'failed_container'
+    | 'failed_initialize'
+    | 'failed_user_cancelled';
+
 export interface UserCreateContainerRequest {
     user_id: string;
     type?: ContainerTypeValue;
@@ -28,6 +43,7 @@ export interface ContainerStatusResponse {
     type?: ContainerTypeValue | null;
     novnc_url?: string | null;
     status: string;
+    git_fin_status?: string;
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
@@ -43,6 +59,7 @@ export interface ContainerStatusListResponse {
 
 export interface CreateContainerResponse {
     container_id: string;
+    service_id: string;
     type?: ContainerTypeValue | null;
     novnc_url?: string | null;
     status: string;
@@ -78,6 +95,7 @@ export interface AdminContainerResponse {
     type?: ContainerTypeValue | null;
     novnc_url?: string | null;
     status: string;
+    git_fin_status?: string;
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
@@ -94,6 +112,10 @@ export interface AdminContainerResponse {
     authorize_general_account: boolean;
     deleted_at?: string | null;
     business_deleted: boolean;
+}
+
+export interface AdminCreateContainerResponse extends AdminContainerResponse {
+    service_id: string;
 }
 
 export interface AdminContainerListResponse {
@@ -206,3 +228,23 @@ export interface UploadImageFileInput {
 }
 
 export type UploadImageRequest = UploadImageInput | UploadImageFileInput;
+
+export interface GitStateResponse {
+    git_status: GitStatus;
+}
+
+export interface GitReportRequest {
+    git_status: GitStatus;
+}
+
+export interface GitReportResponse {
+    git_status: GitStatus;
+}
+
+export interface GitCredentialSubmitRequest {
+    type: 'password';
+    git_username: string;
+    git_email: string;
+    git_password: string;
+    persist: boolean;
+}

@@ -1091,7 +1091,7 @@ function createAdminApi(): AdminRestApi {
         checkImagePushStates: vi.fn(async () => ({ images: [] })),
         setDefaultImage: vi.fn(async () => undefined),
         unsetDefaultImage: vi.fn(async () => undefined),
-            createContainer: vi.fn(async () => sampleContainer()),
+            createContainer: vi.fn(async () => ({ ...sampleContainer(), service_id: 'service-1' })),
             listContainers: vi.fn(async () => ({ containers: [sampleContainer()] })),
         listOrphanContainers: vi.fn(async () => ({ container_ids: ['orphan-1', 'orphan-2'] })),
             deleteOrphanContainers: vi.fn(async () => undefined),

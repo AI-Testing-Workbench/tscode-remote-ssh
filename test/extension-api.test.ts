@@ -134,7 +134,7 @@ describe('public user container API', () => {
 
 function createUserApi(): UserRestApi {
     return {
-        createContainer: vi.fn(async () => ({ container_id: 'container-1', status: 'pending' })),
+        createContainer: vi.fn(async () => ({ container_id: 'container-1', service_id: 'service-1', status: 'pending' })),
         getContainerIds: vi.fn(async () => ({ container_ids: ['container-1'] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => ({

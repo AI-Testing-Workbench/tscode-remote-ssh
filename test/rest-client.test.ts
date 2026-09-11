@@ -149,6 +149,36 @@ describe('RestClient', () => {
         expect(multipartBody).toContain('tar');
     });
 
+    it('preserves service_id from user and administrator creation responses', async () => {
+        const responses = [
+            jsonResponse(200, { container_id: 'container-1', service_id: 'service-1', status: 'pending' }),
+            jsonResponse(200, { container_id: 'container-2', service_id: 'service-2', status: 'pending' }),
+        ];
+        const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.user.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({ service_id: 'service-1' });
+        await expect(client.admin.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({ service_id: 'service-2' });
+    });
+
+    it('defaults missing user Git final status to pending', async () => {
+        const responses = [
+            jsonResponse(200, { containers: [{ container_id: 'container-1', status: 'pending' }] }),
+            jsonResponse(200, { container_id: 'container-1', status: 'pending' }),
+        ];
+        const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.user.getContainerStatuses({ user_id: 'user-1' })).resolves.toEqual({
+            containers: [{ container_id: 'container-1', status: 'pending', git_fin_status: 'pending' }],
+        });
+        await expect(client.user.getContainer('container-1')).resolves.toEqual({
+            container_id: 'container-1',
+            status: 'pending',
+            git_fin_status: 'pending',
+        });
+    });
+
     it('explicitly serializes false when automatic pushing is disabled', () => {
         const multipart = buildMultipartBody({
             file: Buffer.from('tar'),
@@ -363,6 +393,7 @@ describe('RestClient', () => {
         const userStatus = {
             container_id: 'container-1',
             status: 'running',
+            git_fin_status: 'pending',
             endpoint: null,
             started_at: '2026-09-08T00:00:00Z',
             expires_at: null,
@@ -460,6 +491,94 @@ describe('RestClient', () => {
         const client = new RestClient({ baseUrl: 'http://api.example.test', transport });
 
         await expect(client.user.stopContainer('id')).resolves.toBeUndefined();
+    });
+
+    it('uses service_id and the bound operator header for Git APIs', async () => {
+        const { requests, transport } = createTransport(jsonResponse(200, { git_status: 'credential_required' }));
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.git.getGitState('service/id', ' user-1 ')).resolves.toEqual({ git_status: 'credential_required' });
+        await client.git.submitGitCredential('service/id', 'user-1', {
+            type: 'password',
+            git_username: 'git-user',
+            git_email: '',
+            git_password: 'secret-token',
+            persist: false,
+        });
+        await expect(client.git.reportUserCancelled('service/id', 'user-1'))
+            .resolves.toEqual({ git_status: 'credential_required' });
+
+        expect(requests.map(request => `${request.method} ${request.url.pathname}`)).toEqual([
+            'GET /git/service%2Fid/state',
+            'POST /git/service%2Fid/credential',
+            'POST /git/service%2Fid/report',
+        ]);
+        expect(requests.every(request => request.headers[ADMIN_OPERATOR_USER_ID_HEADER] === 'user-1')).toBe(true);
+        expect(readJsonBody(requests[1])).toEqual({
+            type: 'password',
+            git_username: 'git-user',
+            git_email: '',
+            git_password: 'secret-token',
+            persist: false,
+        });
+        expect(readJsonBody(requests[2])).toEqual({ git_status: 'failed_user_cancelled' });
+        expect(requests.some(request => request.url.pathname.includes('/credential') && request.method === 'GET')).toBe(false);
+    });
+
+    it('accepts a 204 response for Git credential submission', async () => {
+        const { transport } = createTransport({ statusCode: 204, body: Buffer.alloc(0) });
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.git.submitGitCredential('service-1', 'user-1', {
+            type: 'password',
+            git_username: 'git-user',
+            git_email: '',
+            git_password: 'secret-token',
+            persist: true,
+        })).resolves.toBeUndefined();
+    });
+
+    it('rejects missing Git operator IDs before sending a request', async () => {
+        const { transport } = createTransport(jsonResponse(200, { git_status: 'starting' }));
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.git.getGitState('service-1', '   ')).rejects.toMatchObject({
+            kind: 'request',
+            code: REST_ERROR_CODES.REQUEST,
+            message: 'Git API 操作用户 ID 不能为空',
+        });
+        expect(transport).not.toHaveBeenCalled();
+    });
+
+    it('maps Git API HTTP and network failures to the shared stable errors', async () => {
+        for (const statusCode of [409, 404, 401, 403, 500, 502]) {
+            const { transport } = createTransport(jsonResponse(statusCode, {
+                code: `git_${statusCode}`,
+                message: `Git 错误 ${statusCode}`,
+            }));
+            const client = new RestClient('https://api.example.test', { transport });
+
+            await expect(client.git.getGitState('service-1', 'user-1')).rejects.toMatchObject({
+                kind: 'http',
+                code: `git_${statusCode}`,
+                statusCode,
+            });
+        }
+
+        const { transport } = createTransport(new Error('connection refused'));
+        const client = new RestClient('https://api.example.test', { transport });
+        await expect(client.git.reportUserCancelled('service-1', 'user-1')).rejects.toMatchObject({
+            kind: 'network',
+            code: REST_ERROR_CODES.NETWORK,
+        });
+    });
+
+    it('does not expose a transport error secret in the formatted Git API error', async () => {
+        const { transport } = createTransport(new Error('secret-token'));
+        const client = new RestClient('https://api.example.test', { transport });
+
+        const error = await client.git.getGitState('service-1', 'user-1').catch(value => value);
+        expect(formatRestClientError(error)).not.toContain('secret-token');
     });
 
     it('returns raw text for the administrator container log endpoint', async () => {
