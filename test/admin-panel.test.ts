@@ -322,6 +322,10 @@ describe('AdminPanel', () => {
         expect(html).toContain('data-gitee-mode-panel="full"');
         expect(html).toContain('data-gitee-mode-panel="parts"');
         expect(html).toContain('data-field="gitee_repository" data-persist-key="create.gitee_repository" type="text" placeholder="XXX" disabled');
+        expect(html).toContain('placeholder="完整的 https://XXX"');
+        expect(html).toContain('placeholder="https://XXX 前缀"');
+        expect(html).not.toContain('git://');
+        expect(html).not.toContain('git@XXX');
         expect(html).toContain('data-resource-items');
         expect(html).not.toContain('data-action="clearSearch"');
         expectPersistedFields(html, [

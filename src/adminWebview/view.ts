@@ -217,7 +217,7 @@ function renderContainersTab(
                 <div class="gitee-option-row">
                     <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="full" type="radio">码云拉取地址</label>
                     <div class="gitee-fields" data-gitee-mode-panel="full">
-                        <label>码云拉取地址<input data-field="gitee_full_url" data-persist-key="create.gitee_full_url" type="text" placeholder="完整的 https://XXX 或者 git@XXX" disabled></label>
+                        <label>码云拉取地址<input data-field="gitee_full_url" data-persist-key="create.gitee_full_url" type="text" placeholder="完整的 https://XXX" disabled></label>
                     </div>
                 </div>
                 <div class="gitee-option-row">
@@ -225,7 +225,7 @@ function renderContainersTab(
                     <div class="gitee-fields parts-fields inactive" data-gitee-mode-panel="parts">
                         <label>码云用户名<input data-field="gitee_user" data-persist-key="create.gitee_user" type="text" placeholder="XXX" disabled></label>
                         <label>码云仓库名<input data-field="gitee_repository" data-persist-key="create.gitee_repository" type="text" placeholder="XXX" disabled></label>
-                        <label>码云网址前缀<input data-field="gitee_url" data-persist-key="create.gitee_url" type="text" placeholder="https://XXX 前缀或者 git@XXX 前缀" disabled></label>
+                        <label>码云网址前缀<input data-field="gitee_url" data-persist-key="create.gitee_url" type="text" placeholder="https://XXX 前缀" disabled></label>
                     </div>
                 </div>
                 <div class="form-row two-fields branch-row">
