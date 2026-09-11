@@ -388,6 +388,82 @@ describe('SidebarViewProvider', () => {
         );
     });
 
+    it('ignores a duplicate request ID while a connection is in flight', async () => {
+        let resolveConnect: (() => void) | undefined;
+        const connect = new Promise<void>(resolve => {
+            resolveConnect = resolve;
+        });
+        const onConnect = vi.fn(() => connect);
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('container-1', 'running', true)], changed: false });
+        const provider = createProvider({
+            state,
+            config: createConfig([configuredContainer('container-1')]),
+            onConnect,
+        });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'connect', containerId: 'container-1', requestId: 'request-1' });
+        view.fireMessage({ command: 'connect', containerId: 'container-1', requestId: 'request-1' });
+        view.fireMessage({ command: 'connect', containerId: 'container-1', requestId: 'request-2' });
+        await vi.waitFor(() => expect(onConnect).toHaveBeenCalledOnce());
+        expect(onConnect).toHaveBeenCalledWith('host-container-1');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '服务 "container-1" 正在执行操作，暂时无法连接',
+            { modal: true },
+        );
+
+        resolveConnect?.();
+        await flushMessages();
+    });
+
+    it('does not finish an old page initialization after the view is disposed', async () => {
+        let resolveUserId: ((value: string) => void) | undefined;
+        const userId = new Promise<string>(resolve => {
+            resolveUserId = resolve;
+        });
+        const provider = createProvider({ userIdProvider: { getCurrentUserId: () => userId } });
+        const view = createWebviewView();
+        const resolving = provider.resolveWebviewView(view as never);
+
+        view.dispose();
+        resolveUserId?.('user-1');
+        await resolving;
+
+        expect(view.webview.options).toEqual({});
+        expect(view.webview.html).toBe('');
+    });
+
+    it('keeps the newest administrator check when a visibility refresh overlaps it', async () => {
+        let resolveFirstCheck: ((value: { admin: boolean }) => void) | undefined;
+        let resolveSecondCheck: ((value: { admin: boolean }) => void) | undefined;
+        const firstCheck = new Promise<{ admin: boolean }>(resolve => {
+            resolveFirstCheck = resolve;
+        });
+        const secondCheck = new Promise<{ admin: boolean }>(resolve => {
+            resolveSecondCheck = resolve;
+        });
+        const checkAdmin = vi.fn()
+            .mockImplementationOnce(() => firstCheck)
+            .mockImplementationOnce(() => secondCheck);
+        const provider = createProvider({
+            userApiFactory: vi.fn(() => ({ checkAdmin } as never)),
+        });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+        await vi.waitFor(() => expect(checkAdmin).toHaveBeenCalledOnce());
+
+        view.fireVisibility(true);
+        await vi.waitFor(() => expect(checkAdmin).toHaveBeenCalledTimes(2));
+        resolveSecondCheck?.({ admin: true });
+        await flushMessages();
+        resolveFirstCheck?.({ admin: false });
+        await flushMessages();
+
+        expect(view.webview.html).toContain('data-action="openAdmin"');
+    });
+
     it('allows connection only for running services', async () => {
         const state = new SidebarSyncState();
         state.update({
@@ -823,7 +899,7 @@ describe('Webview script', () => {
 
         card.fire('dblclick', { target: card });
 
-        expect(messages).toEqual([{ command: 'connect', containerId: 'container-1' }]);
+        expect(messages).toEqual([{ command: 'connect', containerId: 'container-1', requestId: '1' }]);
         expect(connectButton.hasAttribute('disabled')).toBe(true);
         expect(connectButton.classList.contains('is-loading')).toBe(true);
     });

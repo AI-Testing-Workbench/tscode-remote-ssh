@@ -112,12 +112,15 @@ export class ContainerSync {
     private readonly onSync: ((result: ContainerSyncResult) => void) | undefined;
     private readonly onInvalidEndpoint: ((endpoint: InvalidContainerEndpoint) => void) | undefined;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
+    private readonly operationSubscription: { dispose: () => void };
 
     private inFlight: Promise<ContainerSyncResult> | undefined;
     private mutationRefresh: Promise<ContainerSyncResult> | undefined;
     private mutationGate: Promise<void> | undefined;
     private timer: ReturnType<typeof setInterval> | undefined;
     private disposed = false;
+    private syncGeneration = 0;
+    private operationGeneration = 0;
     private readonly locallyDeletedContainerIds = new Set<string>();
     private readonly invalidEndpointNotifications = new Set<string>();
 
@@ -131,6 +134,9 @@ export class ContainerSync {
         this.onSync = options.onSync;
         this.onInvalidEndpoint = options.onInvalidEndpoint;
         this.operationRegistry = options.operationRegistry;
+        this.operationSubscription = this.operationRegistry?.subscribe(() => {
+            this.operationGeneration += 1;
+        }) ?? { dispose: () => undefined };
     }
 
     public sync(): Promise<ContainerSyncResult> {
@@ -144,17 +150,19 @@ export class ContainerSync {
             return this.inFlight;
         }
 
-        this.inFlight = this.performSync()
+        const syncGeneration = ++this.syncGeneration;
+        const operationGeneration = this.operationGeneration;
+        this.inFlight = this.performSync(syncGeneration, operationGeneration)
             .catch(error => this.resultWithError(toSyncError(error, 'sync_failed', '云端沙箱 服务同步失败')))
             .then(result => {
-                if (!this.disposed) {
+                if (this.isCurrentSync(syncGeneration, operationGeneration)) {
                     try {
                         this.onSync?.(result);
                     } catch {
                         // A sidebar listener must not turn a successful sync into an unhandled rejection.
                     }
+                    this.reconcileOperations(result);
                 }
-                this.reconcileOperations(result);
                 return result;
             })
             .finally(() => {
@@ -202,17 +210,23 @@ export class ContainerSync {
         if (this.disposed) {
             return false;
         }
+        if (this.operationRegistry && !this.operationRegistry.isCurrent(operation)) {
+            return true;
+        }
 
         const result = await this.refreshAfterMutation();
+        if (this.disposed) {
+            return false;
+        }
         const current = this.operationRegistry?.get(operation.containerId);
-        if (!current || current.action !== operation.action) {
+        if (!current || current.action !== operation.action || current.operationId !== operation.operationId) {
             return true;
         }
         if (!this.isOperationConfirmed(current, result)) {
             return false;
         }
 
-        this.operationRegistry?.complete(operation.containerId);
+        this.operationRegistry?.complete(operation.containerId, 'succeeded', operation.operationId);
         return true;
     }
 
@@ -223,6 +237,9 @@ export class ContainerSync {
             release = resolve;
         });
         const operationPromise = previousGate.then(async () => {
+            if (this.disposed) {
+                throw new Error('云端沙箱 服务同步已停止');
+            }
             const currentSync = this.inFlight;
             if (currentSync) {
                 await currentSync.then(() => undefined, () => undefined);
@@ -265,6 +282,8 @@ export class ContainerSync {
 
     public dispose(): void {
         this.disposed = true;
+        this.syncGeneration += 1;
+        this.operationSubscription.dispose();
         this.mutationRefresh = undefined;
         this.mutationGate = undefined;
         this.locallyDeletedContainerIds.clear();
@@ -274,7 +293,7 @@ export class ContainerSync {
         }
     }
 
-    private async performSync(): Promise<ContainerSyncResult> {
+    private async performSync(syncGeneration: number, operationGeneration: number): Promise<ContainerSyncResult> {
         const settings = this.safeSettings();
         if (!settings.backendApiUrl) {
             return this.resultWithError(API_URL_ERROR);
@@ -289,7 +308,7 @@ export class ContainerSync {
         if (!userId) {
             return this.resultWithError(USER_ID_ERROR);
         }
-        if (this.disposed) {
+        if (!this.isCurrentSync(syncGeneration, operationGeneration)) {
             return this.disposedResult();
         }
 
@@ -320,7 +339,7 @@ export class ContainerSync {
                 error: toSyncError(error, 'sync_failed', '获取服务清单失败'),
             };
         }
-        if (this.disposed) {
+        if (!this.isCurrentSync(syncGeneration, operationGeneration)) {
             return this.disposedResult();
         }
 
@@ -331,7 +350,7 @@ export class ContainerSync {
             }
         }
         const visibleRemoteIds = remoteIds.filter(containerId => !this.locallyDeletedContainerIds.has(containerId));
-        if (this.disposed) {
+        if (!this.isCurrentSync(syncGeneration, operationGeneration)) {
             return this.disposedResult();
         }
 
@@ -374,7 +393,7 @@ export class ContainerSync {
         }
 
         changed = this.removeExcessHistory(document.config, settings.historyLimit) || changed;
-        if (this.disposed) {
+        if (!this.isCurrentSync(syncGeneration, operationGeneration)) {
             return this.disposedResult();
         }
 
@@ -388,6 +407,9 @@ export class ContainerSync {
                     error: toSyncError(error, 'config_error', '写入服务配置失败'),
                 };
             }
+        }
+        if (!this.isCurrentSync(syncGeneration, operationGeneration)) {
+            return this.disposedResult();
         }
 
         return {
@@ -453,8 +475,14 @@ export class ContainerSync {
             if (operation.phase !== 'reconciling' || !this.isOperationConfirmed(operation, result)) {
                 continue;
             }
-            this.operationRegistry.complete(operation.containerId);
+            this.operationRegistry.complete(operation.containerId, 'succeeded', operation.operationId);
         }
+    }
+
+    private isCurrentSync(syncGeneration: number, operationGeneration: number): boolean {
+        return !this.disposed
+            && this.syncGeneration === syncGeneration
+            && this.operationGeneration === operationGeneration;
     }
 
     private isOperationConfirmed(operation: ContainerOperationState, result: ContainerSyncResult): boolean {

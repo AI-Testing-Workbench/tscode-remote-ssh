@@ -17,6 +17,7 @@ export interface ContainerOperationState {
     action: ContainerOperationAction;
     phase: ContainerOperationPhase;
     source: ContainerOperationSource;
+    operationId: number;
 }
 
 export interface ContainerOperationEvent {
@@ -30,6 +31,7 @@ export type ContainerOperationListener = (event: ContainerOperationEvent) => voi
 export class ContainerOperationRegistry {
     private readonly operations = new Map<string, ContainerOperationState>();
     private readonly listeners = new Set<ContainerOperationListener>();
+    private nextOperationId = 0;
 
     public begin(
         containerId: string,
@@ -46,15 +48,16 @@ export class ContainerOperationRegistry {
             action,
             phase: 'processing',
             source,
+            operationId: ++this.nextOperationId,
         };
         this.operations.set(normalizedId, operation);
         this.notify({ type: 'started', operation });
         return cloneOperation(operation);
     }
 
-    public setPhase(containerId: string, phase: ContainerOperationPhase): ContainerOperationState | undefined {
+    public setPhase(containerId: string, phase: ContainerOperationPhase, operationId?: number): ContainerOperationState | undefined {
         const current = this.operations.get(containerId);
-        if (!current) {
+        if (!current || operationId !== undefined && current.operationId !== operationId) {
             return undefined;
         }
         if (current.phase === phase) {
@@ -67,9 +70,9 @@ export class ContainerOperationRegistry {
         return cloneOperation(operation);
     }
 
-    public complete(containerId: string, outcome: ContainerOperationOutcome = 'succeeded'): ContainerOperationState | undefined {
+    public complete(containerId: string, outcome: ContainerOperationOutcome = 'succeeded', operationId?: number): ContainerOperationState | undefined {
         const current = this.operations.get(containerId);
-        if (!current) {
+        if (!current || operationId !== undefined && current.operationId !== operationId) {
             return undefined;
         }
 
@@ -90,6 +93,10 @@ export class ContainerOperationRegistry {
 
     public has(containerId: string): boolean {
         return this.operations.has(containerId);
+    }
+
+    public isCurrent(operation: ContainerOperationState): boolean {
+        return this.operations.get(operation.containerId)?.operationId === operation.operationId;
     }
 
     public subscribe(listener: ContainerOperationListener): { dispose: () => void } {

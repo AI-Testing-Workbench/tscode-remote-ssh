@@ -861,6 +861,54 @@ describe('AdminPanel', () => {
         expect(secondPanel.webview.html).toContain('镜像管理');
     });
 
+    it('ignores a duplicate action request ID while the first request is running', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        let resolveStart: (() => void) | undefined;
+        const start = new Promise<void>(resolve => {
+            resolveStart = resolve;
+        });
+        adminApi.startContainer = vi.fn(() => start);
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        panel.fireMessage({ command: 'containerAction', containerId: 'container-1', action: 'start', requestId: 'request-1' });
+        panel.fireMessage({ command: 'containerAction', containerId: 'container-1', action: 'start', requestId: 'request-1' });
+        await vi.waitFor(() => expect(adminApi.startContainer).toHaveBeenCalledOnce());
+
+        resolveStart?.();
+        await flushMessages();
+
+        expect(adminApi.startContainer).toHaveBeenCalledWith('container-1');
+        expect(panel.webview.postMessage).toHaveBeenCalledWith({
+            command: 'operationComplete',
+            action: 'containerAction',
+            requestId: 'request-1',
+        });
+    });
+
+    it('does not publish a stale administrator load after the panel is disposed', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        type ImageList = Awaited<ReturnType<AdminRestApi['listImages']>>;
+        let resolveImages: ((value: ImageList) => void) | undefined;
+        adminApi.listImages = vi.fn(() => new Promise<ImageList>(resolve => {
+            resolveImages = resolve;
+        }));
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        const opening = adminPanel.open();
+        await vi.waitFor(() => expect(adminApi.listImages).toHaveBeenCalledOnce());
+        const htmlBeforeDispose = panel.webview.html;
+        panel.dispose();
+        resolveImages?.({ images: [] });
+        await opening;
+
+        expect(panel.webview.html).toBe(htmlBeforeDispose);
+    });
+
     it('sends the selected container type when creating a container', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);

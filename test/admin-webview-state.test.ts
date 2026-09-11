@@ -400,6 +400,21 @@ describe('Admin Webview state', () => {
         ]);
     });
 
+    it('attaches request IDs to actions and ignores stale completions', () => {
+        const document = new FakeDocument();
+        const action = new FakeElement('button', { 'data-action': 'refresh' });
+        document.appendChild(action);
+        const runtime = runScript(document, {});
+
+        document.dispatch('click', action);
+
+        expect(runtime.messages).toContainEqual({ command: 'refresh', requestId: '1' });
+        runtime.dispatchMessage({ command: 'operationComplete', action: 'refresh', requestId: 'stale' });
+        expect(action.classList.contains('is-loading')).toBe(true);
+        runtime.dispatchMessage({ command: 'operationComplete', action: 'refresh', requestId: '1' });
+        expect(action.classList.contains('is-loading')).toBe(false);
+    });
+
     it('does not restore a focus that was released before the page refreshes', () => {
         const first = createFormDocument();
         const firstRuntime = runScript(first.document, {});

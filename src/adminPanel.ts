@@ -63,7 +63,7 @@ export class AdminPanel implements vscode.Disposable {
     private selectedImageFile: { fsPath: string; filename: string } | undefined;
     private panelDisposables: vscode.Disposable[] = [];
     private readonly operationSubscription: { dispose: () => void };
-    private readonly reconciliationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private readonly reconciliationTimers = new Map<string, { operationId: number; timer: ReturnType<typeof setTimeout> }>();
     private refreshTimer: ReturnType<typeof setTimeout> | undefined;
     private refreshPromise: Promise<void> | undefined;
     private loadPromise: Promise<void> | undefined;
@@ -75,6 +75,7 @@ export class AdminPanel implements vscode.Disposable {
     private generation = 0;
     private webviewReady = false;
     private pendingAdminUpdate = false;
+    private readonly activeRequestIds = new Set<string>();
     private disposed = false;
     private state: AdminPanelState = createInitialState();
 
@@ -155,6 +156,7 @@ export class AdminPanel implements vscode.Disposable {
         this.operationGeneration = undefined;
         this.webviewReady = false;
         this.pendingAdminUpdate = false;
+        this.activeRequestIds.clear();
         this.messageQueue = Promise.resolve();
         this.selectedImageFile = undefined;
         this.disposePanelResources();
@@ -164,12 +166,25 @@ export class AdminPanel implements vscode.Disposable {
     }
 
     private enqueueMessage(panel: vscode.WebviewPanel, generation: number, message: unknown): void {
+        const requestId = getRequestId(message);
+        const requestKey = requestId ? `${generation}:${requestId}` : undefined;
+        if (requestKey && this.activeRequestIds.has(requestKey)) {
+            return;
+        }
+        if (requestKey) {
+            this.activeRequestIds.add(requestKey);
+        }
         this.messageQueue = this.messageQueue
             .then(() => this.handleMessage(panel, generation, message))
             .catch(error => {
                 console.error('管理员面板消息处理失败', error);
                 if (this.isActive(panel, generation)) {
                     void vscode.window.showErrorMessage(getErrorMessage(error));
+                }
+            })
+            .finally(() => {
+                if (requestKey) {
+                    this.activeRequestIds.delete(requestKey);
                 }
             });
     }
@@ -178,6 +193,7 @@ export class AdminPanel implements vscode.Disposable {
         if (!this.isActive(panel, generation) || !isRecord(message) || typeof message.command !== 'string') {
             return;
         }
+        const requestId = getRequestId(message);
 
         switch (message.command) {
             case 'ready':
@@ -190,15 +206,15 @@ export class AdminPanel implements vscode.Disposable {
             case 'refresh':
             case 'retry':
                 await this.refresh(panel, generation);
-                this.completeOperation(panel, message.command);
+                this.completeOperation(panel, generation, message.command, requestId);
                 return;
             case 'selectImageFile':
                 this.operationInFlight = true;
                 this.operationGeneration = generation;
                 try {
-                    await this.selectImageFile(panel, generation);
+                    await this.selectImageFile(panel, generation, requestId);
                 } catch (error) {
-                    this.completeOperation(panel, message.command);
+                    this.completeOperation(panel, generation, message.command, requestId);
                     throw error;
                 } finally {
                     this.clearOperation(panel, generation);
@@ -256,7 +272,7 @@ export class AdminPanel implements vscode.Disposable {
                 }
                 return;
             }
-            const changed = await this.executeAction(adminApi, message);
+            const changed = await this.executeAction(adminApi, message, panel, generation);
             if (changed) {
                 await this.refresh(panel, generation, false, true);
             }
@@ -267,7 +283,7 @@ export class AdminPanel implements vscode.Disposable {
             }
         } finally {
             this.flushPendingAdminUpdate(panel, generation);
-            this.completeOperation(panel, message.command);
+            this.completeOperation(panel, generation, message.command, requestId);
             this.clearOperation(panel, generation);
         }
     }
@@ -397,17 +413,22 @@ export class AdminPanel implements vscode.Disposable {
     }
 
     private flushPendingAdminUpdate(panel: vscode.WebviewPanel, generation: number): void {
-        if (!this.pendingAdminUpdate || this.logOpen || this.selectOpen) {
+        if (!this.isActive(panel, generation) || !this.pendingAdminUpdate || this.logOpen || this.selectOpen) {
             return;
         }
         this.pendingAdminUpdate = false;
         this.postAdminUpdate(panel, generation);
     }
 
-    private async executeAction(adminApi: AdminRestApi, message: Record<string, unknown>): Promise<boolean> {
+    private async executeAction(
+        adminApi: AdminRestApi,
+        message: Record<string, unknown>,
+        panel: vscode.WebviewPanel,
+        generation: number,
+    ): Promise<boolean> {
         switch (message.command) {
             case 'uploadImage':
-                return this.uploadImage(adminApi, message);
+                return this.uploadImage(adminApi, message, panel, generation);
             case 'pushImage':
                 await adminApi.pushImage({ full_name: requireText(message.fullName, '镜像名称不能为空') });
                 return true;
@@ -421,7 +442,7 @@ export class AdminPanel implements vscode.Disposable {
                 await adminApi.unsetDefaultImage(containerTypeOf(message.type));
                 return true;
             case 'deleteImage':
-                return this.deleteImage(adminApi, message);
+                return this.deleteImage(adminApi, message, panel, generation);
             case 'createContainer':
                 await adminApi.createContainer(toAdminCreateRequest(message));
                 return true;
@@ -429,9 +450,9 @@ export class AdminPanel implements vscode.Disposable {
                 await adminApi.setContainerLimit(toLimitRequest(message));
                 return true;
             case 'deleteOrphanContainers':
-                return this.deleteOrphanContainers(adminApi, message);
+                return this.deleteOrphanContainers(adminApi, message, panel, generation);
             case 'containerAction':
-                return this.containerAction(adminApi, message);
+                return this.containerAction(adminApi, message, panel, generation);
             case 'addWhitelistUser':
                 await adminApi.addWhitelistUser({ user_id: requireText(message.user_id, '用户 ID 不能为空') });
                 return true;
@@ -449,9 +470,14 @@ export class AdminPanel implements vscode.Disposable {
         }
     }
 
-    private async uploadImage(adminApi: AdminRestApi, message: Record<string, unknown>): Promise<boolean> {
+    private async uploadImage(
+        adminApi: AdminRestApi,
+        message: Record<string, unknown>,
+        panel: vscode.WebviewPanel,
+        generation: number,
+    ): Promise<boolean> {
         const selected = this.selectedImageFile ?? await this.chooseImageFile();
-        if (!selected) {
+        if (!selected || !this.isActive(panel, generation)) {
             return false;
         }
 
@@ -463,22 +489,25 @@ export class AdminPanel implements vscode.Disposable {
             auto_push: asBoolean(message.autoPush, true),
         };
         await adminApi.uploadImage(input);
+        if (!this.isActive(panel, generation)) {
+            return false;
+        }
         this.selectedImageFile = undefined;
         this.state.selectedImageFilename = undefined;
         return true;
     }
 
-    private async selectImageFile(panel: vscode.WebviewPanel, generation: number): Promise<void> {
+    private async selectImageFile(panel: vscode.WebviewPanel, generation: number, requestId?: string): Promise<void> {
         const selected = await this.chooseImageFile();
         if (!selected || !this.isActive(panel, generation)) {
-            this.completeOperation(panel, 'selectImageFile');
+            this.completeOperation(panel, generation, 'selectImageFile', requestId);
             return;
         }
         this.selectedImageFile = selected;
         this.state.selectedImageFilename = selected.filename;
         this.setPanelHtml(panel);
         await panel.webview.postMessage({ command: 'imageFileSelected', filename: selected.filename });
-        this.completeOperation(panel, 'selectImageFile');
+        this.completeOperation(panel, generation, 'selectImageFile', requestId);
     }
 
     private async chooseImageFile(): Promise<{ fsPath: string; filename: string } | undefined> {
@@ -501,7 +530,12 @@ export class AdminPanel implements vscode.Disposable {
         return { fsPath: selected.fsPath, filename };
     }
 
-    private async deleteImage(adminApi: AdminRestApi, message: Record<string, unknown>): Promise<boolean> {
+    private async deleteImage(
+        adminApi: AdminRestApi,
+        message: Record<string, unknown>,
+        panel: vscode.WebviewPanel,
+        generation: number,
+    ): Promise<boolean> {
         const fullName = requireText(message.fullName, '镜像名称不能为空');
         const alsoRegistry = asBoolean(message.alsoRegistry, true);
         const confirmed = await confirmAction(
@@ -511,12 +545,20 @@ export class AdminPanel implements vscode.Disposable {
         if (!confirmed) {
             return false;
         }
+        if (!this.isActive(panel, generation)) {
+            return false;
+        }
         const request: ImageDeleteRequest = { full_name: fullName, also_registry: alsoRegistry };
         await adminApi.deleteImage(request);
         return true;
     }
 
-    private async deleteOrphanContainers(adminApi: AdminRestApi, message: Record<string, unknown>): Promise<boolean> {
+    private async deleteOrphanContainers(
+        adminApi: AdminRestApi,
+        message: Record<string, unknown>,
+        panel: vscode.WebviewPanel,
+        generation: number,
+    ): Promise<boolean> {
         const ids = optionalText(message.orphanContainerIds)
             ?.split(',')
             .map(value => value.trim())
@@ -528,14 +570,25 @@ export class AdminPanel implements vscode.Disposable {
         if (!confirmed) {
             return false;
         }
+        if (!this.isActive(panel, generation)) {
+            return false;
+        }
         await adminApi.deleteOrphanContainers({ container_ids: ids });
         return true;
     }
 
-    private async containerAction(adminApi: AdminRestApi, message: Record<string, unknown>): Promise<boolean> {
+    private async containerAction(
+        adminApi: AdminRestApi,
+        message: Record<string, unknown>,
+        panel: vscode.WebviewPanel,
+        generation: number,
+    ): Promise<boolean> {
         const containerId = requireText(message.containerId, '容器 ID 不能为空');
         const action = requireOneOf(message.action, ['start', 'stop', 'restart', 'delete', 'permanent-delete', 'expiration', 'restore'] as const, '无效容器操作');
         const container = this.state.containers.find(item => item.container_id === containerId);
+        if (!this.isActive(panel, generation)) {
+            return false;
+        }
         if (action === 'restart' && container && !container.business_deleted && container.status.toLowerCase() === 'failed') {
             throw new Error(`容器 "${containerId}" 处于失败状态，不能重启`);
         }
@@ -544,6 +597,9 @@ export class AdminPanel implements vscode.Disposable {
             const label = action === 'delete' ? '业务删除' : '永久删除';
             const confirmed = await confirmAction(`确定对容器「${containerId}」执行${label}吗？`, label);
             if (!confirmed) {
+                return false;
+            }
+            if (!this.isActive(panel, generation)) {
                 return false;
             }
         }
@@ -565,7 +621,7 @@ export class AdminPanel implements vscode.Disposable {
                 });
 
                 if (operation) {
-                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling');
+                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
                     if (reconciling) {
                         this.scheduleReconciliationTimeout(reconciling);
                         const confirmed = await this.reconcileContainerOperation(reconciling);
@@ -579,18 +635,20 @@ export class AdminPanel implements vscode.Disposable {
                 return true;
             } catch (error) {
                 if (operation && isRequestTimeoutError(error)) {
-                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling');
+                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
                     if (reconciling) {
                         this.scheduleReconciliationTimeout(reconciling);
                         void this.reconcileContainerOperation(reconciling);
                     }
-                    void vscode.window.showInformationMessage(
-                        `云端沙箱 服务 "${containerId}" 的${getContainerOperationName(action)}请求已等待 1 分钟，正在进行重试...`,
-                    );
+                    if (this.panel) {
+                        void vscode.window.showInformationMessage(
+                            `云端沙箱 服务 "${containerId}" 的${getContainerOperationName(action)}请求已等待 1 分钟，正在进行重试...`,
+                        );
+                    }
                     return true;
                 }
                 if (operation) {
-                    this.operationRegistry?.complete(containerId, 'failed');
+                    this.operationRegistry?.complete(containerId, 'failed', operation.operationId);
                 }
                 throw error;
             }
@@ -652,24 +710,28 @@ export class AdminPanel implements vscode.Disposable {
         }
     }
 
-    private completeOperation(panel: vscode.WebviewPanel, action: string): void {
-        if (!this.panel || this.panel !== panel) {
+    private completeOperation(panel: vscode.WebviewPanel, generation: number, action: string, requestId?: string): void {
+        if (!this.isActive(panel, generation)) {
             return;
         }
-        void panel.webview.postMessage({ command: 'operationComplete', action })
+        void panel.webview.postMessage({
+            command: 'operationComplete',
+            action,
+            ...(requestId ? { requestId } : {}),
+        })
             .then(() => undefined, () => undefined);
     }
 
     private handleContainerOperationEvent(event: ContainerOperationEvent): void {
         const panel = this.panel;
         if (event.type === 'completed') {
-            this.clearReconciliationTimer(event.operation.containerId);
-            if (event.operation.source === 'admin' && event.outcome === 'succeeded') {
+            this.clearReconciliationTimer(event.operation.containerId, event.operation.operationId);
+            if (panel && event.operation.source === 'admin' && event.outcome === 'succeeded') {
                 void vscode.window.showInformationMessage(
                     `云端沙箱 服务 "${event.operation.containerId}" 已${getContainerOperationName(event.operation.action)}`,
                 );
             }
-            if (event.operation.source === 'admin' && event.outcome === 'failed' && event.operation.phase === 'reconciling') {
+            if (panel && event.operation.source === 'admin' && event.outcome === 'failed' && event.operation.phase === 'reconciling') {
                 void vscode.window.showWarningMessage(
                     `云端沙箱 服务 "${event.operation.containerId}" 的${getContainerOperationName(event.operation.action)}结果暂时无法确认，请刷新后再试`,
                 );
@@ -709,13 +771,16 @@ export class AdminPanel implements vscode.Disposable {
             return true;
         }
         if (!this.onContainerOperation) {
-            this.operationRegistry.complete(operation.containerId);
+            this.operationRegistry.complete(operation.containerId, 'succeeded', operation.operationId);
+            return true;
+        }
+        if (!this.operationRegistry.isCurrent(operation)) {
             return true;
         }
         try {
             const confirmed = await this.onContainerOperation(operation);
-            if (confirmed) {
-                this.operationRegistry.complete(operation.containerId);
+            if (confirmed && this.operationRegistry.isCurrent(operation)) {
+                this.operationRegistry.complete(operation.containerId, 'succeeded', operation.operationId);
                 return true;
             }
         } catch (error) {
@@ -728,28 +793,32 @@ export class AdminPanel implements vscode.Disposable {
     private scheduleReconciliationTimeout(operation: ContainerOperationState): void {
         this.clearReconciliationTimer(operation.containerId);
         const timer = setTimeout(() => {
-            this.reconciliationTimers.delete(operation.containerId);
-            const current = this.operationRegistry?.get(operation.containerId);
-            if (!current || current.phase !== 'reconciling' || current.action !== operation.action) {
+            const entry = this.reconciliationTimers.get(operation.containerId);
+            if (!entry || entry.operationId !== operation.operationId) {
                 return;
             }
-            this.operationRegistry?.complete(operation.containerId, 'failed');
+            this.reconciliationTimers.delete(operation.containerId);
+            const current = this.operationRegistry?.get(operation.containerId);
+            if (!current || current.operationId !== operation.operationId || current.phase !== 'reconciling' || current.action !== operation.action) {
+                return;
+            }
+            this.operationRegistry?.complete(operation.containerId, 'failed', operation.operationId);
         }, OPERATION_RECONCILIATION_TIMEOUT_MS);
-        this.reconciliationTimers.set(operation.containerId, timer);
+        this.reconciliationTimers.set(operation.containerId, { operationId: operation.operationId, timer });
     }
 
-    private clearReconciliationTimer(containerId: string): void {
-        const timer = this.reconciliationTimers.get(containerId);
-        if (!timer) {
+    private clearReconciliationTimer(containerId: string, operationId?: number): void {
+        const entry = this.reconciliationTimers.get(containerId);
+        if (!entry || operationId !== undefined && entry.operationId !== operationId) {
             return;
         }
-        clearTimeout(timer);
+        clearTimeout(entry.timer);
         this.reconciliationTimers.delete(containerId);
     }
 
     private clearReconciliationTimers(): void {
-        for (const timer of this.reconciliationTimers.values()) {
-            clearTimeout(timer);
+        for (const entry of this.reconciliationTimers.values()) {
+            clearTimeout(entry.timer);
         }
         this.reconciliationTimers.clear();
     }
@@ -861,6 +930,7 @@ export class AdminPanel implements vscode.Disposable {
         this.operationGeneration = undefined;
         this.webviewReady = false;
         this.pendingAdminUpdate = false;
+        this.activeRequestIds.clear();
         this.messageQueue = Promise.resolve();
         this.generation++;
         this.clearRefreshTimer();
@@ -1166,6 +1236,14 @@ function isAdminTab(value: unknown): value is AdminTab {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getRequestId(value: unknown): string | undefined {
+    if (!isRecord(value) || typeof value.requestId !== 'string') {
+        return undefined;
+    }
+    const requestId = value.requestId.trim();
+    return requestId || undefined;
 }
 
 function getErrorMessage(error: unknown): string {

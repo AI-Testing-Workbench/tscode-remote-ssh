@@ -303,11 +303,16 @@ const restoreListState = () => {
     updateSortToggle(controls, saved.sortDirection === 'desc' ? 'desc' : 'asc');
 };
 
-const post = (command, payload = {}) => {
+let nextRequestId = 0;
+const post = (command, payload = {}, track = false) => {
     if (!command) return;
     saveFormState();
     saveCollapsibleState();
-    if (typeof vscode.postMessage === 'function') vscode.postMessage({ command, ...payload });
+    const requestId = track ? String(++nextRequestId) : undefined;
+    if (typeof vscode.postMessage === 'function') {
+        vscode.postMessage({ command, ...payload, ...(requestId ? { requestId } : {}) });
+    }
+    return requestId;
 };
 
 const getNodeKey = node => {
@@ -373,7 +378,7 @@ const shouldPreserveAttribute = (current, name, keepLoading) => {
     if (name === 'selected' && tag === 'option') return true;
     if (name === 'open' && tag === 'details') return true;
     if (keepLoading && (name === 'disabled' || name === 'aria-busy')) return true;
-    if (keepLoading && name === 'data-refresh-disabled') return true;
+    if (keepLoading && (name === 'data-refresh-disabled' || name === 'data-request-id')) return true;
     if (name === 'hidden' && current.matches?.('[data-log-modal]') && getSavedLogState().open === true) return true;
     return false;
 };
@@ -732,7 +737,8 @@ document.addEventListener('click', event => {
         openContainerLog(button.getAttribute('data-container-id') || '');
     }
     const form = button.closest('[data-form]') || button.closest('.resource-row');
-    post(action, { ...readForm(form), ...readButtonData(button) });
+    const requestId = post(action, { ...readForm(form), ...readButtonData(button) }, true);
+    if (requestId) button.setAttribute('data-request-id', requestId);
 });
 
 document.addEventListener('input', event => {
@@ -790,8 +796,10 @@ window.addEventListener('message', event => {
     document.querySelectorAll('[data-action]').forEach(button => {
         if (!button.classList.contains('is-loading')) return;
         if (typeof message.action === 'string' && button.getAttribute('data-action') !== message.action) return;
+        if (typeof message.requestId === 'string' && button.getAttribute('data-request-id') !== message.requestId) return;
         button.classList.remove('is-loading');
         button.removeAttribute('aria-busy');
+        button.removeAttribute('data-request-id');
         const refreshedDisabled = button.getAttribute('data-refresh-disabled');
         button.removeAttribute('data-refresh-disabled');
         if (refreshedDisabled === 'true') {

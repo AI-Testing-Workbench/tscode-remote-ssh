@@ -1,9 +1,12 @@
 export const WEBVIEW_SCRIPT = String.raw`
 /* global acquireVsCodeApi, document, window */
 const vscode = acquireVsCodeApi();
+let nextRequestId = 0;
 const post = (command, containerId) => {
     if (!command) return;
-    vscode.postMessage({ command, containerId });
+    const requestId = String(++nextRequestId);
+    vscode.postMessage({ command, containerId, requestId });
+    return requestId;
 };
 const startLoading = actionButton => {
     if (actionButton.hasAttribute('disabled') || actionButton.classList.contains('is-loading')) return false;
@@ -32,7 +35,8 @@ document.querySelectorAll('[data-action]').forEach(actionButton => {
         const action = actionButton.getAttribute('data-action');
         const containerId = actionButton.getAttribute('data-container-id');
         if (blocksConnection(action)) updateConnectionButtons(containerId, true);
-        post(action, containerId);
+        const requestId = post(action, containerId);
+        if (requestId) actionButton.setAttribute('data-request-id', requestId);
     });
 });
 document.querySelectorAll('.container-card[data-container-id]').forEach(containerCard => {
@@ -42,7 +46,8 @@ document.querySelectorAll('.container-card[data-container-id]').forEach(containe
         const connectButton = Array.from(document.querySelectorAll('[data-action="connect"]'))
             .find(button => button.getAttribute('data-container-id') === containerId);
         if (!connectButton || !startLoading(connectButton)) return;
-        post('connect', containerId);
+        const requestId = post('connect', containerId);
+        if (requestId) connectButton.setAttribute('data-request-id', requestId);
     });
 });
 window.addEventListener('message', event => {
@@ -56,9 +61,11 @@ window.addEventListener('message', event => {
             if (!actionButton.classList.contains('is-loading')) return;
             if (actionButton.getAttribute('data-action') !== message.action) return;
             if (typeof message.containerId === 'string' && actionButton.getAttribute('data-container-id') !== message.containerId) return;
+            if (typeof message.requestId === 'string' && actionButton.getAttribute('data-request-id') !== message.requestId) return;
             actionButton.classList.remove('is-loading');
             actionButton.removeAttribute('disabled');
             actionButton.removeAttribute('aria-busy');
+            actionButton.removeAttribute('data-request-id');
         });
         return;
     }

@@ -219,6 +219,27 @@ describe('ContainerSync', () => {
         expect(result.containers).toEqual([]);
     });
 
+    it('recovers on the next sync after a transient status failure', async () => {
+        const store = await createStore();
+        let calls = 0;
+        const getContainerStatuses = vi.fn(async () => {
+            calls += 1;
+            if (calls === 1) {
+                throw new Error('temporary network failure');
+            }
+            return { containers: [status('container-1', 'running', '10.0.0.1:22', '', '')] };
+        });
+        const sync = createSync(store, { getContainerStatuses });
+
+        const first = await sync.sync();
+        const second = await sync.sync();
+
+        expect(first.error?.code).toBe('sync_failed');
+        expect(second.error).toBeUndefined();
+        expect(second.containers).toHaveLength(1);
+        expect(store.list((await store.read()).config).map(entry => entry.containerId)).toEqual(['container-1']);
+    });
+
     it('does not call the API for an empty URL or empty user ID', async () => {
         const store = await createStore();
         const getContainerStatuses = vi.fn();
@@ -390,6 +411,42 @@ describe('ContainerSync', () => {
         await first;
     });
 
+    it('does not publish a sync result that crossed a lifecycle operation boundary', async () => {
+        const store = await createStore();
+        let resolveBatch: ((value: { containers: ContainerStatusResponse[] }) => void) | undefined;
+        const onSync = vi.fn();
+        const registry = new ContainerOperationRegistry();
+        const sync = new ContainerSync({
+            config: store,
+            userIdProvider: { getCurrentUserId: async () => 'user-1' },
+            userApi: {
+                getContainerStatuses: vi.fn(() => new Promise<{ containers: ContainerStatusResponse[] }>(resolve => {
+                    resolveBatch = resolve;
+                })),
+            } as unknown as UserRestApi,
+            getSettings: () => ({
+                backendApiUrl: 'http://api.example.test',
+                userName: 'root',
+                skipKnownHostsCheck: true,
+                historyLimit: 5,
+                statusSyncInterval: 5,
+                debug: false,
+                disableClientValidation: true,
+            }),
+            onSync,
+            operationRegistry: registry,
+        });
+
+        const pending = sync.sync();
+        await vi.waitFor(() => expect(resolveBatch).toBeDefined());
+        registry.begin('container-1', 'stop', 'admin');
+        resolveBatch?.({ containers: [status('container-1', 'running', '10.0.0.1:22', '', '')] });
+
+        const result = await pending;
+        expect(result.error).toMatchObject({ code: 'sync_disposed' });
+        expect(onSync).not.toHaveBeenCalled();
+    });
+
     it('starts one configured timer, performs an immediate sync, and clears the timer on dispose', async () => {
         vi.useFakeTimers();
         const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
@@ -500,6 +557,27 @@ describe('ContainerSync', () => {
         await mutation;
         await waitingSync;
         expect(getContainerStatuses).toHaveBeenCalledOnce();
+    });
+
+    it('does not start a queued mutation after the synchronizer is disposed', async () => {
+        const store = await createStore();
+        const sync = createSync(store, emptyBatch());
+        let releaseFirst: (() => void) | undefined;
+        const first = sync.runMutation(async () => {
+            await new Promise<void>(resolve => {
+                releaseFirst = resolve;
+            });
+        });
+        await vi.waitFor(() => expect(releaseFirst).toBeDefined());
+
+        const secondOperation = vi.fn(async () => undefined);
+        const second = sync.runMutation(secondOperation);
+        sync.dispose();
+        releaseFirst?.();
+
+        await first;
+        await expect(second).rejects.toThrow('同步已停止');
+        expect(secondOperation).not.toHaveBeenCalled();
     });
 
     it('suppresses a stale remote ID after local deletion until the cloud confirms removal', async () => {
