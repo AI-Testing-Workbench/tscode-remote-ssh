@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContainerConfig, ContainerConfigEntry } from '../src/containerConfig';
 import { ContainerSyncResult, SyncedContainer } from '../src/containerSync';
 import { ContainerOperationRegistry } from '../src/containerOperations';
-import { PublicUserContainerApi } from '../src/api/publicApi';
+import { createPublicUserContainerApi, PublicUserContainerApi } from '../src/api/publicApi';
 import { UserRestApi } from '../src/api/restClient';
 import { SidebarSyncState, SidebarViewProvider } from '../src/sidebarView';
 import { WEBVIEW_SCRIPT } from '../src/webviewScript';
@@ -841,6 +841,49 @@ describe('SidebarViewProvider', () => {
         expect(config.read).not.toHaveBeenCalled();
         expect(config.upsertContainer).not.toHaveBeenCalled();
         expect(config.write).not.toHaveBeenCalled();
+    });
+
+    it('waits for public Git initialization before validating a null endpoint', async () => {
+        const userApi = createUserApi(false);
+        userApi.createContainer = vi.fn(async () => ({
+            container_id: 'created-after-git',
+            service_id: 'service-created-after-git',
+            status: 'pending',
+            endpoint: null,
+        }));
+        let resolveInitialization: (() => void) | undefined;
+        const initialization = new Promise<void>(resolve => {
+            resolveInitialization = resolve;
+        });
+        const initializationPoller = { initialize: vi.fn(() => initialization) };
+        const publicApi = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+        const config = createConfig();
+        const values = [''];
+        const provider = createProvider({
+            publicApi,
+            config,
+            showInputBox: vi.fn(async () => values.shift()),
+            showQuickPick: vi.fn(async () => []),
+        });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        const creating = provider.createContainerFromPrompt();
+        await vi.waitFor(() => expect(initializationPoller.initialize).toHaveBeenCalledOnce());
+        expect(config.upsertContainer).not.toHaveBeenCalled();
+        resolveInitialization?.();
+        await creating;
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '服务 "created-after-git" 的 endpoint 无效，应为 IP:Port 格式：(空)',
+            { modal: true },
+        );
+        expect(config.upsertContainer).not.toHaveBeenCalled();
     });
 
     it('does not show the manual create form while remotely connected', async () => {

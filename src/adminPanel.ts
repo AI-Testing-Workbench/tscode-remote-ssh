@@ -27,6 +27,8 @@ import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository
 import { renderAdminContent, renderAdminPage } from './adminWebview/view';
 import { ADMIN_CONTAINER_TYPES, containerTypeOf } from './adminWebview/containerTypes';
 import { AdminDefaultImage, AdminPanelState, AdminTab } from './adminWebview/types';
+import type { ContainerInitializationRunner } from './containerInitializationPoller';
+import { parseContainerEndpoint } from './containerEndpoint';
 
 export const ADMIN_PANEL_VIEW_TYPE = 'testagentRemote.adminPanel';
 export const ADMIN_PANEL_TITLE = '管理员页面';
@@ -44,6 +46,7 @@ export interface AdminPanelOptions {
     userApiFactory?: (baseUrl: string) => UserRestApi;
     adminApiFactory?: AdminApiFactory;
     operationRegistry?: ContainerOperationRegistry;
+    initializationPoller?: ContainerInitializationRunner;
     onContainerOperation?: (operation: ContainerOperationState) => Promise<boolean>;
     showOpenDialog?: ShowOpenDialog;
     logger?: PanelLogger;
@@ -55,6 +58,7 @@ export class AdminPanel implements vscode.Disposable {
     private readonly userApiFactory: (baseUrl: string) => UserRestApi;
     private readonly adminApiFactory: AdminApiFactory;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
+    private readonly initializationPoller: ContainerInitializationRunner | undefined;
     private readonly onContainerOperation: ((operation: ContainerOperationState) => Promise<boolean>) | undefined;
     private readonly showOpenDialog: ShowOpenDialog;
     private readonly logger: PanelLogger | undefined;
@@ -85,6 +89,7 @@ export class AdminPanel implements vscode.Disposable {
         this.userApiFactory = options.userApiFactory ?? ((baseUrl: string) => new RestClient(baseUrl).user);
         this.adminApiFactory = options.adminApiFactory ?? ((baseUrl: string, operatorUserId: string) => new RestClient(baseUrl, { operatorUserId }).admin);
         this.operationRegistry = options.operationRegistry;
+        this.initializationPoller = options.initializationPoller;
         this.onContainerOperation = options.onContainerOperation;
         this.operationSubscription = this.operationRegistry?.subscribe(event => this.handleContainerOperationEvent(event)) ?? { dispose: () => undefined };
         this.logger = options.logger;
@@ -444,7 +449,22 @@ export class AdminPanel implements vscode.Disposable {
             case 'deleteImage':
                 return this.deleteImage(adminApi, message, panel, generation);
             case 'createContainer':
-                await adminApi.createContainer(toAdminCreateRequest(message));
+                {
+                    const request = toAdminCreateRequest(message);
+                    const created = await adminApi.createContainer(request);
+                    if (this.initializationPoller) {
+                        await this.initializationPoller.initialize({
+                            containerId: created.container_id,
+                            serviceId: created.service_id,
+                            operatorUserId: request.user_id,
+                            endpoint: created.endpoint,
+                            statusReader: adminApi,
+                        });
+                        if (!parseContainerEndpoint(created.endpoint, { allowDebugProxy: this.getSettings().debug })) {
+                            throw new Error(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                        }
+                    }
+                }
                 return true;
             case 'setLimit':
                 await adminApi.setContainerLimit(toLimitRequest(message));

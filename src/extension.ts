@@ -13,6 +13,8 @@ import {createPublicUserContainerApi, type TestAgentRemoteApi} from './api/publi
 import SSHDestination from './ssh/sshDestination';
 import {AdminPanel} from './adminPanel';
 import {ContainerOperationRegistry} from './containerOperations';
+import {ContainerInitializationPoller} from './containerInitializationPoller';
+import {getRemoteSettings} from './settings';
 
 let activeContainerSync: ContainerSync | undefined;
 let activeSidebarView: SidebarViewProvider | undefined;
@@ -29,7 +31,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
 
     const sidebarSyncState = new SidebarSyncState();
     const userIdProvider = new UserIdProvider();
-    const publicApi = createPublicUserContainerApi({ userIdProvider });
+    const initializationSettings = getRemoteSettings();
+    const initializationPoller = new ContainerInitializationPoller({
+        gitApi: new RestClient(initializationSettings.backendApiUrl).git,
+        statusSyncInterval: initializationSettings.statusSyncInterval,
+    });
+    const publicApi = createPublicUserContainerApi({ userIdProvider, initializationPoller });
     const operationRegistry = new ContainerOperationRegistry();
     const config = new ContainerConfig();
     const getCloudMode = async (): Promise<boolean> => {
@@ -70,6 +77,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const adminPanel = new AdminPanel({
         userIdProvider,
         operationRegistry,
+        initializationPoller,
         logger,
         onContainerOperation: operation => containerSync.reconcileContainerOperation(operation),
     });

@@ -1,5 +1,6 @@
 import { getRemoteSettings, RemoteSettings } from '../settings';
 import { UserIdProvider } from '../user';
+import type { ContainerInitializationRunner } from '../containerInitializationPoller';
 import {
     ContainerIdsResponse,
     ContainerStatusResponse,
@@ -56,6 +57,7 @@ export interface PublicUserContainerApiOptions {
     userIdProvider?: Pick<UserIdProvider, 'getCurrentUserId'>;
     getSettings?: () => RemoteSettings;
     userApiFactory?: (baseUrl: string) => UserRestApi;
+    initializationPoller?: ContainerInitializationRunner;
 }
 
 export function createPublicUserContainerApi(
@@ -64,6 +66,7 @@ export function createPublicUserContainerApi(
     const userIdProvider = options.userIdProvider ?? new UserIdProvider();
     const getSettings = options.getSettings ?? getRemoteSettings;
     const userApiFactory = options.userApiFactory ?? ((baseUrl: string) => new RestClient(baseUrl).user);
+    const initializationPoller = options.initializationPoller;
 
     const getUserApi = (): UserRestApi => userApiFactory(getSettings().backendApiUrl);
 
@@ -125,7 +128,17 @@ export function createPublicUserContainerApi(
                 request.user_id,
                 'user_id 不能为空',
             );
-            return userApi.createContainer({ ...request, user_id: userId });
+            const created = await userApi.createContainer({ ...request, user_id: userId });
+            if (initializationPoller) {
+                await initializationPoller.initialize({
+                    containerId: created.container_id,
+                    serviceId: created.service_id,
+                    operatorUserId: userId,
+                    endpoint: created.endpoint,
+                    statusReader: userApi,
+                });
+            }
+            return created;
         },
         getContainerIds: async query => {
             const normalizedQuery = query ?? {};

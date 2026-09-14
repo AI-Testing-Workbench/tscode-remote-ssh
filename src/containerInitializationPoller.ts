@@ -7,6 +7,7 @@ export interface ContainerInitializationInput {
     containerId: string;
     serviceId: string;
     operatorUserId: string;
+    statusReader?: Pick<UserRestApi, 'getContainer'>;
     /** Kept for the creation boundary; endpoint validation belongs after initialization. */
     endpoint?: string | null;
 }
@@ -28,12 +29,16 @@ export interface ContainerInitializationResult {
 }
 
 export interface ContainerInitializationPollerOptions {
-    userApi: Pick<UserRestApi, 'getContainer'>;
+    userApi?: Pick<UserRestApi, 'getContainer'>;
     gitApi: Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
     statusSyncInterval?: number;
     maxAttempts?: number;
     sleep?: (milliseconds: number) => Promise<void>;
     credentialPrompt?: (context: GitCredentialPromptContext) => Promise<GitCredentialSubmitRequest | undefined>;
+}
+
+export interface ContainerInitializationRunner {
+    initialize(input: ContainerInitializationInput): Promise<unknown>;
 }
 
 export class ContainerInitializationError extends Error {
@@ -66,7 +71,7 @@ const KNOWN_GIT_STATUSES = new Set<GitStatus>([
 ]);
 
 export class ContainerInitializationPoller {
-    private readonly userApi: Pick<UserRestApi, 'getContainer'>;
+    private readonly userApi: Pick<UserRestApi, 'getContainer'> | undefined;
     private readonly gitApi: Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
     private readonly intervalMilliseconds: number;
     private readonly maxAttempts: number;
@@ -109,10 +114,14 @@ export class ContainerInitializationPoller {
 
     private async poll(input: ContainerInitializationInput): Promise<ContainerInitializationResult> {
         let lastContainer: ContainerStatusResponse | undefined;
+        const statusReader = input.statusReader ?? this.userApi;
+        if (!statusReader) {
+            throw new ContainerInitializationError('status_reader_missing', '创建 Git 会话时缺少容器状态接口');
+        }
         for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
             let container: ContainerStatusResponse;
             try {
-                container = await this.userApi.getContainer(input.containerId);
+                container = await statusReader.getContainer(input.containerId);
                 lastContainer = container;
             } catch (error) {
                 if (attempt >= this.maxAttempts) {
@@ -222,9 +231,9 @@ export class ContainerInitializationPoller {
 }
 
 function normalizeInput(input: ContainerInitializationInput): ContainerInitializationInput {
-    const containerId = input.containerId.trim();
-    const serviceId = input.serviceId.trim();
-    const operatorUserId = input.operatorUserId.trim();
+    const containerId = typeof input.containerId === 'string' ? input.containerId.trim() : '';
+    const serviceId = typeof input.serviceId === 'string' ? input.serviceId.trim() : '';
+    const operatorUserId = typeof input.operatorUserId === 'string' ? input.operatorUserId.trim() : '';
     if (!containerId) {
         throw new ContainerInitializationError('container_id_missing', '创建响应中缺少有效的 container_id');
     }

@@ -130,6 +130,74 @@ describe('public user container API', () => {
 
         await expect(api.createContainer({})).rejects.toBe(restError);
     });
+
+    it('waits for Git initialization before returning from public creation', async () => {
+        const userApi = createUserApi();
+        const initializationPoller = {
+            initialize: vi.fn(async () => ({ gitStatus: 'initialized' as const })),
+        };
+        const userIdProvider = { getCurrentUserId: vi.fn(async () => 'user-1') };
+        const api = createPublicUserContainerApi({
+            userIdProvider,
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+
+        await api.createContainer({ gitee_user: 'alice' });
+
+        expect(initializationPoller.initialize).toHaveBeenCalledWith(expect.objectContaining({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+            statusReader: userApi,
+        }));
+        expect(userApi.getContainer).not.toHaveBeenCalled();
+        await api.getContainer('container-1');
+        expect(initializationPoller.initialize).toHaveBeenCalledOnce();
+    });
+
+    it('does not resolve public creation until the initialization promise settles', async () => {
+        const userApi = createUserApi();
+        let resolveInitialization: (() => void) | undefined;
+        const initialization = new Promise<void>(resolve => {
+            resolveInitialization = resolve;
+        });
+        const initializationPoller = { initialize: vi.fn(() => initialization) };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+
+        let settled = false;
+        const creating = api.createContainer({});
+        creating.then(() => {
+            settled = true;
+        });
+        await vi.waitFor(() => expect(initializationPoller.initialize).toHaveBeenCalledOnce());
+        await Promise.resolve();
+        expect(settled).toBe(false);
+
+        resolveInitialization?.();
+        await expect(creating).resolves.toMatchObject({ service_id: 'service-1' });
+    });
+
+    it('does not return a newly created public service when initialization fails', async () => {
+        const userApi = createUserApi();
+        const initializationError = new Error('git initialization failed');
+        const initializationPoller = { initialize: vi.fn(async () => { throw initializationError; }) };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+
+        await expect(api.createContainer({})).rejects.toBe(initializationError);
+        expect(initializationPoller.initialize).toHaveBeenCalledOnce();
+    });
 });
 
 function createUserApi(): UserRestApi {

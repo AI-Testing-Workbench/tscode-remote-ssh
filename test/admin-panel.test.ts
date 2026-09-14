@@ -888,6 +888,91 @@ describe('AdminPanel', () => {
         });
     });
 
+    it('waits for Git initialization after administrator container creation', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        let resolveInitialization: (() => void) | undefined;
+        const initialization = new Promise<void>(resolve => {
+            resolveInitialization = resolve;
+        });
+        const initializationPoller = {
+            initialize: vi.fn(() => initialization),
+        };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        const creating = send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+        });
+        await vi.waitFor(() => expect(initializationPoller.initialize).toHaveBeenCalledOnce());
+        expect(adminApi.listContainers).toHaveBeenCalledOnce();
+        resolveInitialization?.();
+        await creating;
+
+        expect(initializationPoller.initialize).toHaveBeenCalledWith(expect.objectContaining({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-5',
+            statusReader: adminApi,
+        }));
+        await vi.waitFor(() => expect(adminApi.listContainers).toHaveBeenCalledTimes(2));
+    });
+
+    it('does not refresh administrator data after Git initialization fails', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationError = new Error('git initialization failed');
+        const initializationPoller = {
+            initialize: vi.fn(async () => { throw initializationError; }),
+        };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+        });
+
+        expect(initializationPoller.initialize).toHaveBeenCalledOnce();
+        expect(adminApi.listContainers).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('git initialization failed');
+    });
+
+    it('does not report administrator creation success for an invalid endpoint', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.createContainer = vi.fn(async () => ({ ...sampleContainer(), service_id: 'service-1', endpoint: null }));
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+        });
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '服务 "container-1" 的 endpoint 无效，应为 IP:Port 格式：(空)',
+        );
+        expect(adminApi.listContainers).toHaveBeenCalledOnce();
+    });
+
     it('does not publish a stale administrator load after the panel is disposed', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
