@@ -631,6 +631,7 @@ export class AdminPanel implements vscode.Disposable {
         if (action === 'restart' && container && !container.business_deleted && container.status.toLowerCase() === 'failed') {
             throw new Error(`容器 "${containerId}" 处于失败状态，不能重启`);
         }
+        const restoreExpiration = action === 'restore' ? toExpirationRequest(message) : undefined;
 
         if (action === 'delete' || action === 'permanent-delete') {
             const label = action === 'delete' ? '业务删除' : '永久删除';
@@ -656,7 +657,7 @@ export class AdminPanel implements vscode.Disposable {
                     cancellable: false,
                 }, async progress => {
                     progress.report({ message: `容器 ${containerId}` });
-                    await this.executeLifecycleAction(adminApi, containerId, action, message);
+                    await this.executeLifecycleAction(adminApi, containerId, action, restoreExpiration);
                 });
 
                 if (operation) {
@@ -704,7 +705,7 @@ export class AdminPanel implements vscode.Disposable {
         adminApi: AdminRestApi,
         containerId: string,
         action: ContainerOperationAction,
-        message: Record<string, unknown>,
+        restoreExpiration?: ExpirationRequest,
     ): Promise<void> {
         switch (action) {
             case 'start':
@@ -723,7 +724,10 @@ export class AdminPanel implements vscode.Disposable {
                 await adminApi.permanentDeleteContainer(containerId);
                 return;
             case 'restore':
-                await adminApi.restoreContainer(containerId, toExpirationRequest(message));
+                if (!restoreExpiration) {
+                    throw new Error('恢复操作缺少有效期');
+                }
+                await adminApi.restoreContainer(containerId, restoreExpiration);
                 return;
         }
     }

@@ -258,6 +258,36 @@ describe('AdminPanel', () => {
         }));
     });
 
+    it('validates restore expiration before entering the operation transition', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        vi.mocked(adminApi.listContainers).mockResolvedValue({ containers: [{
+            ...sampleContainer(),
+            status: 'business_deleted',
+            business_deleted: true,
+            deleted_at: '2026-09-05T01:02:03Z',
+        }] });
+        const operationRegistry = new ContainerOperationRegistry();
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            operationRegistry,
+        });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'containers' });
+        panel.webview.postMessage.mockClear();
+        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'restore' });
+
+        expect(adminApi.restoreContainer).not.toHaveBeenCalled();
+        expect(operationRegistry.get('container-1')).toBeUndefined();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('有效期必须是数字');
+        expect(panel.webview.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            command: 'adminUpdate',
+            html: expect.stringContaining('操作中'),
+        }));
+    });
+
     it('switches tabs and scopes search to the active resource dataset', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
