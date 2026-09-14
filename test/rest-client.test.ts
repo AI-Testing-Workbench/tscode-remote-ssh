@@ -45,6 +45,7 @@ describe('RestClient', () => {
         await client.user.createContainer({ user_id: 'user-1' });
         await client.user.getContainerIds({
             user_id: 'user-1',
+            container_type: 'autotest_cloud',
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
@@ -128,7 +129,9 @@ describe('RestClient', () => {
             'POST /v1/admin/images/check',
         ]);
 
-        expect(requests[1].url.search).toBe('?user_id=user-1&gitee_user=alice&gitee_repository=repo&gitee_branch=main');
+        expect(requests[1].url.search).toBe('?user_id=user-1&container_type=autotest_cloud&gitee_user=alice&gitee_repository=repo&gitee_branch=main');
+        expect(requests[12].url.search).toBe('?container_type=autotest_cloud');
+        expect(requests[14].url.search).toBe('?container_type=autotest_cloud');
         expect(Buffer.from(requests[0].body ?? '').toString('utf8')).toBe('{"user_id":"user-1"}');
         expect(Buffer.from(requests[3].body ?? '').toString('utf8')).toBe('{"user_id":"user-1"}');
         expect(requests.slice(0, 8).every(request => request.headers[ADMIN_OPERATOR_USER_ID_HEADER] === undefined)).toBe(true);

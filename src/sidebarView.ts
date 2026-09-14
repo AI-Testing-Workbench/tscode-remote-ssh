@@ -22,7 +22,8 @@ import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } fr
 import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
 import { type PublicUserContainerApi } from './api/publicApi';
-import { formatRestClientError, type UserRestApi } from './api/restClient';
+import { type UserRestApi } from './api/restClient';
+import { formatContainerInitializationError } from './containerInitializationPoller';
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
 
@@ -902,7 +903,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private showError(error: unknown): void {
-        const message = formatRestClientError(error);
+        const message = formatContainerInitializationError(error);
         console.error('侧边栏操作失败', error);
         void vscode.window.showErrorMessage(message, { modal: true });
     }

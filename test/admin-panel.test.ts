@@ -7,6 +7,7 @@ import type { AdminDefaultImage, AdminPanelState } from '../src/adminWebview/typ
 import { REST_ERROR_CODES, RestClientError, type AdminRestApi, type UserRestApi } from '../src/api/restClient';
 import * as vscode from './mocks/vscode';
 import { ContainerOperationRegistry } from '../src/containerOperations';
+import { ContainerInitializationError } from '../src/containerInitializationPoller';
 
 const activePanels: AdminPanel[] = [];
 
@@ -971,6 +972,60 @@ describe('AdminPanel', () => {
             '服务 "container-1" 的 endpoint 无效，应为 IP:Port 格式：(空)',
         );
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
+    });
+
+    it('validates the final endpoint returned by initialization', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.createContainer = vi.fn(async () => ({ ...sampleContainer(), service_id: 'service-1', endpoint: null }));
+        const initializationPoller = {
+            initialize: vi.fn(async () => ({
+                containerId: 'container-1',
+                serviceId: 'service-1',
+                operatorUserId: 'user-5',
+                container: { ...sampleContainer(), endpoint: '10.0.0.8:2222' },
+                gitStatus: 'initialized' as const,
+                attempts: 2,
+            })),
+        };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+        });
+
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    });
+
+    it('shows the initialization failure code in the administrator error dialog', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationPoller = {
+            initialize: vi.fn(async () => {
+                throw new ContainerInitializationError('failed_initialize', '码云初始化失败');
+            }),
+        };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+        });
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败\n错误码: failed_initialize');
     });
 
     it('aborts administrator initialization when the panel is disposed', async () => {

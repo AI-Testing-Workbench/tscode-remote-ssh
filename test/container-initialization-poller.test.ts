@@ -219,6 +219,22 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.getGitState).toHaveBeenCalledOnce();
     });
 
+    it('keeps the API final failure code when the container reports initialization failure', async () => {
+        const userApi = {
+            getContainer: vi.fn(async () => containerStatus('failed', 'failed_initialize')),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn(),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+        const poller = new ContainerInitializationPoller({ userApi, gitApi, sleep: vi.fn(async () => undefined) });
+
+        await expect(poller.initialize({ containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' }))
+            .rejects.toMatchObject({ code: 'failed_initialize' });
+        expect(gitApi.getGitState).not.toHaveBeenCalled();
+    });
+
     it('shares one in-flight promise for the same creation context', async () => {
         let release: (() => void) | undefined;
         const userApi = {

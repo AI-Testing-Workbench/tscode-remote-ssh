@@ -11,7 +11,7 @@ import {
     ImageListItem,
     UploadImageFileInput,
 } from './api/models';
-import { AdminRestApi, formatRestClientError, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
+import { AdminRestApi, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
 import {
     ContainerOperationAction,
     ContainerOperationEvent,
@@ -27,7 +27,12 @@ import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository
 import { renderAdminContent, renderAdminPage } from './adminWebview/view';
 import { ADMIN_CONTAINER_TYPES, containerTypeOf } from './adminWebview/containerTypes';
 import { AdminDefaultImage, AdminPanelState, AdminTab } from './adminWebview/types';
-import { combineAbortSignals, type ContainerInitializationRunner } from './containerInitializationPoller';
+import {
+    combineAbortSignals,
+    formatContainerInitializationError,
+    getInitializationResultContainer,
+    type ContainerInitializationRunner,
+} from './containerInitializationPoller';
 import { parseContainerEndpoint } from './containerEndpoint';
 
 export const ADMIN_PANEL_VIEW_TYPE = 'testagentRemote.adminPanel';
@@ -461,7 +466,7 @@ export class AdminPanel implements vscode.Disposable {
                         const initializationController = new AbortController();
                         this.initializationControllers.add(initializationController);
                         try {
-                            await this.initializationPoller.initialize({
+                            const initialization = await this.initializationPoller.initialize({
                                 containerId: created.container_id,
                                 serviceId: created.service_id,
                                 operatorUserId: request.user_id,
@@ -469,8 +474,10 @@ export class AdminPanel implements vscode.Disposable {
                                 statusReader: adminApi,
                                 signal: combineAbortSignals(this.initializationSignal, initializationController.signal),
                             });
-                            if (!parseContainerEndpoint(created.endpoint, { allowDebugProxy: this.getSettings().debug })) {
-                                throw new Error(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                            const finalContainer = getInitializationResultContainer(initialization);
+                            const endpoint = finalContainer ? finalContainer.endpoint : created.endpoint;
+                            if (!parseContainerEndpoint(endpoint, { allowDebugProxy: this.getSettings().debug })) {
+                                throw new Error(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${endpoint ?? '(空)'}`);
                             }
                         } finally {
                             this.initializationControllers.delete(initializationController);
@@ -1287,7 +1294,7 @@ function getRequestId(value: unknown): string | undefined {
 }
 
 function getErrorMessage(error: unknown): string {
-    return formatRestClientError(error);
+    return formatContainerInitializationError(error);
 }
 
 function logAdminError(logger: PanelLogger | undefined, message: string, error: unknown, data: unknown): void {

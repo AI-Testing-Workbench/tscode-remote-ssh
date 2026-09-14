@@ -1,5 +1,5 @@
 import type { ContainerStatusResponse, GitCredentialSubmitRequest, GitStatus } from './api/models';
-import type { GitRestApi, UserRestApi } from './api/restClient';
+import { formatRestClientError, RestClientError, type GitRestApi, type UserRestApi } from './api/restClient';
 import { GitConfigReader } from './gitConfig';
 import { promptForGitCredentials } from './gitCredentialPrompt';
 
@@ -40,6 +40,29 @@ export interface ContainerInitializationPollerOptions {
 
 export interface ContainerInitializationRunner {
     initialize(input: ContainerInitializationInput): Promise<unknown>;
+}
+
+export function getInitializationResultContainer(value: unknown): ContainerStatusResponse | undefined {
+    if (!isRecord(value) || !isRecord(value.container)) {
+        return undefined;
+    }
+    const container = value.container;
+    if (typeof container.container_id !== 'string' || typeof container.status !== 'string') {
+        return undefined;
+    }
+    return container as unknown as ContainerStatusResponse;
+}
+
+export function formatContainerInitializationError(error: unknown): string {
+    if (!(error instanceof ContainerInitializationError)) {
+        return formatRestClientError(error);
+    }
+
+    const apiCode = error.cause instanceof RestClientError ? error.cause.code : undefined;
+    const codeDetails = apiCode && apiCode !== error.code
+        ? `错误码: ${error.code}，API错误码: ${apiCode}`
+        : `错误码: ${error.code}`;
+    return `${error.message}\n${codeDetails}`;
 }
 
 export function combineAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
@@ -158,7 +181,10 @@ export class ContainerInitializationPoller {
             const normalStatus = normalizeText(container.status);
             const finalGitStatus = normalizeOptionalText(container.git_fin_status);
             if (normalStatus === 'failed') {
-                throw this.failure('failed_container', `服务 "${input.containerId}" 初始化失败\n请联系支持团队解决`);
+                throw this.failure(
+                    finalGitStatus?.startsWith('failed_') ? finalGitStatus : 'failed_container',
+                    `服务 "${input.containerId}" 初始化失败\n请联系支持团队解决`,
+                );
             }
             if (finalGitStatus?.startsWith('failed_')) {
                 throw this.failure(finalGitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
@@ -279,6 +305,10 @@ function normalizeInput(input: ContainerInitializationInput): ContainerInitializ
         throw new ContainerInitializationError('user_id_missing', '创建码云初始化会话时缺少用户 ID');
     }
     return { ...input, containerId, serviceId, operatorUserId };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
 }
 
 function normalizeInterval(seconds: number | undefined): number {

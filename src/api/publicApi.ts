@@ -1,6 +1,10 @@
 import { getRemoteSettings, RemoteSettings } from '../settings';
 import { UserIdProvider } from '../user';
-import { combineAbortSignals, type ContainerInitializationRunner } from '../containerInitializationPoller';
+import {
+    combineAbortSignals,
+    getInitializationResultContainer,
+    type ContainerInitializationRunner,
+} from '../containerInitializationPoller';
 import {
     ContainerIdsResponse,
     ContainerStatusResponse,
@@ -131,7 +135,7 @@ export function createPublicUserContainerApi(
             );
             const created = await userApi.createContainer({ ...request, user_id: userId });
             if (initializationPoller) {
-                await initializationPoller.initialize({
+                const initialization = await initializationPoller.initialize({
                     containerId: created.container_id,
                     serviceId: created.service_id,
                     operatorUserId: userId,
@@ -139,6 +143,10 @@ export function createPublicUserContainerApi(
                     statusReader: userApi,
                     signal: combineAbortSignals(options.initializationSignal, createOptions?.initializationSignal),
                 });
+                const finalContainer = getInitializationResultContainer(initialization);
+                if (finalContainer) {
+                    return mergeFinalContainerStatus(created, finalContainer);
+                }
             }
             return created;
         },
@@ -172,4 +180,27 @@ export function createPublicUserContainerApi(
             await userApi.deleteContainer(containerId);
         },
     };
+}
+
+function mergeFinalContainerStatus(created: CreateContainerResponse, finalContainer: ContainerStatusResponse): CreateContainerResponse {
+    const result: CreateContainerResponse = {
+        ...created,
+        status: finalContainer.status,
+    };
+    if (Object.prototype.hasOwnProperty.call(finalContainer, 'type')) {
+        result.type = finalContainer.type;
+    }
+    if (Object.prototype.hasOwnProperty.call(finalContainer, 'novnc_url')) {
+        result.novnc_url = finalContainer.novnc_url;
+    }
+    if (Object.prototype.hasOwnProperty.call(finalContainer, 'endpoint')) {
+        result.endpoint = finalContainer.endpoint;
+    }
+    if (Object.prototype.hasOwnProperty.call(finalContainer, 'started_at')) {
+        result.started_at = finalContainer.started_at;
+    }
+    if (Object.prototype.hasOwnProperty.call(finalContainer, 'expires_at')) {
+        result.expires_at = finalContainer.expires_at;
+    }
+    return result;
 }

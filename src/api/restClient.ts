@@ -653,11 +653,11 @@ export class RestClient {
     }
 
     private defaultImagePath(type?: ContainerTypeValue): string {
-        return type ? `/admin/images/default?type=${encodeURIComponent(type)}` : '/admin/images/default';
+        return type ? `/admin/images/default?container_type=${encodeURIComponent(type)}` : '/admin/images/default';
     }
 
     private unsetDefaultImagePath(type?: ContainerTypeValue): string {
-        return type ? `/admin/images/default/unset?type=${encodeURIComponent(type)}` : '/admin/images/default/unset';
+        return type ? `/admin/images/default/unset?container_type=${encodeURIComponent(type)}` : '/admin/images/default/unset';
     }
 }
 

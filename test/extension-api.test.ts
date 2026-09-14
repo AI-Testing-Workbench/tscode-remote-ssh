@@ -28,6 +28,7 @@ describe('public user container API', () => {
             authorize_general_account: true,
         });
         await api.getContainerIds({
+            container_type: 'autotest_cloud',
             gitee_user: 'Alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
@@ -57,6 +58,7 @@ describe('public user container API', () => {
             user_id: 'user-1',
         });
         expect(userApi.getContainerIds).toHaveBeenCalledWith({
+            container_type: 'autotest_cloud',
             gitee_user: 'Alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
@@ -155,6 +157,43 @@ describe('public user container API', () => {
         expect(userApi.getContainer).not.toHaveBeenCalled();
         await api.getContainer('container-1');
         expect(initializationPoller.initialize).toHaveBeenCalledOnce();
+    });
+
+    it('returns the final container status from public creation initialization', async () => {
+        const userApi = createUserApi();
+        const initializationPoller = {
+            initialize: vi.fn(async () => ({
+                containerId: 'container-1',
+                serviceId: 'service-1',
+                operatorUserId: 'user-1',
+                container: {
+                    container_id: 'container-1',
+                    status: 'running',
+                    type: 'autotest_cloud',
+                    novnc_url: 'http://10.0.0.1:6080',
+                    endpoint: '10.0.0.1:2222',
+                    gitee_user: '',
+                    gitee_repository: '',
+                },
+                gitStatus: 'initialized' as const,
+                attempts: 2,
+            })),
+        };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+
+        await expect(api.createContainer({})).resolves.toMatchObject({
+            container_id: 'container-1',
+            service_id: 'service-1',
+            status: 'running',
+            type: 'autotest_cloud',
+            novnc_url: 'http://10.0.0.1:6080',
+            endpoint: '10.0.0.1:2222',
+        });
     });
 
     it('does not resolve public creation until the initialization promise settles', async () => {

@@ -29,6 +29,7 @@ export type CreateContainerRequest = UserCreateContainerRequest;
 
 export interface UserContainerQuery {
     user_id: string;
+    container_type?: ContainerTypeValue | null;
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;

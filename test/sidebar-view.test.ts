@@ -7,6 +7,7 @@ import { createPublicUserContainerApi, PublicUserContainerApi } from '../src/api
 import { UserRestApi } from '../src/api/restClient';
 import { SidebarSyncState, SidebarViewProvider } from '../src/sidebarView';
 import { WEBVIEW_SCRIPT } from '../src/webviewScript';
+import { ContainerInitializationError } from '../src/containerInitializationPoller';
 import * as vscode from './mocks/vscode';
 
 describe('SidebarSyncState', () => {
@@ -844,6 +845,22 @@ describe('SidebarViewProvider', () => {
         expect(config.read).not.toHaveBeenCalled();
         expect(config.upsertContainer).not.toHaveBeenCalled();
         expect(config.write).not.toHaveBeenCalled();
+    });
+
+    it('shows the initialization failure code in the sidebar error dialog', async () => {
+        const publicApi = createPublicApi();
+        publicApi.createContainer = vi.fn(async () => {
+            throw new ContainerInitializationError('failed_initialize', '码云初始化失败');
+        });
+        const provider = createProvider({
+            publicApi,
+            showInputBox: vi.fn(async () => ''),
+            showQuickPick: vi.fn(async () => []),
+        });
+
+        await provider.createContainerFromPrompt();
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败\n错误码: failed_initialize', { modal: true });
     });
 
     it('waits for public 码云 initialization before validating a null endpoint', async () => {
