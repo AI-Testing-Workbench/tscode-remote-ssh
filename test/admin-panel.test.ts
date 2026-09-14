@@ -362,6 +362,34 @@ describe('AdminPanel', () => {
         expect(failedHtml).toContain('value="failed"');
         expect(failedHtml).toContain('data-filter-status="failed"');
         expect(failedHtml).toContain('status-chip tag warning">已失败</span>');
+        const failedGitDescriptions: Record<string, string> = {
+            failed_timeout: '启动脚本超时',
+            failed_max_attempts: '达到最大尝试次数',
+            failed_unexpected_state: '沙盒服务返回未知状态',
+            failed_git: 'Git 返回不可恢复的错误',
+            failed_service: '沙盒服务请求失败/最终状态无法写入服务',
+            failed_container: '容器在初始化完成前退出或不可用',
+            failed_initialize: '初始化完成上报/最终写入失败',
+            failed_user_cancelled: '用户取消或未输入密码',
+        };
+        for (const [code, description] of Object.entries(failedGitDescriptions)) {
+            const failedWithGitHtml = renderAdminPage({
+                ...state,
+                containers: [{ ...sampleContainer(), status: 'failed', git_fin_status: code }],
+            }, 'nonce', 'vscode-resource://test');
+            expect(failedWithGitHtml).toContain(`status-chip tag warning">已失败 (${code}: ${description})</span>`);
+        }
+        const failedWithUnknownGitHtml = renderAdminPage({
+            ...state,
+            containers: [{ ...sampleContainer(), status: 'failed', git_fin_status: 'failed_new_reason' }],
+        }, 'nonce', 'vscode-resource://test');
+        expect(failedWithUnknownGitHtml).toContain('status-chip tag warning">已失败 (failed_new_reason: Git 初始化失败)</span>');
+        const runningWithFailureCodeHtml = renderAdminPage({
+            ...state,
+            containers: [{ ...sampleContainer(), status: 'running', git_fin_status: 'failed_git' }],
+        }, 'nonce', 'vscode-resource://test');
+        expect(runningWithFailureCodeHtml).toContain('status-chip tag success">运行中</span>');
+        expect(runningWithFailureCodeHtml).not.toContain('failed_git:');
         const stoppedHtml = renderAdminPage({
             ...state,
             containers: [{ ...sampleContainer(), status: 'stopped' }],

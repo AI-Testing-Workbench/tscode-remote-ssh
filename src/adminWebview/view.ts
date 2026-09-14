@@ -400,7 +400,7 @@ function renderContainerRow(container: AdminContainerResponse): string {
         container.user_id,
         container.image,
         status,
-        containerStatusLabel(container.status, deleted),
+        containerStatusLabel(container.status, deleted, container.git_fin_status),
         container.type ?? '',
         containerTypeLabel(container.type),
         container.gitee_user,
@@ -410,7 +410,7 @@ function renderContainerRow(container: AdminContainerResponse): string {
     ].join(' ');
     return `<article class="${rowClasses}" data-patch-key="container:${escapeAttribute(container.container_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-filter-type="${escapeAttribute(container.type ?? '')}" data-sort-container_id="${escapeAttribute(container.container_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
         <div class="container-card-heading">
-            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted))}</span>${typeBadge}</div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
+            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted, container.git_fin_status))}</span>${typeBadge}</div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
             <button class="small-button log-button" type="button" data-action="getContainerLog" data-container-id="${escapeAttribute(container.container_id)}">日志</button>
         </div>
         <div class="container-details">
@@ -493,14 +493,14 @@ function imageStatusLabel(status: string): string {
     }
 }
 
-function containerStatusLabel(status: string, deleted: boolean): string {
+function containerStatusLabel(status: string, deleted: boolean, gitFinStatus?: string): string {
     if (deleted) {
         return '业务删除';
     }
     switch (status.toLowerCase()) {
         case 'running': return '运行中';
         case 'stopped': return '已停止';
-        case 'failed': return '已失败';
+        case 'failed': return `已失败${formatGitFailureStatus(gitFinStatus)}`;
         case 'pending': return '准备中';
         case 'starting': return '启动中';
         case 'stopping': return '停止中';
@@ -511,6 +511,26 @@ function containerStatusLabel(status: string, deleted: boolean): string {
         default: return status || '未知状态';
     }
 }
+
+function formatGitFailureStatus(gitFinStatus: string | undefined): string {
+    const code = gitFinStatus?.trim();
+    if (!code || !code.startsWith('failed_')) {
+        return '';
+    }
+    const description = GIT_FAILURE_DESCRIPTIONS[code] ?? 'Git 初始化失败';
+    return ` (${code}: ${description})`;
+}
+
+const GIT_FAILURE_DESCRIPTIONS: Record<string, string> = {
+    failed_timeout: '启动脚本超时',
+    failed_max_attempts: '达到最大尝试次数',
+    failed_unexpected_state: '沙盒服务返回未知状态',
+    failed_git: 'Git 返回不可恢复的错误',
+    failed_service: '沙盒服务请求失败/最终状态无法写入服务',
+    failed_container: '容器在初始化完成前退出或不可用',
+    failed_initialize: '初始化完成上报/最终写入失败',
+    failed_user_cancelled: '用户取消或未输入密码',
+};
 
 function statusClass(status: string): string {
     switch (status.toLowerCase()) {
