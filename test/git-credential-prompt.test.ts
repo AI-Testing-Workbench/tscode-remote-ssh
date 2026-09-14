@@ -5,7 +5,7 @@ describe('promptForGitCredentials', () => {
     it('prefills editable identity values and returns a non-persistent credential request', async () => {
         const values = ['edited-user', 'edited@example.test', 'secret-token'];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => '不持久化');
+        const showQuickPick = vi.fn(async () => '否');
         const showErrorMessage = vi.fn(async () => undefined);
         const identityReader = { read: vi.fn(async () => ({ username: 'configured-user', email: 'configured@example.test' })) };
 
@@ -26,7 +26,7 @@ describe('promptForGitCredentials', () => {
     it('allows an empty email and supports persistent credentials', async () => {
         const values = ['git-user', '', 'secret-token'];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => '持久化');
+        const showQuickPick = vi.fn(async () => '是');
 
         await expect(promptForGitCredentials({
             identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
@@ -95,7 +95,7 @@ describe('promptForGitCredentials', () => {
             .mockResolvedValueOnce('second-user')
             .mockResolvedValueOnce('second@example.test')
             .mockResolvedValueOnce('second-secret');
-        const showQuickPick = vi.fn(async () => '不持久化');
+        const showQuickPick = vi.fn(async () => '否');
 
         await promptForGitCredentials({ identityReader, showInputBox, showQuickPick });
         await promptForGitCredentials({ identityReader, showInputBox, showQuickPick });

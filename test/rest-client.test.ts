@@ -545,7 +545,7 @@ describe('RestClient', () => {
         await expect(client.git.getGitState('service-1', '   ')).rejects.toMatchObject({
             kind: 'request',
             code: REST_ERROR_CODES.REQUEST,
-            message: '码云 API 操作用户 ID 不能为空',
+            message: 'Git API 操作用户 ID 不能为空',
         });
         expect(transport).not.toHaveBeenCalled();
     });
