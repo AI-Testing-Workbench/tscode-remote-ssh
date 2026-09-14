@@ -161,7 +161,7 @@ describe('RestClient', () => {
         await expect(client.admin.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({ service_id: 'service-2' });
     });
 
-    it('defaults missing user Git final status to pending', async () => {
+    it('defaults missing user 码云 final status to pending', async () => {
         const responses = [
             jsonResponse(200, { containers: [{ container_id: 'container-1', status: 'pending' }] }),
             jsonResponse(200, { container_id: 'container-1', status: 'pending' }),
@@ -493,7 +493,7 @@ describe('RestClient', () => {
         await expect(client.user.stopContainer('id')).resolves.toBeUndefined();
     });
 
-    it('uses service_id and the bound operator header for Git APIs', async () => {
+    it('uses service_id and the bound operator header for 码云 APIs', async () => {
         const { requests, transport } = createTransport(jsonResponse(200, { git_status: 'credential_required' }));
         const client = new RestClient('https://api.example.test', { transport });
 
@@ -525,7 +525,7 @@ describe('RestClient', () => {
         expect(requests.some(request => request.url.pathname.includes('/credential') && request.method === 'GET')).toBe(false);
     });
 
-    it('accepts a 204 response for Git credential submission', async () => {
+    it('accepts a 204 response for 码云 credential submission', async () => {
         const { transport } = createTransport({ statusCode: 204, body: Buffer.alloc(0) });
         const client = new RestClient('https://api.example.test', { transport });
 
@@ -538,23 +538,23 @@ describe('RestClient', () => {
         })).resolves.toBeUndefined();
     });
 
-    it('rejects missing Git operator IDs before sending a request', async () => {
+    it('rejects missing 码云 operator IDs before sending a request', async () => {
         const { transport } = createTransport(jsonResponse(200, { git_status: 'starting' }));
         const client = new RestClient('https://api.example.test', { transport });
 
         await expect(client.git.getGitState('service-1', '   ')).rejects.toMatchObject({
             kind: 'request',
             code: REST_ERROR_CODES.REQUEST,
-            message: 'Git API 操作用户 ID 不能为空',
+            message: '码云 API 操作用户 ID 不能为空',
         });
         expect(transport).not.toHaveBeenCalled();
     });
 
-    it('maps Git API HTTP and network failures to the shared stable errors', async () => {
+    it('maps 码云 API HTTP and network failures to the shared stable errors', async () => {
         for (const statusCode of [409, 404, 401, 403, 500, 502]) {
             const { transport } = createTransport(jsonResponse(statusCode, {
                 code: `git_${statusCode}`,
-                message: `Git 错误 ${statusCode}`,
+                message: `码云错误 ${statusCode}`,
             }));
             const client = new RestClient('https://api.example.test', { transport });
 
@@ -573,7 +573,7 @@ describe('RestClient', () => {
         });
     });
 
-    it('does not expose a transport error secret in the formatted Git API error', async () => {
+    it('does not expose a transport error secret in the formatted 码云 API error', async () => {
         const { transport } = createTransport(new Error('secret-token'));
         const client = new RestClient('https://api.example.test', { transport });
 

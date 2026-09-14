@@ -4,7 +4,7 @@ import { ContainerInitializationPoller } from '../src/containerInitializationPol
 import { RestClientError, type GitRestApi, type UserRestApi } from '../src/api/restClient';
 
 describe('ContainerInitializationPoller', () => {
-    it('runs the complete pending-to-running Git initialization sequence in order', async () => {
+    it('runs the complete pending-to-running 码云 initialization sequence in order', async () => {
         const statuses = [
             containerStatus('pending', undefined),
             containerStatus('starting', 'pending'),
@@ -115,7 +115,7 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.submitGitCredential).not.toHaveBeenCalled();
     });
 
-    it('retries temporary ordinary and Git status failures without reporting a fake Git failure', async () => {
+    it('retries temporary ordinary and 码云 status failures without reporting a fake 码云 failure', async () => {
         const userApi = {
             getContainer: vi.fn()
                 .mockRejectedValueOnce(new Error('temporary status failure'))
@@ -124,7 +124,7 @@ describe('ContainerInitializationPoller', () => {
         } as Pick<UserRestApi, 'getContainer'>;
         const gitApi = {
             getGitState: vi.fn()
-                .mockRejectedValueOnce(new Error('temporary Git failure'))
+                .mockRejectedValueOnce(new Error('temporary 码云 failure'))
                 .mockResolvedValueOnce({ git_status: 'initialized' }),
             submitGitCredential: vi.fn(),
             reportUserCancelled: vi.fn(),
@@ -174,7 +174,7 @@ describe('ContainerInitializationPoller', () => {
         }
     });
 
-    it('stops on an unknown Git response without submitting or reporting it', async () => {
+    it('stops on an unknown 码云 response without submitting or reporting it', async () => {
         const userApi = {
             getContainer: vi.fn(async () => containerStatus('running', 'pending')),
         } as Pick<UserRestApi, 'getContainer'>;
@@ -191,7 +191,7 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.reportUserCancelled).not.toHaveBeenCalled();
     });
 
-    it('ends on failed Git and ordinary states without another status request', async () => {
+    it('ends on failed 码云 and ordinary states without another status request', async () => {
         const userApi = {
             getContainer: vi.fn(async () => containerStatus('running', 'pending')),
         } as Pick<UserRestApi, 'getContainer'>;
@@ -242,7 +242,7 @@ describe('ContainerInitializationPoller', () => {
         await expect(first).resolves.toMatchObject({ gitStatus: 'initialized' });
     });
 
-    it('stops a cancelled creation before querying Git or opening credentials', async () => {
+    it('stops a cancelled creation before querying 码云 or opening credentials', async () => {
         const controller = new AbortController();
         let resolveStatus: ((value: ContainerStatusResponse) => void) | undefined;
         const userApi = {

@@ -138,7 +138,7 @@ export class ContainerInitializationPoller {
         let lastContainer: ContainerStatusResponse | undefined;
         const statusReader = input.statusReader ?? this.userApi;
         if (!statusReader) {
-            throw new ContainerInitializationError('status_reader_missing', '创建 Git 会话时缺少容器状态接口');
+            throw new ContainerInitializationError('status_reader_missing', '创建码云初始化会话时缺少容器状态接口');
         }
         for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
             this.throwIfCancelled(input);
@@ -158,13 +158,13 @@ export class ContainerInitializationPoller {
             const normalStatus = normalizeText(container.status);
             const finalGitStatus = normalizeOptionalText(container.git_fin_status);
             if (normalStatus === 'failed') {
-                throw this.failure('failed_container', `服务 "${input.containerId}" 初始化失败`);
+                throw this.failure('failed_container', `服务 "${input.containerId}" 初始化失败\n请联系支持团队解决`);
             }
             if (finalGitStatus?.startsWith('failed_')) {
-                throw this.failure(finalGitStatus, `服务 "${input.containerId}" Git 初始化失败`);
+                throw this.failure(finalGitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
             }
             if (finalGitStatus && finalGitStatus !== 'pending' && finalGitStatus !== 'initialized') {
-                throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的 Git 状态`);
+                throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
             }
             if (normalStatus === 'running' && finalGitStatus === 'initialized') {
                 return {
@@ -191,10 +191,10 @@ export class ContainerInitializationPoller {
                 this.throwIfCancelled(input);
 
                 if (!isKnownGitStatus(gitStatus)) {
-                    throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的 Git 状态`);
+                    throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
                 }
                 if (gitStatus.startsWith('failed_')) {
-                    throw this.failure(gitStatus, `服务 "${input.containerId}" Git 初始化失败`);
+                    throw this.failure(gitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
                 }
                 if (gitStatus === 'credential_required' || gitStatus === 'credential_rejected') {
                     const credential = await this.credentialPrompt({
@@ -206,10 +206,10 @@ export class ContainerInitializationPoller {
                     this.throwIfCancelled(input);
                     if (credential === undefined) {
                         await this.reportUserCancelled(input);
-                        throw this.failure('failed_user_cancelled', `服务 "${input.containerId}" Git 凭证输入已取消`);
+                        throw this.failure('failed_user_cancelled', `服务 "${input.containerId}" 码云凭证输入已取消`);
                     }
                     if (!isValidCredential(credential)) {
-                        throw this.failure('credential_invalid', `服务 "${input.containerId}" Git 凭证不完整`);
+                        throw this.failure('credential_invalid', `服务 "${input.containerId}" 码云凭证不完整`);
                     }
                     try {
                         await this.gitApi.submitGitCredential(input.serviceId, input.operatorUserId, credential);
@@ -255,7 +255,7 @@ export class ContainerInitializationPoller {
     private maxAttemptsError(input: ContainerInitializationInput, cause: unknown): ContainerInitializationError {
         return this.failure(
             'failed_max_attempts',
-            `服务 "${input.containerId}" Git 初始化未在规定时间内完成`,
+            `服务 "${input.containerId}" 码云初始化未在规定时间内完成\n请联系支持团队解决`,
             cause,
         );
     }
@@ -276,7 +276,7 @@ function normalizeInput(input: ContainerInitializationInput): ContainerInitializ
         throw new ContainerInitializationError('service_id_missing', '创建响应中缺少有效的 service_id');
     }
     if (!operatorUserId) {
-        throw new ContainerInitializationError('user_id_missing', '创建 Git 会话时缺少用户 ID');
+        throw new ContainerInitializationError('user_id_missing', '创建码云初始化会话时缺少用户 ID');
     }
     return { ...input, containerId, serviceId, operatorUserId };
 }

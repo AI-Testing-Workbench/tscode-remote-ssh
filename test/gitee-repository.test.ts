@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { looksLikeGiteeRepositoryUrl, parseGiteeRepositoryUrl } from '../src/giteeRepository';
 
 describe('Gitee repository input', () => {
-    it('extracts the HTTP(S) repository fields with or without the git suffix', () => {
+    it('extracts the HTTP(S) repository fields with or without the repository suffix', () => {
         expect(parseGiteeRepositoryUrl('https://github.com/JustWorkingAndWorking/testagent-cloud-remote-ssh.git'))
             .toEqual({
                 user: 'JustWorkingAndWorking',
@@ -29,7 +29,7 @@ describe('Gitee repository input', () => {
             });
     });
 
-    it('extracts the SSH repository fields with or without the git suffix', () => {
+    it('extracts the SSH repository fields with or without the repository suffix', () => {
         expect(parseGiteeRepositoryUrl('git@github.com:JustWorkingAndWorking/testagent-cloud-remote-ssh.git'))
             .toEqual({
                 user: 'JustWorkingAndWorking',

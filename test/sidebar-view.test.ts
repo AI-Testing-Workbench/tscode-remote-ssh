@@ -724,7 +724,7 @@ describe('SidebarViewProvider', () => {
             gitee_branch: 'main',
             authorize_general_account: true,
         }, { initializationSignal: expect.any(AbortSignal) });
-        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址 (HTTP协议，可选)' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址（可选）' }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云分支 (可选)' }));
         expect(showQuickPick).toHaveBeenCalledWith(['授权使用 TestAgent 码云通用账户'], expect.objectContaining({ canPickMany: true }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
@@ -746,7 +746,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('云端沙箱 服务创建成功');
     });
 
-    it('extracts Gitee fields from a repository URL and only asks for the branch', async () => {
+    it('extracts 码云 fields from a repository URL and only asks for the branch', async () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
@@ -774,7 +774,7 @@ describe('SidebarViewProvider', () => {
         }, { initializationSignal: expect.any(AbortSignal) });
     });
 
-    it('keeps the existing flow when the Gitee input is blank', async () => {
+    it('keeps the existing flow when the 码云 input is blank', async () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
@@ -804,7 +804,7 @@ describe('SidebarViewProvider', () => {
         }, { skipKnownHostsCheck: true, userName: 'root' });
     });
 
-    it('rejects a manually entered Gitee username', async () => {
+    it('rejects a manually entered 码云 username', async () => {
         const publicApi = createPublicApi();
         const values = ['alice'];
         const showInputBox = vi.fn(async () => values.shift());
@@ -846,7 +846,7 @@ describe('SidebarViewProvider', () => {
         expect(config.write).not.toHaveBeenCalled();
     });
 
-    it('waits for public Git initialization before validating a null endpoint', async () => {
+    it('waits for public 码云 initialization before validating a null endpoint', async () => {
         const userApi = createUserApi(false);
         userApi.createContainer = vi.fn(async () => ({
             container_id: 'created-after-git',
@@ -889,7 +889,7 @@ describe('SidebarViewProvider', () => {
         expect(config.upsertContainer).not.toHaveBeenCalled();
     });
 
-    it('does not hold the mutation lock while public Git initialization is waiting', async () => {
+    it('does not hold the mutation lock while public 码云 initialization is waiting', async () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         type CreatedResponse = Awaited<ReturnType<PublicUserContainerApi['createContainer']>>;

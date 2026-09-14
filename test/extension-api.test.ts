@@ -131,7 +131,7 @@ describe('public user container API', () => {
         await expect(api.createContainer({})).rejects.toBe(restError);
     });
 
-    it('waits for Git initialization before returning from public creation', async () => {
+    it('waits for 码云 initialization before returning from public creation', async () => {
         const userApi = createUserApi();
         const initializationPoller = {
             initialize: vi.fn(async () => ({ gitStatus: 'initialized' as const })),

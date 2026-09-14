@@ -52,7 +52,7 @@ describe('promptForGitCredentials', () => {
             showQuickPick,
             showErrorMessage,
         })).resolves.toBeUndefined();
-        expect(showErrorMessage).toHaveBeenCalledWith('Git 用户名不能为空');
+        expect(showErrorMessage).toHaveBeenCalledWith('码云用户名不能为空');
         expect(showQuickPick).not.toHaveBeenCalled();
     });
 

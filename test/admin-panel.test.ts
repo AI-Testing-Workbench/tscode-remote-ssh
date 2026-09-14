@@ -888,7 +888,7 @@ describe('AdminPanel', () => {
         });
     });
 
-    it('waits for Git initialization after administrator container creation', async () => {
+    it('waits for 码云 initialization after administrator container creation', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
         const adminApi = createAdminApi();
@@ -924,11 +924,11 @@ describe('AdminPanel', () => {
         await vi.waitFor(() => expect(adminApi.listContainers).toHaveBeenCalledTimes(2));
     });
 
-    it('does not refresh administrator data after Git initialization fails', async () => {
+    it('does not refresh administrator data after 码云 initialization fails', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
         const adminApi = createAdminApi();
-        const initializationError = new Error('git initialization failed');
+        const initializationError = new Error('码云初始化失败');
         const initializationPoller = {
             initialize: vi.fn(async () => { throw initializationError; }),
         };
@@ -946,7 +946,7 @@ describe('AdminPanel', () => {
 
         expect(initializationPoller.initialize).toHaveBeenCalledOnce();
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('git initialization failed');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败');
     });
 
     it('does not report administrator creation success for an invalid endpoint', async () => {
@@ -1044,7 +1044,7 @@ describe('AdminPanel', () => {
         });
     });
 
-    it('uses the same Git initialization runner for both container types', async () => {
+    it('uses the same 码云 initialization runner for both container types', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
         const adminApi = createAdminApi();

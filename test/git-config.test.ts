@@ -22,7 +22,7 @@ describe('GitConfigReader', () => {
         expect(runGit).toHaveBeenNthCalledWith(2, ['config', '--local', '--get', 'user.email'], 'C:\\workspace-active');
     });
 
-    it('falls back per field to user-level Git config when the workspace value is absent', async () => {
+    it('falls back per field to user-level repository config when the workspace value is absent', async () => {
         const runGit = vi.fn<GitConfigCommandRunner>(async args => {
             const key = args[args.length - 1];
             if (args.includes('--local')) {
@@ -59,7 +59,7 @@ describe('GitConfigReader', () => {
         expect(runGit).toHaveBeenCalledWith(['config', '--global', '--get', 'user.email'], undefined);
     });
 
-    it('hides Git command failures and returns empty defaults', async () => {
+    it('hides repository command failures and returns empty defaults', async () => {
         const runGit = vi.fn<GitConfigCommandRunner>(async () => {
             throw new Error('private command output');
         });
