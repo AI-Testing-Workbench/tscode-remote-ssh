@@ -13,8 +13,8 @@ export interface GitCredentialPromptOptions {
     onCancel?: () => Thenable<unknown> | void;
 }
 
-const DO_NOT_PERSIST = '不持久化';
-const PERSIST = '持久化';
+const DO_NOT_PERSIST = '否';
+const PERSIST = '是';
 
 export async function promptForGitCredentials(
     options: GitCredentialPromptOptions,
@@ -33,17 +33,17 @@ export async function promptForGitCredentials(
     const identity = await readIdentity(options.identityReader);
 
     const username = await promptRequired(showInputBox, showErrorMessage, {
-        title: 'Git 用户名',
+        title: '码云用户名',
         prompt: '',
         value: identity.username,
-        emptyMessage: 'Git 用户名不能为空',
+        emptyMessage: '码云用户名不能为空',
     }, value => value.trim());
     if (username === undefined) {
         return cancel();
     }
 
     const email = await showInputBox({
-        title: 'Git 邮箱',
+        title: '码云邮箱',
         prompt: '(可选)',
         value: identity.email,
         ignoreFocusOut: true,
@@ -53,18 +53,18 @@ export async function promptForGitCredentials(
     }
 
     const password = await promptRequired(showInputBox, showErrorMessage, {
-        title: 'Git 密码',
-        prompt: '请输入 Git 密码',
+        title: '码云密码',
+        prompt: '',
         password: true,
         ignoreFocusOut: true,
-        emptyMessage: 'Git 密码不能为空',
+        emptyMessage: '码云密码不能为空',
     }, value => value);
     if (password === undefined) {
         return cancel();
     }
 
     const persistChoice = await showQuickPick([DO_NOT_PERSIST, PERSIST], {
-        title: '是否持久化 Git 凭证',
+        title: '是否加密储存码云信息？储存后将无需进行码云认证',
         placeHolder: DO_NOT_PERSIST,
         canPickMany: false,
         ignoreFocusOut: true,
