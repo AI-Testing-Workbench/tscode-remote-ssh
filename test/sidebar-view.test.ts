@@ -723,7 +723,7 @@ describe('SidebarViewProvider', () => {
             gitee_repository: 'repo',
             gitee_branch: 'main',
             authorize_general_account: true,
-        });
+        }, { initializationSignal: expect.any(AbortSignal) });
         expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址 (HTTP协议，可选)' }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云分支 (可选)' }));
         expect(showQuickPick).toHaveBeenCalledWith(['授权使用 TestAgent 码云通用账户'], expect.objectContaining({ canPickMany: true }));
@@ -771,7 +771,7 @@ describe('SidebarViewProvider', () => {
             gitee_repository: 'testagent-cloud-remote-ssh',
             gitee_branch: 'develop',
             authorize_general_account: false,
-        });
+        }, { initializationSignal: expect.any(AbortSignal) });
     });
 
     it('keeps the existing flow when the Gitee input is blank', async () => {
@@ -792,7 +792,10 @@ describe('SidebarViewProvider', () => {
 
         expect(showInputBox).toHaveBeenCalledOnce();
         expect(showQuickPick).toHaveBeenCalledOnce();
-        expect(publicApi.createContainer).toHaveBeenCalledWith({ authorize_general_account: false });
+        expect(publicApi.createContainer).toHaveBeenCalledWith(
+            { authorize_general_account: false },
+            { initializationSignal: expect.any(AbortSignal) },
+        );
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-without-gitee',
             host: '云端沙箱 服务',
@@ -884,6 +887,81 @@ describe('SidebarViewProvider', () => {
             { modal: true },
         );
         expect(config.upsertContainer).not.toHaveBeenCalled();
+    });
+
+    it('does not hold the mutation lock while public Git initialization is waiting', async () => {
+        const config = createConfig();
+        const publicApi = createPublicApi();
+        type CreatedResponse = Awaited<ReturnType<PublicUserContainerApi['createContainer']>>;
+        let resolveCreation: ((value: CreatedResponse) => void) | undefined;
+        publicApi.createContainer = vi.fn(() => new Promise<CreatedResponse>(resolve => {
+            resolveCreation = resolve;
+        }));
+        const runMutation = vi.fn(async (operation: () => Promise<unknown>) => operation());
+        const sync = {
+            refresh: vi.fn(async () => ({ containers: [], changed: false })),
+            runMutation: runMutation as unknown as ProviderTestOptions['sync']['runMutation'],
+        } as ProviderTestOptions['sync'];
+        const provider = createProvider({
+            publicApi,
+            config,
+            sync,
+            showInputBox: vi.fn(async () => ''),
+            showQuickPick: vi.fn(async () => []),
+        });
+
+        const creating = provider.createContainerFromPrompt();
+        await vi.waitFor(() => expect(publicApi.createContainer).toHaveBeenCalledOnce());
+        expect(runMutation).not.toHaveBeenCalled();
+        resolveCreation?.({
+            container_id: 'created-after-wait',
+            service_id: 'service-after-wait',
+            status: 'pending',
+            endpoint: '10.0.0.8:2222',
+        });
+        await creating;
+
+        expect(runMutation).toHaveBeenCalledOnce();
+        expect(config.write).toHaveBeenCalledOnce();
+    });
+
+    it('aborts public initialization when its sidebar view is disposed', async () => {
+        const userApi = createUserApi(false);
+        userApi.createContainer = vi.fn(async () => ({
+            container_id: 'created-before-dispose',
+            service_id: 'service-before-dispose',
+            status: 'pending',
+            endpoint: '10.0.0.9:2222',
+        }));
+        const initializationPoller = {
+            initialize: vi.fn(({ signal }: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
+                signal?.addEventListener('abort', () => reject(new Error('creation cancelled')));
+            })),
+        };
+        const publicApi = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+        const config = createConfig();
+        const provider = createProvider({
+            publicApi,
+            config,
+            showInputBox: vi.fn(async () => ''),
+            showQuickPick: vi.fn(async () => []),
+        });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        const creating = provider.createContainerFromPrompt();
+        await vi.waitFor(() => expect(initializationPoller.initialize).toHaveBeenCalledOnce());
+        view.dispose();
+        await creating;
+
+        expect((initializationPoller.initialize.mock.calls[0][0] as { signal: AbortSignal }).signal.aborted).toBe(true);
+        expect(config.write).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith('creation cancelled', { modal: true });
     });
 
     it('does not show the manual create form while remotely connected', async () => {

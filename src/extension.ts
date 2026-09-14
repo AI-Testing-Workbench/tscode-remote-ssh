@@ -20,6 +20,7 @@ let activeContainerSync: ContainerSync | undefined;
 let activeSidebarView: SidebarViewProvider | undefined;
 let activeSidebarSyncState: SidebarSyncState | undefined;
 let activeAdminPanel: AdminPanel | undefined;
+let activeInitializationController: AbortController | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<TestAgentRemoteApi> {
     const logger = new Log('TestAgent - Remote');
@@ -32,11 +33,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const sidebarSyncState = new SidebarSyncState();
     const userIdProvider = new UserIdProvider();
     const initializationSettings = getRemoteSettings();
+    const initializationController = new AbortController();
+    activeInitializationController = initializationController;
     const initializationPoller = new ContainerInitializationPoller({
         gitApi: new RestClient(initializationSettings.backendApiUrl).git,
         statusSyncInterval: initializationSettings.statusSyncInterval,
     });
-    const publicApi = createPublicUserContainerApi({ userIdProvider, initializationPoller });
+    const publicApi = createPublicUserContainerApi({
+        userIdProvider,
+        initializationPoller,
+        initializationSignal: initializationController.signal,
+    });
     const operationRegistry = new ContainerOperationRegistry();
     const config = new ContainerConfig();
     const getCloudMode = async (): Promise<boolean> => {
@@ -78,6 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         userIdProvider,
         operationRegistry,
         initializationPoller,
+        initializationSignal: initializationController.signal,
         logger,
         onContainerOperation: operation => containerSync.reconcileContainerOperation(operation),
     });
@@ -123,6 +131,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const remoteSSHResolver = new RemoteSSHResolver(context, logger);
     context.subscriptions.push(vscode.workspace.registerRemoteAuthorityResolver(REMOTE_SSH_AUTHORITY, remoteSSHResolver));
     context.subscriptions.push(remoteSSHResolver);
+    context.subscriptions.push({ dispose: () => initializationController.abort() });
 
     const locationHistory = new RemoteLocationHistory(context);
     const locationData = getRemoteWorkspaceLocationData();
@@ -151,6 +160,8 @@ function getCurrentRemoteHost(): string | undefined {
 }
 
 export function deactivate() {
+    activeInitializationController?.abort();
+    activeInitializationController = undefined;
     activeSidebarView?.dispose();
     activeSidebarView = undefined;
     activeSidebarSyncState?.dispose();

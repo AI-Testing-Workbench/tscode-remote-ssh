@@ -1,6 +1,6 @@
 import { getRemoteSettings, RemoteSettings } from '../settings';
 import { UserIdProvider } from '../user';
-import type { ContainerInitializationRunner } from '../containerInitializationPoller';
+import { combineAbortSignals, type ContainerInitializationRunner } from '../containerInitializationPoller';
 import {
     ContainerIdsResponse,
     ContainerStatusResponse,
@@ -30,7 +30,7 @@ export type PublicContainerQuery = Omit<UserContainerQuery, 'user_id'> & {
 };
 
 export interface PublicUserContainerApi {
-    createContainer(request: PublicCreateContainerRequest): Promise<CreateContainerResponse>;
+    createContainer(request: PublicCreateContainerRequest, options?: { initializationSignal?: AbortSignal }): Promise<CreateContainerResponse>;
     getContainerIds(query?: PublicContainerQuery): Promise<ContainerIdsResponse>;
     getContainer(containerId: string): Promise<ContainerStatusResponse>;
     startContainer(containerId: string): Promise<void>;
@@ -58,6 +58,7 @@ export interface PublicUserContainerApiOptions {
     getSettings?: () => RemoteSettings;
     userApiFactory?: (baseUrl: string) => UserRestApi;
     initializationPoller?: ContainerInitializationRunner;
+    initializationSignal?: AbortSignal;
 }
 
 export function createPublicUserContainerApi(
@@ -122,7 +123,7 @@ export function createPublicUserContainerApi(
     };
 
     return {
-        createContainer: async request => {
+        createContainer: async (request, createOptions) => {
             assertObject(request, '请求必须是对象');
             const { userId, userApi } = await prepareUserRequest(
                 request.user_id,
@@ -136,6 +137,7 @@ export function createPublicUserContainerApi(
                     operatorUserId: userId,
                     endpoint: created.endpoint,
                     statusReader: userApi,
+                    signal: combineAbortSignals(options.initializationSignal, createOptions?.initializationSignal),
                 });
             }
             return created;

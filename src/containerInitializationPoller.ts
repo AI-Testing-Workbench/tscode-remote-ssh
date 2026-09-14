@@ -8,6 +8,7 @@ export interface ContainerInitializationInput {
     serviceId: string;
     operatorUserId: string;
     statusReader?: Pick<UserRestApi, 'getContainer'>;
+    signal?: AbortSignal;
     /** Kept for the creation boundary; endpoint validation belongs after initialization. */
     endpoint?: string | null;
 }
@@ -33,12 +34,33 @@ export interface ContainerInitializationPollerOptions {
     gitApi: Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
     statusSyncInterval?: number;
     maxAttempts?: number;
-    sleep?: (milliseconds: number) => Promise<void>;
+    sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
     credentialPrompt?: (context: GitCredentialPromptContext) => Promise<GitCredentialSubmitRequest | undefined>;
 }
 
 export interface ContainerInitializationRunner {
     initialize(input: ContainerInitializationInput): Promise<unknown>;
+}
+
+export function combineAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+    const activeSignals = signals.filter((signal): signal is AbortSignal => signal !== undefined);
+    if (activeSignals.length === 0) {
+        return undefined;
+    }
+    if (activeSignals.length === 1) {
+        return activeSignals[0];
+    }
+
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    for (const signal of activeSignals) {
+        if (signal.aborted) {
+            abort();
+            break;
+        }
+        signal.addEventListener('abort', abort, { once: true });
+    }
+    return controller.signal;
 }
 
 export class ContainerInitializationError extends Error {
@@ -75,7 +97,7 @@ export class ContainerInitializationPoller {
     private readonly gitApi: Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
     private readonly intervalMilliseconds: number;
     private readonly maxAttempts: number;
-    private readonly sleep: (milliseconds: number) => Promise<void>;
+    private readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
     private readonly credentialPrompt: (context: GitCredentialPromptContext) => Promise<GitCredentialSubmitRequest | undefined>;
     private readonly inFlight = new Map<string, Promise<ContainerInitializationResult>>();
 
@@ -119,6 +141,7 @@ export class ContainerInitializationPoller {
             throw new ContainerInitializationError('status_reader_missing', '创建 Git 会话时缺少容器状态接口');
         }
         for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+            this.throwIfCancelled(input);
             let container: ContainerStatusResponse;
             try {
                 container = await statusReader.getContainer(input.containerId);
@@ -127,9 +150,10 @@ export class ContainerInitializationPoller {
                 if (attempt >= this.maxAttempts) {
                     throw this.maxAttemptsError(input, error);
                 }
-                await this.waitForNextAttempt();
+                await this.waitForNextAttempt(input);
                 continue;
             }
+            this.throwIfCancelled(input);
 
             const normalStatus = normalizeText(container.status);
             const finalGitStatus = normalizeOptionalText(container.git_fin_status);
@@ -161,9 +185,10 @@ export class ContainerInitializationPoller {
                     if (attempt >= this.maxAttempts) {
                         throw this.maxAttemptsError(input, error);
                     }
-                    await this.waitForNextAttempt();
+                    await this.waitForNextAttempt(input);
                     continue;
                 }
+                this.throwIfCancelled(input);
 
                 if (!isKnownGitStatus(gitStatus)) {
                     throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的 Git 状态`);
@@ -178,6 +203,7 @@ export class ContainerInitializationPoller {
                         operatorUserId: input.operatorUserId,
                         gitStatus,
                     });
+                    this.throwIfCancelled(input);
                     if (credential === undefined) {
                         await this.reportUserCancelled(input);
                         throw this.failure('failed_user_cancelled', `服务 "${input.containerId}" Git 凭证输入已取消`);
@@ -191,14 +217,15 @@ export class ContainerInitializationPoller {
                         if (attempt >= this.maxAttempts) {
                             throw this.maxAttemptsError(input, error);
                         }
-                        await this.waitForNextAttempt();
+                        await this.waitForNextAttempt(input);
                         continue;
                     }
+                    this.throwIfCancelled(input);
                 }
             }
 
             if (attempt < this.maxAttempts) {
-                await this.waitForNextAttempt();
+                await this.waitForNextAttempt(input);
             }
         }
 
@@ -213,8 +240,16 @@ export class ContainerInitializationPoller {
         }
     }
 
-    private async waitForNextAttempt(): Promise<void> {
-        await this.sleep(this.intervalMilliseconds);
+    private async waitForNextAttempt(input: ContainerInitializationInput): Promise<void> {
+        this.throwIfCancelled(input);
+        await this.sleep(this.intervalMilliseconds, input.signal);
+        this.throwIfCancelled(input);
+    }
+
+    private throwIfCancelled(input: ContainerInitializationInput): void {
+        if (input.signal?.aborted) {
+            throw this.failure('creation_cancelled', '当前创建流程已取消');
+        }
     }
 
     private maxAttemptsError(input: ContainerInitializationInput, cause: unknown): ContainerInitializationError {
@@ -288,6 +323,20 @@ function isValidCredential(value: unknown): value is GitCredentialSubmitRequest 
         && typeof value.persist === 'boolean';
 }
 
-function sleep(milliseconds: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, milliseconds));
+function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+        return Promise.reject(new ContainerInitializationError('creation_cancelled', '当前创建流程已取消'));
+    }
+    return new Promise((resolve, reject) => {
+        const onAbort = (): void => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+            reject(new ContainerInitializationError('creation_cancelled', '当前创建流程已取消'));
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, milliseconds);
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
 }

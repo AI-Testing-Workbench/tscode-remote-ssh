@@ -973,6 +973,35 @@ describe('AdminPanel', () => {
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
     });
 
+    it('aborts administrator initialization when the panel is disposed', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationPoller = {
+            initialize: vi.fn(({ signal }: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
+                signal?.addEventListener('abort', () => reject(new Error('admin creation cancelled')));
+            })),
+        };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        const creating = send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+        });
+        await vi.waitFor(() => expect(initializationPoller.initialize).toHaveBeenCalledOnce());
+        panel.dispose();
+        await creating;
+
+        expect((initializationPoller.initialize.mock.calls[0][0] as { signal: AbortSignal }).signal.aborted).toBe(true);
+        expect(adminApi.listContainers).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith('admin creation cancelled');
+    });
+
     it('does not publish a stale administrator load after the panel is disposed', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -1013,6 +1042,33 @@ describe('AdminPanel', () => {
             type: 'autotest_cloud',
             authorize_general_account: false,
         });
+    });
+
+    it('uses the same Git initialization runner for both container types', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, { command: 'createContainer', user_id: 'user-1', type: 'testagent_cloud', giteeMode: 'none' });
+        await send(panel, { command: 'createContainer', user_id: 'user-1', type: 'autotest_cloud', giteeMode: 'none' });
+
+        expect(initializationPoller.initialize).toHaveBeenCalledTimes(2);
+        expect(initializationPoller.initialize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+            statusReader: adminApi,
+        }));
+        expect(initializationPoller.initialize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+            statusReader: adminApi,
+        }));
     });
 
     it('manually checks image push states without reloading the image list', async () => {

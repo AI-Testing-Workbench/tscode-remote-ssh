@@ -242,6 +242,41 @@ describe('ContainerInitializationPoller', () => {
         await expect(first).resolves.toMatchObject({ gitStatus: 'initialized' });
     });
 
+    it('stops a cancelled creation before querying Git or opening credentials', async () => {
+        const controller = new AbortController();
+        let resolveStatus: ((value: ContainerStatusResponse) => void) | undefined;
+        const userApi = {
+            getContainer: vi.fn(() => new Promise<ContainerStatusResponse>(resolve => {
+                resolveStatus = resolve;
+            })),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn(),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+        const prompt = vi.fn();
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            credentialPrompt: prompt,
+        });
+
+        const pending = poller.initialize({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+            signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(userApi.getContainer).toHaveBeenCalledOnce());
+        controller.abort();
+        resolveStatus?.(containerStatus('pending', 'pending'));
+
+        await expect(pending).rejects.toMatchObject({ code: 'creation_cancelled' });
+        expect(gitApi.getGitState).not.toHaveBeenCalled();
+        expect(prompt).not.toHaveBeenCalled();
+    });
+
     it('rejects missing creation identifiers before making API calls', async () => {
         const userApi = { getContainer: vi.fn() } as Pick<UserRestApi, 'getContainer'>;
         const gitApi = {

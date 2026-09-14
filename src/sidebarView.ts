@@ -122,6 +122,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly operationSubscription: { dispose: () => void };
     private readonly optimisticallyRemovedContainerIds = new Set<string>();
     private readonly activeRequestIds = new Set<string>();
+    private readonly initializationControllers = new Map<AbortController, SidebarViewContext | undefined>();
 
     private webviewView: vscode.WebviewView | undefined;
     private messageSubscription: vscode.Disposable | undefined;
@@ -185,6 +186,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             this.viewVisibilitySubscription = undefined;
             this.adminCheckInFlight = undefined;
             this.activeRequestIds.clear();
+            this.abortInitializations(context);
         });
         const cloudMode = await this.getCloudMode();
         if (!this.isActiveView(context)) {
@@ -255,12 +257,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.viewGeneration++;
         this.adminCheckInFlight = undefined;
         this.webviewView = undefined;
+        this.abortInitializations();
     }
 
     private async refreshForVisibleView(context: SidebarViewContext): Promise<void> {
         if (!this.isActiveView(context)) {
             return;
         }
+        this.abortInitializations(context);
         const refreshedContext: SidebarViewContext = {
             webviewView: context.webviewView,
             generation: ++this.viewGeneration,
@@ -768,40 +772,46 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
 
-        const createdSuccessfully = await vscode.window.withProgress({
+        const initializationController = new AbortController();
+        this.initializationControllers.set(initializationController, context);
+        const createdSuccessfully = await Promise.resolve(vscode.window.withProgress({
             title: '正在创建云端沙箱 服务...',
             location: vscode.ProgressLocation.Notification,
             cancellable: false,
         }, async () => {
+            const created = await this.publicApi.createContainer({
+                ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
+                ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
+                ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
+                ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
+                authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
+            }, { initializationSignal: initializationController.signal });
+            if (!this.isActiveView(context)) {
+                return false;
+            }
+            if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
+                this.showError('响应中缺少有效的 container_id');
+                return false;
+            }
+            if (typeof created.service_id !== 'string' || !created.service_id.trim()) {
+                this.showError('响应中缺少有效的 service_id');
+                return false;
+            }
+
+            const settings = this.getSettings();
+            if (!this.isActiveView(context)) {
+                return false;
+            }
+            const userName = getEffectiveRemoteUserName(settings.userName);
+            const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
+            if (!endpoint) {
+                if (this.isActiveView(context)) {
+                    this.showError(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                }
+                return false;
+            }
+
             const createdSuccessfully = await this.runMutation(async () => {
-                const created = await this.publicApi.createContainer({
-                    ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
-                    ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
-                    ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
-                    ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
-                    authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
-                });
-                if (!this.isActiveView(context)) {
-                    return false;
-                }
-                if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
-                    this.showError('响应中缺少有效的 container_id');
-                    return false;
-                }
-
-                const settings = this.getSettings();
-                if (!this.isActiveView(context)) {
-                    return false;
-                }
-                const userName = getEffectiveRemoteUserName(settings.userName);
-                const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
-                if (!endpoint) {
-                    if (this.isActiveView(context)) {
-                        this.showError(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
-                    }
-                    return false;
-                }
-
                 const document = await this.config.read();
                 if (!this.isActiveView(context)) {
                     return false;
@@ -835,6 +845,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 await this.refreshAfterMutation();
             }
             return createdSuccessfully;
+        })).finally(() => {
+            this.initializationControllers.delete(initializationController);
         });
         if (createdSuccessfully && this.isActiveView(context)) {
             this.showCreateSuccess();
@@ -941,6 +953,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private isActiveView(context?: SidebarViewContext): boolean {
         return !this.disposed
             && (!context || this.webviewView === context.webviewView && this.viewGeneration === context.generation);
+    }
+
+    private abortInitializations(context?: SidebarViewContext): void {
+        for (const [controller, owner] of this.initializationControllers) {
+            const matches = !context
+                || !owner
+                || owner.webviewView === context.webviewView && owner.generation === context.generation;
+            if (!matches) {
+                continue;
+            }
+            controller.abort();
+            this.initializationControllers.delete(controller);
+        }
     }
 }
 

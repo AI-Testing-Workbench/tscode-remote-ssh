@@ -27,7 +27,7 @@ import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository
 import { renderAdminContent, renderAdminPage } from './adminWebview/view';
 import { ADMIN_CONTAINER_TYPES, containerTypeOf } from './adminWebview/containerTypes';
 import { AdminDefaultImage, AdminPanelState, AdminTab } from './adminWebview/types';
-import type { ContainerInitializationRunner } from './containerInitializationPoller';
+import { combineAbortSignals, type ContainerInitializationRunner } from './containerInitializationPoller';
 import { parseContainerEndpoint } from './containerEndpoint';
 
 export const ADMIN_PANEL_VIEW_TYPE = 'testagentRemote.adminPanel';
@@ -47,6 +47,7 @@ export interface AdminPanelOptions {
     adminApiFactory?: AdminApiFactory;
     operationRegistry?: ContainerOperationRegistry;
     initializationPoller?: ContainerInitializationRunner;
+    initializationSignal?: AbortSignal;
     onContainerOperation?: (operation: ContainerOperationState) => Promise<boolean>;
     showOpenDialog?: ShowOpenDialog;
     logger?: PanelLogger;
@@ -59,6 +60,7 @@ export class AdminPanel implements vscode.Disposable {
     private readonly adminApiFactory: AdminApiFactory;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly initializationPoller: ContainerInitializationRunner | undefined;
+    private readonly initializationSignal: AbortSignal | undefined;
     private readonly onContainerOperation: ((operation: ContainerOperationState) => Promise<boolean>) | undefined;
     private readonly showOpenDialog: ShowOpenDialog;
     private readonly logger: PanelLogger | undefined;
@@ -80,6 +82,7 @@ export class AdminPanel implements vscode.Disposable {
     private webviewReady = false;
     private pendingAdminUpdate = false;
     private readonly activeRequestIds = new Set<string>();
+    private readonly initializationControllers = new Set<AbortController>();
     private disposed = false;
     private state: AdminPanelState = createInitialState();
 
@@ -90,6 +93,7 @@ export class AdminPanel implements vscode.Disposable {
         this.adminApiFactory = options.adminApiFactory ?? ((baseUrl: string, operatorUserId: string) => new RestClient(baseUrl, { operatorUserId }).admin);
         this.operationRegistry = options.operationRegistry;
         this.initializationPoller = options.initializationPoller;
+        this.initializationSignal = options.initializationSignal;
         this.onContainerOperation = options.onContainerOperation;
         this.operationSubscription = this.operationRegistry?.subscribe(event => this.handleContainerOperationEvent(event)) ?? { dispose: () => undefined };
         this.logger = options.logger;
@@ -162,6 +166,7 @@ export class AdminPanel implements vscode.Disposable {
         this.webviewReady = false;
         this.pendingAdminUpdate = false;
         this.activeRequestIds.clear();
+        this.abortInitializations();
         this.messageQueue = Promise.resolve();
         this.selectedImageFile = undefined;
         this.disposePanelResources();
@@ -282,8 +287,8 @@ export class AdminPanel implements vscode.Disposable {
                 await this.refresh(panel, generation, false, true);
             }
         } catch (error) {
-            console.error('管理员面板操作失败', error);
             if (this.isActive(panel, generation)) {
+                console.error('管理员面板操作失败', error);
                 void vscode.window.showErrorMessage(getErrorMessage(error));
             }
         } finally {
@@ -453,15 +458,22 @@ export class AdminPanel implements vscode.Disposable {
                     const request = toAdminCreateRequest(message);
                     const created = await adminApi.createContainer(request);
                     if (this.initializationPoller) {
-                        await this.initializationPoller.initialize({
-                            containerId: created.container_id,
-                            serviceId: created.service_id,
-                            operatorUserId: request.user_id,
-                            endpoint: created.endpoint,
-                            statusReader: adminApi,
-                        });
-                        if (!parseContainerEndpoint(created.endpoint, { allowDebugProxy: this.getSettings().debug })) {
-                            throw new Error(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                        const initializationController = new AbortController();
+                        this.initializationControllers.add(initializationController);
+                        try {
+                            await this.initializationPoller.initialize({
+                                containerId: created.container_id,
+                                serviceId: created.service_id,
+                                operatorUserId: request.user_id,
+                                endpoint: created.endpoint,
+                                statusReader: adminApi,
+                                signal: combineAbortSignals(this.initializationSignal, initializationController.signal),
+                            });
+                            if (!parseContainerEndpoint(created.endpoint, { allowDebugProxy: this.getSettings().debug })) {
+                                throw new Error(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                            }
+                        } finally {
+                            this.initializationControllers.delete(initializationController);
                         }
                     }
                 }
@@ -951,6 +963,7 @@ export class AdminPanel implements vscode.Disposable {
         this.webviewReady = false;
         this.pendingAdminUpdate = false;
         this.activeRequestIds.clear();
+        this.abortInitializations();
         this.messageQueue = Promise.resolve();
         this.generation++;
         this.clearRefreshTimer();
@@ -965,6 +978,13 @@ export class AdminPanel implements vscode.Disposable {
         for (const subscription of subscriptions) {
             subscription.dispose();
         }
+    }
+
+    private abortInitializations(): void {
+        for (const controller of this.initializationControllers) {
+            controller.abort();
+        }
+        this.initializationControllers.clear();
     }
 }
 
