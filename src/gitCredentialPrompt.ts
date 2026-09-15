@@ -33,7 +33,7 @@ export async function promptForGitCredentials(
     const identity = await readIdentity(options.identityReader);
 
     const username = await promptRequired(showInputBox, showErrorMessage, {
-        title: '码云用户名',
+        title: '请输入码云用户名',
         prompt: '',
         value: identity.username,
         emptyMessage: '码云用户名不能为空',
@@ -43,7 +43,7 @@ export async function promptForGitCredentials(
     }
 
     const email = await showInputBox({
-        title: '码云邮箱',
+        title: '请输入码云邮箱',
         prompt: '(可选)',
         value: identity.email,
         ignoreFocusOut: true,
@@ -53,7 +53,7 @@ export async function promptForGitCredentials(
     }
 
     const password = await promptRequired(showInputBox, showErrorMessage, {
-        title: '码云密码',
+        title: '请输入码云密码 (将会加密使用)',
         prompt: '',
         password: true,
         ignoreFocusOut: true,
