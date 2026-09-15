@@ -56,6 +56,28 @@ describe('promptForGitCredentials', () => {
         expect(showQuickPick).not.toHaveBeenCalled();
     });
 
+    it('treats an empty password after the validation message as cancellation', async () => {
+        const onCancel = vi.fn(async () => undefined);
+        const showInputBox = vi.fn()
+            .mockResolvedValueOnce('user')
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce('');
+        const showErrorMessage = vi.fn(async () => undefined);
+        const showQuickPick = vi.fn();
+
+        await expect(promptForGitCredentials({
+            identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
+            showInputBox,
+            showQuickPick,
+            showErrorMessage,
+            onCancel,
+        })).resolves.toBeUndefined();
+        expect(showErrorMessage).toHaveBeenCalledWith('码云密码不能为空');
+        expect(showInputBox).toHaveBeenCalledTimes(3);
+        expect(showQuickPick).not.toHaveBeenCalled();
+        expect(onCancel).toHaveBeenCalledOnce();
+    });
+
     it('treats password close and persistence close as cancellation', async () => {
         const onCancel = vi.fn(async () => undefined);
         const passwordClosed = await promptForGitCredentials({

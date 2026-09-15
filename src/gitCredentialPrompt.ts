@@ -58,7 +58,7 @@ export async function promptForGitCredentials(
         password: true,
         ignoreFocusOut: true,
         emptyMessage: '码云密码不能为空',
-    }, value => value);
+    }, value => value, true);
     if (password === undefined) {
         return cancel();
     }
@@ -95,6 +95,7 @@ async function promptRequired(
     showErrorMessage: (message: string) => Thenable<unknown>,
     inputOptions: vscode.InputBoxOptions & { emptyMessage: string },
     normalize: (value: string) => string,
+    cancelOnEmpty = false,
 ): Promise<string | undefined> {
     const { emptyMessage, ...options } = inputOptions;
     while (true) {
@@ -107,5 +108,8 @@ async function promptRequired(
             return normalized;
         }
         await showErrorMessage(emptyMessage);
+        if (cancelOnEmpty) {
+            return undefined;
+        }
     }
 }
