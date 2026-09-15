@@ -56,7 +56,7 @@ describe('promptForGitCredentials', () => {
             git_username: 'git-user',
             git_password: 'secret-token',
         });
-        expect(showErrorMessage).toHaveBeenCalledWith('码云密码错误，请重试');
+        expect(showErrorMessage).toHaveBeenCalledWith('码云凭证输入错误或缓存过期，请重试');
     });
 
     it('keeps the prompt open for empty required fields and treats close as cancellation', async () => {
