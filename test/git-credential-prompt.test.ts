@@ -40,6 +40,25 @@ describe('promptForGitCredentials', () => {
         });
     });
 
+    it('notifies the user before retrying rejected credentials', async () => {
+        const values = ['git-user', 'git@example.test', 'secret-token'];
+        const showInputBox = vi.fn(async () => values.shift());
+        const showQuickPick = vi.fn(async () => '否');
+        const showErrorMessage = vi.fn(async () => undefined);
+
+        await expect(promptForGitCredentials({
+            identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
+            showInputBox,
+            showQuickPick,
+            showErrorMessage,
+            gitStatus: 'credential_rejected',
+        })).resolves.toMatchObject({
+            git_username: 'git-user',
+            git_password: 'secret-token',
+        });
+        expect(showErrorMessage).toHaveBeenCalledWith('码云密码错误，请重试');
+    });
+
     it('keeps the prompt open for empty required fields and treats close as cancellation', async () => {
         const values: Array<string | undefined> = ['', undefined];
         const showInputBox = vi.fn(async () => values.shift());
@@ -76,6 +95,30 @@ describe('promptForGitCredentials', () => {
         expect(showInputBox).toHaveBeenCalledTimes(3);
         expect(showQuickPick).not.toHaveBeenCalled();
         expect(onCancel).toHaveBeenCalledOnce();
+    });
+
+    it('does not wait for the password validation message before cancelling', async () => {
+        let resolveErrorMessage: (() => void) | undefined;
+        const onCancel = vi.fn(async () => undefined);
+        const showInputBox = vi.fn()
+            .mockResolvedValueOnce('user')
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce('');
+        const showErrorMessage = vi.fn(() => new Promise<void>(resolve => {
+            resolveErrorMessage = resolve;
+        }));
+        const prompt = promptForGitCredentials({
+            identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
+            showInputBox,
+            showQuickPick: vi.fn(),
+            showErrorMessage,
+            onCancel,
+        });
+
+        await vi.waitFor(() => expect(showErrorMessage).toHaveBeenCalledWith('码云密码不能为空'));
+        await expect(prompt).resolves.toBeUndefined();
+        expect(onCancel).toHaveBeenCalledOnce();
+        resolveErrorMessage?.();
     });
 
     it('treats password close and persistence close as cancellation', async () => {

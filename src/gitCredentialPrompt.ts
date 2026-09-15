@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { GitCredentialSubmitRequest } from './api/models';
+import type { GitCredentialSubmitRequest, GitStatus } from './api/models';
 import type { GitConfigReader, GitIdentity } from './gitConfig';
 
 export interface GitCredentialPromptOptions {
@@ -11,6 +11,7 @@ export interface GitCredentialPromptOptions {
     ) => Thenable<string | undefined>;
     showErrorMessage?: (message: string) => Thenable<unknown>;
     onCancel?: () => Thenable<unknown> | void;
+    gitStatus?: Extract<GitStatus, 'credential_required' | 'credential_rejected'>;
 }
 
 const DO_NOT_PERSIST = '否';
@@ -22,6 +23,9 @@ export async function promptForGitCredentials(
     const showInputBox = options.showInputBox ?? (inputOptions => vscode.window.showInputBox(inputOptions));
     const showQuickPick = options.showQuickPick ?? ((items, pickOptions) => vscode.window.showQuickPick(items, pickOptions));
     const showErrorMessage = options.showErrorMessage ?? (message => vscode.window.showErrorMessage(message));
+    if (options.gitStatus === 'credential_rejected') {
+        void showErrorMessage('码云凭证输入错误或缓存过期，请重试');
+    }
     const cancel = async (): Promise<undefined> => {
         try {
             await options.onCancel?.();
@@ -107,9 +111,10 @@ async function promptRequired(
         if (normalized) {
             return normalized;
         }
-        await showErrorMessage(emptyMessage);
         if (cancelOnEmpty) {
+            void showErrorMessage(emptyMessage);
             return undefined;
         }
+        await showErrorMessage(emptyMessage);
     }
 }

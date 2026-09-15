@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ContainerStatusResponse, GitCredentialSubmitRequest, GitStateResponse } from '../src/api/models';
 import { ContainerInitializationPoller } from '../src/containerInitializationPoller';
 import { RestClientError, type GitRestApi, type UserRestApi } from '../src/api/restClient';
+import { promptForGitCredentials } from '../src/gitCredentialPrompt';
 
 describe('ContainerInitializationPoller', () => {
     it('runs the complete pending-to-running 码云 initialization sequence in order', async () => {
@@ -112,6 +113,48 @@ describe('ContainerInitializationPoller', () => {
             .rejects.toMatchObject({ code: 'failed_user_cancelled' });
         expect(gitApi.reportUserCancelled).toHaveBeenCalledOnce();
         expect(gitApi.reportUserCancelled).toHaveBeenCalledWith('service-1', 'user-1');
+        expect(gitApi.submitGitCredential).not.toHaveBeenCalled();
+    });
+
+    it('reports cancellation immediately when the password is empty', async () => {
+        let resolveErrorMessage: (() => void) | undefined;
+        const userApi = {
+            getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn(async () => ({ git_status: 'credential_required' })),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(async () => undefined),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+        const showInputBox = vi.fn()
+            .mockResolvedValueOnce('user')
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce('');
+        const showErrorMessage = vi.fn(() => new Promise<void>(resolve => {
+            resolveErrorMessage = resolve;
+        }));
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            sleep: vi.fn(async () => undefined),
+            credentialPrompt: () => promptForGitCredentials({
+                identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
+                showInputBox,
+                showQuickPick: vi.fn(),
+                showErrorMessage,
+            }),
+        });
+
+        const initialization = poller.initialize({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+        });
+        const initializationExpectation = expect(initialization).rejects.toMatchObject({ code: 'failed_user_cancelled' });
+        await vi.waitFor(() => expect(gitApi.reportUserCancelled).toHaveBeenCalledWith('service-1', 'user-1'));
+        resolveErrorMessage?.();
+
+        await initializationExpectation;
         expect(gitApi.submitGitCredential).not.toHaveBeenCalled();
     });
 

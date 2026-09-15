@@ -130,8 +130,9 @@ export class ContainerInitializationPoller {
         this.intervalMilliseconds = normalizeInterval(options.statusSyncInterval);
         this.maxAttempts = normalizeMaxAttempts(options.maxAttempts);
         this.sleep = options.sleep ?? sleep;
-        this.credentialPrompt = options.credentialPrompt ?? (async () => promptForGitCredentials({
+        this.credentialPrompt = options.credentialPrompt ?? (context => promptForGitCredentials({
             identityReader: new GitConfigReader(),
+            gitStatus: context.gitStatus,
         }));
     }
 
