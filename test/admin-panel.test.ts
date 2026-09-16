@@ -543,6 +543,14 @@ describe('AdminPanel', () => {
         }
         expect(getContainerActionButton(failedHtml, 'restart')).toMatch(/disabled>/);
         expect(getContainerActionButton(stoppedHtml, 'restart')).not.toMatch(/disabled>/);
+        for (const status of ['running', 'pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring', 'failed', 'unknown']) {
+            const statusHtml = renderAdminPage({
+                ...state,
+                containers: [{ ...sampleContainer(), status }],
+            }, 'nonce', 'vscode-resource://test');
+            expect(getContainerActionButton(statusHtml, 'delete')).not.toMatch(/disabled>/);
+            expect(getContainerActionButton(statusHtml, 'permanent-delete')).not.toMatch(/disabled>/);
+        }
 
         const containerHtml = renderAdminPage({
             ...state,
@@ -587,6 +595,8 @@ describe('AdminPanel', () => {
         expect(deletedHtml).toContain('删除时间');
         expect(deletedHtml).toContain('2026/09/05 09:02');
         expect(deletedHtml).not.toContain('预计删除时间');
+        expect(getContainerActionButton(deletedHtml, 'delete')).toBe('');
+        expect(getContainerActionButton(deletedHtml, 'permanent-delete')).not.toMatch(/disabled>/);
 
         const userHtml = renderAdminPage({ ...state, activeTab: 'whitelist', whitelistUsers: ['user-1'] }, 'nonce', 'vscode-resource://test');
         expect(userHtml).toContain('<details class="inline-form user-form collapsible-card" data-form="whitelistUser" open>');
