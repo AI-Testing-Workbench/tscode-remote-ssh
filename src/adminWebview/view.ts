@@ -105,6 +105,9 @@ function renderVolumeTab(volume: AdminVolumeState | undefined): string {
         case 'disabled':
             body = renderVolumeStatusCard('disabled', '卷未启用', '后端尚未配置可用的 FileBrowser Quantum 设置。', false);
             break;
+        case 'external':
+            body = renderVolumeExternal(current);
+            break;
         case 'error':
             body = renderVolumeStatusCard('error', '卷管理暂时不可用', current.error ?? '卷配置或 FileBrowser Quantum 页面无法加载。', true);
             break;
@@ -139,7 +142,7 @@ function renderVolumeFrame(volume: AdminVolumeState): string {
     return `<div class="volume-frame-card" data-volume-frame-card>
         <div class="volume-frame-shell" data-volume-frame-shell>
             <div class="volume-frame-loading" data-volume-frame-loading><span class="spinner" aria-hidden="true"></span><span>正在加载 FileBrowser Quantum 页面...</span></div>
-            <iframe data-volume-frame src="${escapeAttribute(volume.frameUrl)}" title="FileBrowser 卷管理" referrerpolicy="no-referrer"></iframe>
+            <iframe data-volume-frame data-volume-frame-mode="${escapeAttribute(volume.frameMode ?? 'bridge')}" src="${escapeAttribute(volume.frameUrl)}" title="FileBrowser 卷管理" referrerpolicy="no-referrer"></iframe>
             <div class="volume-frame-error" data-volume-frame-error hidden>
                 <span class="volume-status-icon error" aria-hidden="true">!</span>
                 <strong>FileBrowser Quantum 页面无法加载</strong>
@@ -147,6 +150,18 @@ function renderVolumeFrame(volume: AdminVolumeState): string {
                 <button class="primary-button" type="button" data-action="retryVolume">重新加载</button>
             </div>
         </div>
+    </div>`;
+}
+
+function renderVolumeExternal(volume: AdminVolumeState): string {
+    if (!volume.externalUrl || !isSafeFrameUrl(volume.externalUrl)) {
+        return renderVolumeStatusCard('error', '卷管理暂时不可用', 'FileBrowser Quantum 地址无效。', true);
+    }
+    return `<div class="volume-status-card volume-external-card" data-volume-status="external">
+        <span class="volume-status-icon" aria-hidden="true">i</span>
+        <h3>FileBrowser Quantum 无法在插件内登录</h3>
+        <p>当前仅配置了 API Key，无法自动登录。请前往浏览器访问。</p>
+        <button class="primary-button" type="button" data-action="openVolumeBrowser">在浏览器中打开</button>
     </div>`;
 }
 
@@ -1024,6 +1039,7 @@ body.vscode-high-contrast { color-scheme: dark; }
 .volume-status-card h3 { margin-bottom: 8px; font-size: 18px; }
 .volume-status-card p { max-width: 560px; margin-bottom: 18px; color: var(--muted); white-space: pre-line; }
 .volume-error-card { border-color: var(--danger); box-shadow: inset 0 2px 0 var(--danger); }
+.volume-external-card { border-color: var(--primary); box-shadow: inset 0 2px 0 var(--primary); }
 .volume-status-icon { display: inline-grid; place-items: center; width: 34px; height: 34px; margin-bottom: 16px; border-radius: 50%; color: var(--primary-text); background: var(--primary); font-weight: 700; }
 .volume-status-icon.error { background: var(--danger); }
 .volume-frame-card { display: grid; gap: 10px; min-width: 0; }

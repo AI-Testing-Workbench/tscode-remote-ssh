@@ -501,6 +501,15 @@ const applyAdminUpdate = html => {
 };
 
 let volumeFrameTimer;
+const markVolumeFrameReady = () => {
+    if (volumeFrameTimer !== undefined && typeof window.clearTimeout === 'function') {
+        window.clearTimeout(volumeFrameTimer);
+        volumeFrameTimer = undefined;
+    }
+    const loading = document.querySelector('[data-volume-frame-loading]');
+    if (loading) loading.hidden = true;
+};
+
 const showVolumeFrameError = () => {
     if (volumeFrameTimer !== undefined && typeof window.clearTimeout === 'function') {
         window.clearTimeout(volumeFrameTimer);
@@ -518,12 +527,9 @@ const setupVolumeFrame = () => {
     if (!frame || typeof frame.addEventListener !== 'function' || frame.getAttribute('data-frame-listeners') === 'true') return;
     frame.setAttribute('data-frame-listeners', 'true');
     frame.addEventListener('load', () => {
-        if (volumeFrameTimer !== undefined && typeof window.clearTimeout === 'function') {
-            window.clearTimeout(volumeFrameTimer);
-            volumeFrameTimer = undefined;
+        if (frame.getAttribute('data-volume-frame-mode') !== 'bridge') {
+            markVolumeFrameReady();
         }
-        const loading = document.querySelector('[data-volume-frame-loading]');
-        if (loading) loading.hidden = true;
     });
     frame.addEventListener('error', showVolumeFrameError);
     if (typeof window.setTimeout === 'function') {
@@ -818,6 +824,13 @@ window.addEventListener('message', event => {
     const message = event.data;
     if (!message || typeof message !== 'object' || message.command !== 'adminUpdate') return;
     applyAdminUpdate(message.html);
+});
+
+window.addEventListener('message', event => {
+    const message = event.data;
+    if (!message || typeof message !== 'object' || message.command !== 'filebrowserBridgeReady') return;
+    const frame = document.querySelector('[data-volume-frame]');
+    if (frame && event.source === frame.contentWindow) markVolumeFrameReady();
 });
 
 window.addEventListener('message', event => {

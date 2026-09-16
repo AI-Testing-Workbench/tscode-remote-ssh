@@ -12,6 +12,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_PROBE_BODY_BYTES = 2 * 1024 * 1024;
 const SESSION_COOKIE = 'testagent_filebrowser_session';
 const LOCAL_BRIDGE_HOST = 'localhost';
+const BRIDGE_READY_PATH = '/__testagent_filebrowser_ready.js';
 
 export interface FileBrowserBridgeSession {
     readonly frameUrl: string;
@@ -280,6 +281,10 @@ export class FileBrowserBridge {
             respondError(response, 400, 'FileBrowser Quantum 请求地址无效');
             return;
         }
+        if (parsed.pathname === BRIDGE_READY_PATH) {
+            this.handleReadyScript(request, response);
+            return;
+        }
         const ticketMatch = /^\/ticket\/([^/]+)$/.exec(parsed.pathname);
         if (ticketMatch) {
             await this.handleTicket(request, response, ticketMatch[1]);
@@ -299,6 +304,25 @@ export class FileBrowserBridge {
             return;
         }
         await this.proxyRequest(request, response, parsed, session);
+    }
+
+    private handleReadyScript(request: IncomingMessage, response: ServerResponse): void {
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+            respondError(response, 405, 'FileBrowser Quantum 就绪脚本请求方法不受支持');
+            return;
+        }
+        if (!this.findSession(request.headers.cookie)) {
+            respondError(response, 401, 'FileBrowser Quantum 登录会话已失效');
+            return;
+        }
+        const body = 'window.parent.postMessage({command:"filebrowserBridgeReady"},"*");';
+        response.writeHead(200, {
+            'Content-Type': 'application/javascript; charset=utf-8',
+            'Content-Length': String(Buffer.byteLength(body)),
+            'Cache-Control': 'no-store',
+            'Referrer-Policy': 'no-referrer',
+        });
+        response.end(request.method === 'HEAD' ? undefined : body);
     }
 
     private async handleTicket(request: IncomingMessage, response: ServerResponse, ticket: string): Promise<void> {
@@ -439,7 +463,7 @@ export class FileBrowserBridge {
                 resolve();
                 return;
             }
-            const body = Buffer.from(rewriteHtml(Buffer.concat(chunks).toString('utf8'), session.baseUrl), 'utf8');
+            const body = Buffer.from(injectBridgeReadyScript(rewriteHtml(Buffer.concat(chunks).toString('utf8'), session.baseUrl)), 'utf8');
             headers['content-length'] = String(body.byteLength);
             response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.statusMessage, headers);
             if (method !== 'HEAD') {
@@ -708,6 +732,15 @@ function rewriteHtml(value: string, baseUrl: URL): string {
     return rewritten;
 }
 
+function injectBridgeReadyScript(value: string): string {
+    const tag = `<script src="${BRIDGE_READY_PATH}"></script>`;
+    if (value.includes(BRIDGE_READY_PATH)) {
+        return value;
+    }
+    const headEnd = value.search(/<\/head\s*>/i);
+    return headEnd >= 0 ? `${value.slice(0, headEnd)}${tag}${value.slice(headEnd)}` : `${tag}${value}`;
+}
+
 function assertFrameEmbeddingAllowed(headers: IncomingHttpHeaders, proxied: boolean): void {
     const frameOptions = headerValue(headers, 'x-frame-options')?.toLowerCase().trim();
     if (frameOptions === 'deny' || !proxied && frameOptions === 'sameorigin') {
@@ -858,12 +891,14 @@ function respondError(response: ServerResponse, statusCode: number, message: str
         response.destroy();
         return;
     }
+    const body = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>FileBrowser Quantum</title></head><body><h1>${escapeHtml(message)}</h1></body></html>`;
     response.writeHead(statusCode, {
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Length': String(Buffer.byteLength(body)),
         'Cache-Control': 'no-store',
         'Referrer-Policy': 'no-referrer',
     });
-    response.end(message);
+    response.end(body);
 }
 
 function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
@@ -899,6 +934,15 @@ function hasControlCharacters(value: string): boolean {
         }
     }
     return false;
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function escapeRegExp(value: string): string {

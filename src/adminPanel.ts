@@ -263,6 +263,13 @@ export class AdminPanel implements vscode.Disposable {
             case 'volumeFrameError':
                 this.handleVolumeFrameError(panel, generation);
                 return;
+            case 'openVolumeBrowser':
+                try {
+                    await this.openVolumeBrowser(panel, generation);
+                } finally {
+                    this.completeOperation(panel, generation, message.command, requestId);
+                }
+                return;
             case 'search':
                 this.updateSearch(message.value);
                 return;
@@ -849,6 +856,27 @@ export class AdminPanel implements vscode.Disposable {
         this.setPanelHtml(panel);
     }
 
+    private async openVolumeBrowser(panel: vscode.WebviewPanel, generation: number): Promise<void> {
+        if (!this.isActive(panel, generation) || this.state.status !== 'ready' || this.state.activeTab !== 'volume') {
+            return;
+        }
+        const volume = this.state.volume;
+        if (!volume || volume.status !== 'external' || !volume.externalUrl) {
+            return;
+        }
+        try {
+            const url = validateFileBrowserUrl(volume.externalUrl);
+            const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+            if (!opened && this.isActive(panel, generation)) {
+                void vscode.window.showErrorMessage('无法打开 FileBrowser Quantum 浏览器页面。');
+            }
+        } catch {
+            if (this.isActive(panel, generation)) {
+                void vscode.window.showErrorMessage('无法打开 FileBrowser Quantum 浏览器页面。');
+            }
+        }
+    }
+
     private isVolumeRequestActive(panel: vscode.WebviewPanel, generation: number, requestGeneration: number): boolean {
         return this.isActive(panel, generation)
             && this.state.status === 'ready'
@@ -1257,7 +1285,7 @@ async function prepareVolumeState(
         throw new Error('卷配置中没有完整的 FileBrowser Quantum 认证信息');
     }
     return {
-        state: { status: 'ready', frameUrl: baseUrl, frameMode: 'direct' },
+        state: { status: 'external', externalUrl: baseUrl, frameMode: 'direct' },
     };
 }
 

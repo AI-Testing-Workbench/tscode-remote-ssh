@@ -19,6 +19,8 @@ describe('AdminPanel', () => {
         vscode.window.showWarningMessage.mockReset();
         vscode.window.showErrorMessage.mockReset();
         vscode.window.showInformationMessage.mockReset();
+        vscode.env.openExternal.mockReset();
+        vscode.env.openExternal.mockResolvedValue(true);
     });
 
     afterEach(() => {
@@ -122,15 +124,25 @@ describe('AdminPanel', () => {
             filebrowser_username: null,
             filebrowser_password: null,
         }));
-        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+        const bridge = {
+            createSession: vi.fn(),
+            dispose: vi.fn(),
+        };
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), fileBrowserBridge: bridge });
 
         await adminPanel.open();
         await send(panel, { command: 'selectTab', tab: 'volume' });
 
-        expect(panel.webview.html).toContain('src="https://filebrowser.example.test/files/"');
-        expect(panel.webview.html).toContain('frame-src https://filebrowser.example.test;');
+        expect(panel.webview.html).toContain('data-volume-status="external"');
+        expect(panel.webview.html).toContain('仅配置 API Key，插件无法完成网页登录');
+        expect(panel.webview.html).toContain('data-action="openVolumeBrowser"');
+        expect(panel.webview.html).not.toContain('<iframe');
+        expect(panel.webview.html).toContain('frame-src \'none\';');
         expect(panel.webview.html).not.toContain('api-key-value');
-        expect(panel.webview.html).toContain('正在加载 FileBrowser Quantum 页面');
+        expect(bridge.createSession).not.toHaveBeenCalled();
+
+        await send(panel, { command: 'openVolumeBrowser', requestId: 'open-volume-1' });
+        expect(vscode.env.openExternal).toHaveBeenCalledWith({ value: 'https://filebrowser.example.test/files/' });
     });
 
     it('uses username/password bridge mode, prefers it over API key, and keeps credentials out of Webview content', async () => {
@@ -173,6 +185,35 @@ describe('AdminPanel', () => {
         expect(session.dispose).toHaveBeenCalledOnce();
         expect(panel.webview.html).toContain('FileBrowser Quantum 页面无法加载');
         expect(panel.webview.html).not.toContain('<iframe');
+    });
+
+    it('renders a visible error page when the FileBrowser bridge cannot reach the manager', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.getVolumeStatus = vi.fn(async () => ({
+            enabled: true,
+            filebrowser_url: 'https://filebrowser.example.test/files',
+            filebrowser_api_key: null,
+            filebrowser_username: 'volume-admin',
+            filebrowser_password: 'volume-password',
+        }));
+        const bridge = {
+            createSession: vi.fn(async () => {
+                throw new Error('FileBrowser unavailable');
+            }),
+            dispose: vi.fn(),
+        };
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), fileBrowserBridge: bridge });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+
+        expect(panel.webview.html).toContain('卷管理暂时不可用');
+        expect(panel.webview.html).toContain('FileBrowser Quantum 页面无法加载');
+        expect(panel.webview.html).not.toContain('<iframe');
+        expect(panel.webview.html).not.toContain('volume-admin');
+        expect(panel.webview.html).not.toContain('volume-password');
     });
 
     it('shows a safe volume error for partial authentication configuration', async () => {

@@ -84,7 +84,12 @@ describe('FileBrowser bridge', () => {
             expect(page.statusCode).toBe(200);
             expect(page.body.toString('utf8')).toContain('src="/static/app.js"');
             expect(page.body.toString('utf8')).toContain('href="/static/app.css"');
+            expect(page.body.toString('utf8')).toContain('/__testagent_filebrowser_ready.js');
             expect(page.body.toString('utf8')).not.toContain('http://127.0.0.1/upstream');
+
+            const readyScript = await request(new URL('/__testagent_filebrowser_ready.js', session.frameUrl).toString(), { headers: { Cookie: cookie } });
+            expect(readyScript.statusCode).toBe(200);
+            expect(readyScript.body.toString('utf8')).toContain('filebrowserBridgeReady');
 
             const script = await request(new URL('/static/app.js', session.frameUrl).toString(), { headers: { Cookie: cookie } });
             expect(script.statusCode).toBe(200);
@@ -105,6 +110,8 @@ describe('FileBrowser bridge', () => {
             expect(secondTicketResponse.statusCode).toBe(404);
             const missingSession = await request(new URL('/', session.frameUrl).toString());
             expect(missingSession.statusCode).toBe(401);
+            expect(missingSession.headers['content-type']).toContain('text/html');
+            expect(missingSession.body.toString('utf8')).toContain('登录会话已失效');
 
             const login = upstreamRequests.find(entry => entry.url.startsWith('/fb/api/auth/login?'));
             expect(login).toMatchObject({

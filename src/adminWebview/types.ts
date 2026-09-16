@@ -10,12 +10,13 @@ export type AdminTab = 'images' | 'containers' | 'volume' | 'whitelist' | 'admin
 
 export type AdminPageStatus = 'loading' | 'ready' | 'error' | 'forbidden';
 
-export type VolumePageStatus = 'idle' | 'loading' | 'disabled' | 'ready' | 'error';
+export type VolumePageStatus = 'idle' | 'loading' | 'disabled' | 'external' | 'ready' | 'error';
 
 export interface AdminVolumeState {
     status: VolumePageStatus;
     frameUrl?: string;
     frameMode?: 'direct' | 'bridge';
+    externalUrl?: string;
     error?: string;
 }
 
