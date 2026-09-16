@@ -96,7 +96,7 @@
 	],
 	"contributes": {
 		"configuration": {
-			"title": "TestAgent Remote",
+			"title": "TSCode Remote",
 			"properties": {
 				"tscode.remote.backendApiUrl": {
 					"type": "string",
