@@ -40,6 +40,7 @@ import {
     UserIdRequest,
     UserIdsResponse,
     UserMutationResponse,
+    VolumeStatusResponse,
 } from './models';
 
 export const DEFAULT_REST_TIMEOUT_MS = 15_000;
@@ -166,6 +167,7 @@ export interface AdminRestApi {
     addAdminUser(request: UserIdRequest): Promise<UserMutationResponse>;
     listAdminUsers(): Promise<UserIdsResponse>;
     deleteAdminUser(request: UserIdRequest): Promise<void>;
+    getVolumeStatus(): Promise<VolumeStatusResponse>;
 }
 
 interface RequestOptions {
@@ -397,6 +399,9 @@ export class RestClient {
             addAdminUser: request => this.requestJson<UserMutationResponse>('POST', '/admin/admin-users', { jsonBody: request }),
             listAdminUsers: () => this.requestJson<UserIdsResponse>('GET', '/admin/admin-users'),
             deleteAdminUser: request => this.requestNoContent('POST', '/admin/admin-users/delete', { jsonBody: request }),
+            getVolumeStatus: async () => normalizeVolumeStatus(await this.requestJson<unknown>('GET', '/volume/status', {
+                headers: this.adminOperatorHeaders(),
+            })),
         };
     }
 
@@ -648,6 +653,18 @@ export class RestClient {
         return { [OPERATOR_USER_ID_HEADER]: normalizedUserId };
     }
 
+    private adminOperatorHeaders(): Record<string, string> {
+        const normalizedUserId = this.operatorUserId.trim();
+        if (!normalizedUserId) {
+            throw new RestClientError(
+                'request',
+                REST_ERROR_CODES.REQUEST,
+                '管理员 API 操作用户 ID不能为空',
+            );
+        }
+        return { [ADMIN_OPERATOR_USER_ID_HEADER]: normalizedUserId };
+    }
+
     private actionPath(prefix: string, containerId: string, action: string): string {
         return `${this.containerPath(prefix, containerId)}/${action}`;
     }
@@ -666,6 +683,48 @@ function normalizeContainerStatus(response: ContainerStatusResponse): ContainerS
         ...response,
         git_fin_status: response.git_fin_status ?? 'pending',
     };
+}
+
+function normalizeVolumeStatus(value: unknown): VolumeStatusResponse {
+    if (!isRecord(value) || typeof value.enabled !== 'boolean') {
+        throw new RestClientError(
+            'response',
+            REST_ERROR_CODES.INVALID_RESPONSE,
+            '后端 云端沙箱 管理服务返回了无效的卷状态响应',
+        );
+    }
+
+    const fields = [
+        'filebrowser_url',
+        'filebrowser_api_key',
+        'filebrowser_username',
+        'filebrowser_password',
+    ] as const;
+    for (const field of fields) {
+        if (value[field] !== null && typeof value[field] !== 'string') {
+            throw new RestClientError(
+                'response',
+                REST_ERROR_CODES.INVALID_RESPONSE,
+                '后端 云端沙箱 管理服务返回了无效的卷状态响应',
+            );
+        }
+    }
+
+    const response: VolumeStatusResponse = {
+        enabled: value.enabled,
+        filebrowser_url: value.filebrowser_url as string | null,
+        filebrowser_api_key: value.filebrowser_api_key as string | null,
+        filebrowser_username: value.filebrowser_username as string | null,
+        filebrowser_password: value.filebrowser_password as string | null,
+    };
+    if (!response.enabled && fields.some(field => response[field] !== null)) {
+        throw new RestClientError(
+            'response',
+            REST_ERROR_CODES.INVALID_RESPONSE,
+            '后端 云端沙箱 管理服务返回了无效的卷状态响应',
+        );
+    }
+    return response;
 }
 
 function getApiError(value: unknown): ErrorResponse | undefined {

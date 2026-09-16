@@ -139,6 +139,14 @@ export interface AdminStateResponse {
     admin_count: number;
 }
 
+export interface VolumeStatusResponse {
+    enabled: boolean;
+    filebrowser_url: string | null;
+    filebrowser_api_key: string | null;
+    filebrowser_username: string | null;
+    filebrowser_password: string | null;
+}
+
 export interface ExpirationRequest {
     expiration_hours: number;
 }

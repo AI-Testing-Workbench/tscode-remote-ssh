@@ -6,9 +6,18 @@ import type {
     ImageListItem,
 } from '../api/models';
 
-export type AdminTab = 'images' | 'containers' | 'whitelist' | 'adminUsers';
+export type AdminTab = 'images' | 'containers' | 'volume' | 'whitelist' | 'adminUsers';
 
 export type AdminPageStatus = 'loading' | 'ready' | 'error' | 'forbidden';
+
+export type VolumePageStatus = 'idle' | 'loading' | 'disabled' | 'ready' | 'error';
+
+export interface AdminVolumeState {
+    status: VolumePageStatus;
+    frameUrl?: string;
+    frameMode?: 'direct' | 'bridge';
+    error?: string;
+}
 
 export interface AdminDefaultImage {
     type: ContainerTypeValue;
@@ -29,4 +38,5 @@ export interface AdminPanelState {
     limit?: ContainerLimitResponse;
     whitelistUsers: string[];
     adminUsers: string[];
+    volume?: AdminVolumeState;
 }

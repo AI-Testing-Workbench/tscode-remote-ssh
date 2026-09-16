@@ -9,7 +9,7 @@ window.addEventListener('unhandledrejection', event => {
     console.error('管理员页面未处理的 Promise 错误', event.reason);
 });
 
-const tabKind = tab => tab === 'images' ? 'images' : tab === 'containers' ? 'containers' : tab === 'whitelist' ? 'whitelist' : 'adminUsers';
+const tabKind = tab => tab === 'images' ? 'images' : tab === 'containers' ? 'containers' : tab === 'volume' ? 'volume' : tab === 'whitelist' ? 'whitelist' : 'adminUsers';
 
 const getSavedState = () => {
     const saved = vscode.getState();
@@ -496,7 +496,39 @@ const applyAdminUpdate = html => {
     restoreListState();
     syncCustomSelects();
     applyListView();
+    setupVolumeFrame();
     restorePageState(pageState);
+};
+
+let volumeFrameTimer;
+const showVolumeFrameError = () => {
+    if (volumeFrameTimer !== undefined && typeof window.clearTimeout === 'function') {
+        window.clearTimeout(volumeFrameTimer);
+        volumeFrameTimer = undefined;
+    }
+    const loading = document.querySelector('[data-volume-frame-loading]');
+    const error = document.querySelector('[data-volume-frame-error]');
+    if (loading) loading.hidden = true;
+    if (error) error.hidden = false;
+    post('volumeFrameError');
+};
+
+const setupVolumeFrame = () => {
+    const frame = document.querySelector('[data-volume-frame]');
+    if (!frame || typeof frame.addEventListener !== 'function' || frame.getAttribute('data-frame-listeners') === 'true') return;
+    frame.setAttribute('data-frame-listeners', 'true');
+    frame.addEventListener('load', () => {
+        if (volumeFrameTimer !== undefined && typeof window.clearTimeout === 'function') {
+            window.clearTimeout(volumeFrameTimer);
+            volumeFrameTimer = undefined;
+        }
+        const loading = document.querySelector('[data-volume-frame-loading]');
+        if (loading) loading.hidden = true;
+    });
+    frame.addEventListener('error', showVolumeFrameError);
+    if (typeof window.setTimeout === 'function') {
+        volumeFrameTimer = window.setTimeout(showVolumeFrameError, 15_000);
+    }
 };
 
 const readForm = root => {
@@ -839,5 +871,6 @@ syncCustomSelects();
 applyListView();
 restoreLogState();
 restoreFocusState();
+setupVolumeFrame();
 post('ready');
 `;

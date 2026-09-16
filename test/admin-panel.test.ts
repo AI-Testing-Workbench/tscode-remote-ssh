@@ -69,6 +69,9 @@ describe('AdminPanel', () => {
         expect(panel.webview.html).not.toContain('管理员控制台');
         expect(panel.webview.html).toContain('镜像管理');
         expect(panel.webview.html).toContain('容器管理');
+        expect([...panel.webview.html.matchAll(/data-action="tab" data-tab="([^"]+)"/g)].map(match => match[1])).toEqual([
+            'images', 'containers', 'volume', 'whitelist', 'adminUsers',
+        ]);
         expect(panel.webview.html).toContain('白名单用户');
         expect(panel.webview.html).toContain('管理员用户');
         expect(panel.webview.html).toContain('data-default-sort');
@@ -84,6 +87,115 @@ describe('AdminPanel', () => {
         expect(panel.webview.html).not.toContain('主题切换');
     });
 
+    it('loads volume status only on the volume tab and on a volume refresh', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        expect(adminApi.getVolumeStatus).not.toHaveBeenCalled();
+
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+        expect(adminApi.getVolumeStatus).toHaveBeenCalledOnce();
+        expect(panel.webview.html).toContain('卷未启用');
+        expect(panel.webview.html).not.toContain('<iframe');
+
+        await send(panel, { command: 'selectTab', tab: 'containers' });
+        await send(panel, { command: 'refresh' });
+        expect(adminApi.getVolumeStatus).toHaveBeenCalledOnce();
+
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+        expect(adminApi.getVolumeStatus).toHaveBeenCalledTimes(2);
+        await send(panel, { command: 'refresh' });
+        expect(adminApi.getVolumeStatus).toHaveBeenCalledTimes(3);
+    });
+
+    it('renders API key mode without exposing the key and constrains the frame CSP', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.getVolumeStatus = vi.fn(async () => ({
+            enabled: true,
+            filebrowser_url: 'https://filebrowser.example.test/files/',
+            filebrowser_api_key: 'api-key-value',
+            filebrowser_username: null,
+            filebrowser_password: null,
+        }));
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+
+        expect(panel.webview.html).toContain('src="https://filebrowser.example.test/files/"');
+        expect(panel.webview.html).toContain('frame-src https://filebrowser.example.test;');
+        expect(panel.webview.html).not.toContain('api-key-value');
+        expect(panel.webview.html).toContain('正在加载 FileBrowser Quantum 页面');
+    });
+
+    it('uses username/password bridge mode, prefers it over API key, and keeps credentials out of Webview content', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.getVolumeStatus = vi.fn(async () => ({
+            enabled: true,
+            filebrowser_url: 'https://filebrowser.example.test/files',
+            filebrowser_api_key: 'api-key-value',
+            filebrowser_username: 'volume-admin',
+            filebrowser_password: 'volume-password',
+        }));
+        const session = { frameUrl: 'http://127.0.0.1:39123/ticket/ticket-value', dispose: vi.fn() };
+        const bridge = {
+            createSession: vi.fn(async () => session),
+            dispose: vi.fn(),
+        };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            fileBrowserBridge: bridge,
+        });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+
+        expect(bridge.createSession).toHaveBeenCalledWith({
+            baseUrl: 'https://filebrowser.example.test/files',
+            username: 'volume-admin',
+            password: 'volume-password',
+            context: expect.any(String),
+        });
+        expect(panel.webview.html).toContain('src="http://127.0.0.1:39123/ticket/ticket-value"');
+        expect(panel.webview.html).not.toContain('api-key-value');
+        expect(panel.webview.html).not.toContain('volume-admin');
+        expect(panel.webview.html).not.toContain('volume-password');
+        expect(panel.webview.html).not.toContain('Bearer ');
+
+        await send(panel, { command: 'volumeFrameError' });
+        expect(session.dispose).toHaveBeenCalledOnce();
+        expect(panel.webview.html).toContain('FileBrowser Quantum 页面无法加载');
+        expect(panel.webview.html).not.toContain('<iframe');
+    });
+
+    it('shows a safe volume error for partial authentication configuration', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.getVolumeStatus = vi.fn(async () => ({
+            enabled: true,
+            filebrowser_url: 'https://filebrowser.example.test/files',
+            filebrowser_api_key: null,
+            filebrowser_username: 'volume-admin',
+            filebrowser_password: null,
+        }));
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+
+        expect(panel.webview.html).toContain('卷管理暂时不可用');
+        expect(panel.webview.html).not.toContain('<iframe');
+        expect(panel.webview.html).not.toContain('volume-admin');
+    });
+
     it('shows an access error and never creates or calls an administrator API for a non-admin', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -96,12 +208,14 @@ describe('AdminPanel', () => {
 
         await adminPanel.open();
         panel.fireMessage({ command: 'deleteAdminUser', userId: 'victim' });
+        panel.fireMessage({ command: 'selectTab', tab: 'volume' });
         await flushMessages();
 
         expect(panel.webview.html).toContain('无权访问管理员页面');
         expect(adminApiFactory).not.toHaveBeenCalled();
         expect(adminApi.listImages).not.toHaveBeenCalled();
         expect(adminApi.deleteAdminUser).not.toHaveBeenCalled();
+        expect(adminApi.getVolumeStatus).not.toHaveBeenCalled();
     });
 
     it('logs permission check failures to the log channel', async () => {
@@ -681,6 +795,39 @@ describe('AdminPanel', () => {
         expect(getSettings).toHaveBeenCalled();
         expect(requestsAfterTimer).toBeGreaterThan(requestsBeforeTimer);
         expect(vi.mocked(adminApi.listContainers).mock.calls.length).toBe(requestsAfterTimer);
+    });
+
+    it('pauses automatic administrator refresh while the volume page is open', async () => {
+        vi.useFakeTimers();
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const getSettings = vi.fn(() => ({
+            backendApiUrl: 'https://api.example.test',
+            userName: 'root',
+            skipKnownHostsCheck: true,
+            historyLimit: 5,
+            statusSyncInterval: 1,
+            debug: false,
+            disableClientValidation: true,
+        }));
+        const adminPanel = createPanel({ getSettings, adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        panel.fireMessage({ command: 'selectTab', tab: 'volume' });
+        await vi.advanceTimersByTimeAsync(0);
+        await Promise.resolve();
+        await Promise.resolve();
+        const containerRequests = vi.mocked(adminApi.listContainers).mock.calls.length;
+        const volumeRequests = vi.mocked(adminApi.getVolumeStatus).mock.calls.length;
+        const html = panel.webview.html;
+        await vi.advanceTimersByTimeAsync(3000);
+
+        expect(vi.mocked(adminApi.listContainers).mock.calls.length).toBe(containerRequests);
+        expect(vi.mocked(adminApi.getVolumeStatus).mock.calls.length).toBe(volumeRequests);
+        expect(panel.webview.html).toBe(html);
+        adminPanel.dispose();
+        vi.useRealTimers();
     });
 
     it('pauses automatic refresh while the log modal is open and resumes after it closes', async () => {
@@ -1373,6 +1520,13 @@ function createAdminApi(): AdminRestApi {
         addAdminUser: vi.fn(async () => ({ user_id: 'admin-2' })),
         listAdminUsers: vi.fn(async () => ({ user_ids: ['admin-2'] })),
         deleteAdminUser: vi.fn(async () => undefined),
+        getVolumeStatus: vi.fn(async () => ({
+            enabled: false,
+            filebrowser_url: null,
+            filebrowser_api_key: null,
+            filebrowser_username: null,
+            filebrowser_password: null,
+        })),
     };
 }
 

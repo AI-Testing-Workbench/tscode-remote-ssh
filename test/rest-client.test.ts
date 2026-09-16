@@ -152,6 +152,57 @@ describe('RestClient', () => {
         expect(multipartBody).toContain('tar');
     });
 
+    it('requests the volume status contract with the bound administrator header', async () => {
+        const { requests, transport } = createTransport(jsonResponse(200, {
+            enabled: true,
+            filebrowser_url: 'https://filebrowser.example.test/files',
+            filebrowser_api_key: 'api-key-value',
+            filebrowser_username: null,
+            filebrowser_password: null,
+        }));
+        const client = new RestClient('https://api.example.test', { transport, operatorUserId: ' admin-1 ' });
+
+        await expect(client.admin.getVolumeStatus()).resolves.toEqual({
+            enabled: true,
+            filebrowser_url: 'https://filebrowser.example.test/files',
+            filebrowser_api_key: 'api-key-value',
+            filebrowser_username: null,
+            filebrowser_password: null,
+        });
+        expect(requests).toHaveLength(1);
+        expect(requests[0].method).toBe('GET');
+        expect(requests[0].url.pathname).toBe('/volume/status');
+        expect(requests[0].url.search).toBe('');
+        expect(requests[0].headers[ADMIN_OPERATOR_USER_ID_HEADER]).toBe('admin-1');
+    });
+
+    it('rejects a disabled volume response that contains credentials', async () => {
+        const { transport } = createTransport(jsonResponse(200, {
+            enabled: false,
+            filebrowser_url: null,
+            filebrowser_api_key: 'must-not-be-present',
+            filebrowser_username: null,
+            filebrowser_password: null,
+        }));
+        const client = new RestClient('https://api.example.test', { transport, operatorUserId: 'admin-1' });
+
+        await expect(client.admin.getVolumeStatus()).rejects.toMatchObject({
+            kind: 'response',
+            code: REST_ERROR_CODES.INVALID_RESPONSE,
+        });
+    });
+
+    it('rejects the volume status request without an administrator identity', async () => {
+        const { requests, transport } = createTransport(jsonResponse(200, { enabled: false }));
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.admin.getVolumeStatus()).rejects.toMatchObject({
+            kind: 'request',
+            code: REST_ERROR_CODES.REQUEST,
+        });
+        expect(requests).toHaveLength(0);
+    });
+
     it('preserves service_id from user and administrator creation responses', async () => {
         const responses = [
             jsonResponse(200, { container_id: 'container-1', service_id: 'service-1', status: 'pending' }),

@@ -10,8 +10,10 @@ import {
     ImageDeleteRequest,
     ImageListItem,
     UploadImageFileInput,
+    VolumeStatusResponse,
 } from './api/models';
 import { AdminRestApi, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
+import { FileBrowserBridge, getFileBrowserFrameSource, validateFileBrowserUrl, type FileBrowserBridgeSession } from './filebrowserBridge';
 import {
     ContainerOperationAction,
     ContainerOperationEvent,
@@ -26,7 +28,7 @@ import { UserIdProvider } from './user';
 import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository';
 import { renderAdminContent, renderAdminPage } from './adminWebview/view';
 import { ADMIN_CONTAINER_TYPES, containerTypeOf } from './adminWebview/containerTypes';
-import { AdminDefaultImage, AdminPanelState, AdminTab } from './adminWebview/types';
+import type { AdminDefaultImage, AdminPanelState, AdminTab, AdminVolumeState } from './adminWebview/types';
 import {
     combineAbortSignals,
     formatContainerInitializationError,
@@ -44,6 +46,7 @@ type PanelLogger = Pick<Log, 'error'>;
 type ShowOpenDialog = (options?: vscode.OpenDialogOptions) => Thenable<vscode.Uri[] | undefined>;
 type AdminApiFactory = (baseUrl: string, operatorUserId: string) => AdminRestApi;
 type AdminData = Pick<AdminPanelState, 'images' | 'defaultImages' | 'containers' | 'orphanContainerIds' | 'stats' | 'limit' | 'whitelistUsers' | 'adminUsers'>;
+type FileBrowserBridgeFactory = Pick<FileBrowserBridge, 'createSession' | 'dispose'>;
 
 export interface AdminPanelOptions {
     userIdProvider?: UserIdSource;
@@ -55,6 +58,7 @@ export interface AdminPanelOptions {
     initializationSignal?: AbortSignal;
     onContainerOperation?: (operation: ContainerOperationState) => Promise<boolean>;
     showOpenDialog?: ShowOpenDialog;
+    fileBrowserBridge?: FileBrowserBridgeFactory;
     logger?: PanelLogger;
 }
 
@@ -68,6 +72,7 @@ export class AdminPanel implements vscode.Disposable {
     private readonly initializationSignal: AbortSignal | undefined;
     private readonly onContainerOperation: ((operation: ContainerOperationState) => Promise<boolean>) | undefined;
     private readonly showOpenDialog: ShowOpenDialog;
+    private readonly fileBrowserBridge: FileBrowserBridgeFactory;
     private readonly logger: PanelLogger | undefined;
 
     private panel: vscode.WebviewPanel | undefined;
@@ -88,6 +93,8 @@ export class AdminPanel implements vscode.Disposable {
     private pendingAdminUpdate = false;
     private readonly activeRequestIds = new Set<string>();
     private readonly initializationControllers = new Set<AbortController>();
+    private volumeSession: FileBrowserBridgeSession | undefined;
+    private volumeRequestGeneration = 0;
     private disposed = false;
     private state: AdminPanelState = createInitialState();
 
@@ -103,6 +110,7 @@ export class AdminPanel implements vscode.Disposable {
         this.operationSubscription = this.operationRegistry?.subscribe(event => this.handleContainerOperationEvent(event)) ?? { dispose: () => undefined };
         this.logger = options.logger;
         this.showOpenDialog = options.showOpenDialog ?? (dialogOptions => vscode.window.showOpenDialog(dialogOptions));
+        this.fileBrowserBridge = options.fileBrowserBridge ?? new FileBrowserBridge();
     }
 
     public open(): Promise<void> {
@@ -174,6 +182,8 @@ export class AdminPanel implements vscode.Disposable {
         this.abortInitializations();
         this.messageQueue = Promise.resolve();
         this.selectedImageFile = undefined;
+        this.disposeVolumeSession();
+        this.fileBrowserBridge.dispose();
         this.disposePanelResources();
         this.clearReconciliationTimers();
         this.operationSubscription.dispose();
@@ -237,7 +247,21 @@ export class AdminPanel implements vscode.Disposable {
                 }
                 return;
             case 'selectTab':
-                this.selectTab(message.tab);
+                await this.selectTab(panel, generation, message.tab);
+                return;
+            case 'retryVolume':
+                this.operationInFlight = true;
+                this.operationGeneration = generation;
+                try {
+                    await this.loadVolumeStatus(panel, generation);
+                } finally {
+                    this.completeOperation(panel, generation, message.command, requestId);
+                    this.clearOperation(panel, generation);
+                    this.flushPendingAdminUpdate(panel, generation);
+                }
+                return;
+            case 'volumeFrameError':
+                this.handleVolumeFrameError(panel, generation);
                 return;
             case 'search':
                 this.updateSearch(message.value);
@@ -343,7 +367,13 @@ export class AdminPanel implements vscode.Disposable {
         }
     }
 
-    private refresh(panel: vscode.WebviewPanel, generation: number, showLoading = true, allowDuringOperation = false): Promise<void> {
+    private refresh(
+        panel: vscode.WebviewPanel,
+        generation: number,
+        showLoading = true,
+        allowDuringOperation = false,
+        refreshVolume = this.state.activeTab === 'volume',
+    ): Promise<void> {
         if (!this.isActive(panel, generation)) {
             return Promise.resolve();
         }
@@ -386,11 +416,18 @@ export class AdminPanel implements vscode.Disposable {
                 if (!wasReady) {
                     this.setPanelHtml(panel);
                 } else if (dataChanged || this.pendingAdminUpdate) {
-                    if (this.logOpen || this.selectOpen || this.isOperationInFlight(generation) && !allowDuringOperation) {
-                        this.pendingAdminUpdate = true;
+                    if (this.state.activeTab === 'volume') {
+                        this.pendingAdminUpdate = false;
                     } else {
-                        this.postAdminUpdate(panel, generation);
+                        if (this.logOpen || this.selectOpen || this.isOperationInFlight(generation) && !allowDuringOperation) {
+                            this.pendingAdminUpdate = true;
+                        } else {
+                            this.postAdminUpdate(panel, generation);
+                        }
                     }
+                }
+                if (refreshVolume && this.state.activeTab === 'volume' && this.isActive(panel, generation)) {
+                    await this.loadVolumeStatus(panel, generation, adminApi);
                 }
             } catch (error) {
                 logAdminError(this.logger, '管理员面板数据刷新失败', error, { error });
@@ -732,15 +769,104 @@ export class AdminPanel implements vscode.Disposable {
         }
     }
 
-    private selectTab(value: unknown): void {
+    private async selectTab(panel: vscode.WebviewPanel, generation: number, value: unknown): Promise<void> {
         if (!isAdminTab(value)) {
             return;
         }
+        const previousTab = this.state.activeTab;
+        if (previousTab === 'volume' && value !== 'volume') {
+            this.volumeRequestGeneration++;
+            this.disposeVolumeSession();
+            this.state.volume = { status: 'idle' };
+        }
+        if (value === 'volume') {
+            this.clearRefreshTimer();
+        }
         this.state.activeTab = value;
         this.state.search = '';
-        if (this.panel && this.state.status === 'ready') {
-            this.setPanelHtml(this.panel);
+        if (!this.isActive(panel, generation) || this.state.status !== 'ready') {
+            return;
         }
+        this.setPanelHtml(panel);
+        if (previousTab === 'volume' && value !== 'volume') {
+            this.startRefreshTimer(panel, generation);
+        }
+        if (value === 'volume' && previousTab !== 'volume') {
+            await this.loadVolumeStatus(panel, generation);
+        }
+    }
+
+    private async loadVolumeStatus(panel: vscode.WebviewPanel, generation: number, checkedAdminApi?: AdminRestApi): Promise<void> {
+        if (!this.isActive(panel, generation) || this.state.status !== 'ready' || this.state.activeTab !== 'volume') {
+            return;
+        }
+        const requestGeneration = ++this.volumeRequestGeneration;
+        this.disposeVolumeSession();
+        this.state.volume = { status: 'loading' };
+        this.setPanelHtml(panel);
+
+        try {
+            const adminApi = checkedAdminApi ?? await this.authorize(panel, generation);
+            if (!adminApi || !this.isVolumeRequestActive(panel, generation, requestGeneration)) {
+                return;
+            }
+            const response = normalizeVolumeStatusForPanel(await adminApi.getVolumeStatus());
+            const prepared = await prepareVolumeState(
+                response,
+                this.fileBrowserBridge,
+                `${generation}:${requestGeneration}`,
+            );
+            if (!this.isVolumeRequestActive(panel, generation, requestGeneration)) {
+                prepared.session?.dispose();
+                return;
+            }
+            this.volumeSession = prepared.session;
+            this.state.volume = prepared.state;
+            this.setPanelHtml(panel);
+        } catch (error) {
+            if (!this.isVolumeRequestActive(panel, generation, requestGeneration)) {
+                return;
+            }
+            this.state.volume = {
+                status: 'error',
+                error: getVolumeErrorMessage(error),
+            };
+            this.logVolumeError(error);
+            this.setPanelHtml(panel);
+        }
+    }
+
+    private handleVolumeFrameError(panel: vscode.WebviewPanel, generation: number): void {
+        if (!this.isActive(panel, generation) || this.state.status !== 'ready' || this.state.activeTab !== 'volume') {
+            return;
+        }
+        this.volumeRequestGeneration++;
+        this.disposeVolumeSession();
+        this.state.volume = {
+            status: 'error',
+            error: 'FileBrowser Quantum 页面无法加载，请检查地址、网络连接和 iframe 嵌入策略。',
+        };
+        this.setPanelHtml(panel);
+    }
+
+    private isVolumeRequestActive(panel: vscode.WebviewPanel, generation: number, requestGeneration: number): boolean {
+        return this.isActive(panel, generation)
+            && this.state.status === 'ready'
+            && this.state.activeTab === 'volume'
+            && this.volumeRequestGeneration === requestGeneration;
+    }
+
+    private disposeVolumeSession(): void {
+        const session = this.volumeSession;
+        this.volumeSession = undefined;
+        session?.dispose();
+    }
+
+    private logVolumeError(error: unknown): void {
+        const metadata = error instanceof RestClientError
+            ? { kind: error.kind, code: error.code, statusCode: error.statusCode }
+            : { kind: 'volume_configuration_or_filebrowser_error' };
+        this.logger?.error('管理员面板卷状态加载失败', metadata);
     }
 
     private updateSearch(value: unknown): void {
@@ -779,12 +905,12 @@ export class AdminPanel implements vscode.Disposable {
                     `云端沙箱 服务 "${event.operation.containerId}" 的${getContainerOperationName(event.operation.action)}结果暂时无法确认，请刷新后再试`,
                 );
             }
-            if (panel && this.state.status === 'ready') {
+            if (panel && this.state.status === 'ready' && this.state.activeTab !== 'volume') {
                 void this.refresh(panel, this.generation, false, true);
             }
             return;
         }
-        if (panel && this.state.status === 'ready') {
+        if (panel && this.state.status === 'ready' && this.state.activeTab !== 'volume') {
             this.postAdminUpdate(panel, this.generation);
         }
     }
@@ -911,14 +1037,14 @@ export class AdminPanel implements vscode.Disposable {
 
     private startRefreshTimer(panel: vscode.WebviewPanel, generation: number): void {
         this.clearRefreshTimer();
-        if (this.logOpen || this.selectOpen) {
+        if (this.logOpen || this.selectOpen || this.state.activeTab === 'volume') {
             return;
         }
         this.scheduleRefreshTimer(panel, generation);
     }
 
     private scheduleRefreshTimer(panel: vscode.WebviewPanel, generation: number): void {
-        if (!this.isActive(panel, generation) || this.logOpen || this.selectOpen) {
+        if (!this.isActive(panel, generation) || this.logOpen || this.selectOpen || this.state.activeTab === 'volume') {
             return;
         }
         let intervalSeconds: number;
@@ -936,7 +1062,7 @@ export class AdminPanel implements vscode.Disposable {
             if (!this.isActive(panel, generation)) {
                 return;
             }
-            if (this.logOpen || this.selectOpen || this.isOperationInFlight(generation)) {
+            if (this.logOpen || this.selectOpen || this.state.activeTab === 'volume' || this.isOperationInFlight(generation)) {
                 this.scheduleRefreshTimer(panel, generation);
                 return;
             }
@@ -980,6 +1106,8 @@ export class AdminPanel implements vscode.Disposable {
         this.clearRefreshTimer();
         this.refreshPromise = undefined;
         this.loadPromise = undefined;
+        this.volumeRequestGeneration++;
+        this.disposeVolumeSession();
         this.disposePanelResources();
     }
 
@@ -1031,6 +1159,7 @@ function createInitialState(): AdminPanelState {
         orphanContainerIds: [],
         whitelistUsers: [],
         adminUsers: [],
+        volume: { status: 'idle' },
     };
 }
 
@@ -1073,6 +1202,100 @@ async function loadDefaultImages(adminApi: AdminRestApi): Promise<AdminDefaultIm
         return { type: entry.type, fullName: response.full_name ?? null };
     }));
     return pairs;
+}
+
+interface PreparedVolumeState {
+    state: AdminVolumeState;
+    session?: FileBrowserBridgeSession;
+}
+
+async function prepareVolumeState(
+    response: VolumeStatusResponse,
+    bridge: FileBrowserBridgeFactory,
+    context: string,
+): Promise<PreparedVolumeState> {
+    const normalized = normalizeVolumeStatusForPanel(response);
+    if (!normalized.enabled) {
+        return { state: { status: 'disabled' } };
+    }
+
+    let baseUrl: string;
+    try {
+        baseUrl = validateFileBrowserUrl(normalized.filebrowser_url ?? '');
+    } catch {
+        throw new Error('卷配置中的 FileBrowser Quantum 地址无效');
+    }
+
+    const username = typeof normalized.filebrowser_username === 'string' ? normalized.filebrowser_username.trim() : '';
+    const password = normalized.filebrowser_password;
+    const hasUsername = Boolean(username);
+    const hasPassword = typeof password === 'string' && password.length > 0;
+    if (hasUsername !== hasPassword) {
+        throw new Error('卷配置中的 FileBrowser Quantum 用户名密码不完整');
+    }
+
+    if (hasUsername && hasPassword) {
+        const session = await bridge.createSession({
+            baseUrl,
+            username,
+            password: password as string,
+            context,
+        });
+        try {
+            getFileBrowserFrameSource(session.frameUrl);
+        } catch {
+            session.dispose();
+            throw new Error('FileBrowser Quantum 登录桥接地址无效');
+        }
+        return {
+            state: { status: 'ready', frameUrl: session.frameUrl, frameMode: 'bridge' },
+            session,
+        };
+    }
+
+    if (typeof normalized.filebrowser_api_key !== 'string' || !normalized.filebrowser_api_key.trim()) {
+        throw new Error('卷配置中没有完整的 FileBrowser Quantum 认证信息');
+    }
+    return {
+        state: { status: 'ready', frameUrl: baseUrl, frameMode: 'direct' },
+    };
+}
+
+function normalizeVolumeStatusForPanel(value: VolumeStatusResponse): VolumeStatusResponse {
+    if (!isRecord(value) || typeof value.enabled !== 'boolean') {
+        throw new Error('卷状态响应格式无效');
+    }
+    const fields = [
+        'filebrowser_url',
+        'filebrowser_api_key',
+        'filebrowser_username',
+        'filebrowser_password',
+    ] as const;
+    for (const field of fields) {
+        if (value[field] !== null && typeof value[field] !== 'string') {
+            throw new Error('卷状态响应格式无效');
+        }
+    }
+    if (!value.enabled && fields.some(field => value[field] !== null)) {
+        throw new Error('卷状态响应格式无效');
+    }
+    return {
+        enabled: value.enabled,
+        filebrowser_url: value.filebrowser_url as string | null,
+        filebrowser_api_key: value.filebrowser_api_key as string | null,
+        filebrowser_username: value.filebrowser_username as string | null,
+        filebrowser_password: value.filebrowser_password as string | null,
+    };
+}
+
+function getVolumeErrorMessage(error: unknown): string {
+    if (error instanceof RestClientError && (error.statusCode === 401 || error.statusCode === 403)) {
+        return '当前管理员无权读取卷配置。';
+    }
+    if (error instanceof RestClientError && error.kind === 'response') {
+        return '卷状态响应格式无效。';
+    }
+    return '卷配置或 FileBrowser Quantum 页面无法加载。';
 }
 
 function hasAdminDataChanged(previous: AdminPanelState, next: AdminData): boolean {
@@ -1282,7 +1505,7 @@ function isBlank(value: unknown): boolean {
 }
 
 function isAdminTab(value: unknown): value is AdminTab {
-    return value === 'images' || value === 'containers' || value === 'whitelist' || value === 'adminUsers';
+    return value === 'images' || value === 'containers' || value === 'volume' || value === 'whitelist' || value === 'adminUsers';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

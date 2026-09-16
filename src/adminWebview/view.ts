@@ -5,9 +5,10 @@ import type {
     ContainerTypeValue,
     ImageListItem,
 } from '../api/models';
+import { getFileBrowserFrameSource } from '../filebrowserBridge';
 import { ADMIN_WEBVIEW_SCRIPT } from './script';
 import { ADMIN_CONTAINER_TYPES, containerTypeLabel } from './containerTypes';
-import type { AdminDefaultImage, AdminPanelState, AdminTab } from './types';
+import type { AdminDefaultImage, AdminPanelState, AdminTab, AdminVolumeState } from './types';
 
 interface SelectOption {
     value: string;
@@ -17,12 +18,14 @@ interface SelectOption {
 }
 
 export function renderAdminPage(state: AdminPanelState, nonce: string, cspSource: string): string {
+    const frameSource = getVolumeFrameSource(state.volume);
+    const frameDirective = frameSource ? `frame-src ${escapeCspToken(frameSource)};` : 'frame-src \'none\';';
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'; ${frameDirective} object-src 'none'; base-uri 'none'; form-action 'none';">
     <style nonce="${nonce}">${ADMIN_CSS}</style>
 </head>
 <body>
@@ -63,6 +66,7 @@ function renderReadyPage(state: AdminPanelState): string {
         <nav class="tab-bar" data-patch-key="tab-bar">
             ${renderTabButton('images', '镜像管理', state.activeTab)}
             ${renderTabButton('containers', '容器管理', state.activeTab)}
+            ${renderTabButton('volume', '卷管理', state.activeTab)}
             ${renderTabButton('whitelist', '白名单用户管理', state.activeTab)}
             ${renderTabButton('adminUsers', '管理员用户管理', state.activeTab)}
         </nav>
@@ -82,11 +86,92 @@ function renderTabContent(state: AdminPanelState): string {
             return renderImagesTab(state.images, state.defaultImages, state.selectedImageFilename, state.search, state.containers);
         case 'containers':
             return renderContainersTab(state.containers, state.images, state.defaultImages, state.search);
+        case 'volume':
+            return renderVolumeTab(state.volume);
         case 'whitelist':
             return renderUsersTab('whitelist', '白名单用户', state.whitelistUsers, state.search);
         case 'adminUsers':
             return renderUsersTab('admin', '管理员用户', state.adminUsers, state.search);
     }
+}
+
+function renderVolumeTab(volume: AdminVolumeState | undefined): string {
+    const current = volume ?? { status: 'idle' as const };
+    let body: string;
+    switch (current.status) {
+        case 'loading':
+            body = renderVolumeStatusCard('loading', '正在读取卷配置', '正在验证卷状态和嵌入地址...', false);
+            break;
+        case 'disabled':
+            body = renderVolumeStatusCard('disabled', '卷未启用', '后端尚未配置可用的 FileBrowser Quantum 设置。', false);
+            break;
+        case 'error':
+            body = renderVolumeStatusCard('error', '卷管理暂时不可用', current.error ?? '卷配置或 FileBrowser Quantum 页面无法加载。', true);
+            break;
+        case 'ready':
+            body = renderVolumeFrame(current);
+            break;
+        case 'idle':
+        default:
+            body = renderVolumeStatusCard('loading', '等待读取卷配置', '等待读取卷配置中...', true);
+            break;
+    }
+    return `<section class="tab-panel volume-panel" data-tab-panel data-patch-key="tab-volume" aria-labelledby="volume-tab">
+        <div class="section-heading"><h2 id="volume-tab">卷管理</h2><span class="tag">FileBrowser Quantum</span></div>
+        ${body}
+    </section>`;
+}
+
+function renderVolumeStatusCard(status: 'loading' | 'disabled' | 'error', title: string, message: string, retry: boolean): string {
+    const isError = status === 'error';
+    return `<div class="volume-status-card${isError ? ' volume-error-card' : ''}" data-volume-status="${status}">
+        ${status === 'loading' ? '<span class="spinner" aria-hidden="true"></span>' : `<span class="volume-status-icon${isError ? ' error' : ''}" aria-hidden="true">${isError ? '!' : 'i'}</span>`}
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(message)}</p>
+        ${retry ? '<button class="primary-button" type="button" data-action="retryVolume">重新加载</button>' : ''}
+    </div>`;
+}
+
+function renderVolumeFrame(volume: AdminVolumeState): string {
+    if (!volume.frameUrl || !isSafeFrameUrl(volume.frameUrl)) {
+        return renderVolumeStatusCard('error', '卷管理暂时不可用', 'FileBrowser Quantum 地址无效。', true);
+    }
+    return `<div class="volume-frame-card" data-volume-frame-card>
+        <div class="volume-frame-shell" data-volume-frame-shell>
+            <div class="volume-frame-loading" data-volume-frame-loading><span class="spinner" aria-hidden="true"></span><span>正在加载 FileBrowser Quantum 页面...</span></div>
+            <iframe data-volume-frame src="${escapeAttribute(volume.frameUrl)}" title="FileBrowser 卷管理" referrerpolicy="no-referrer"></iframe>
+            <div class="volume-frame-error" data-volume-frame-error hidden>
+                <span class="volume-status-icon error" aria-hidden="true">!</span>
+                <strong>FileBrowser Quantum 页面无法加载</strong>
+                <p>请检查地址、网络连接以及页面是否允许嵌入。</p>
+                <button class="primary-button" type="button" data-action="retryVolume">重新加载</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function isSafeFrameUrl(value: string): boolean {
+    try {
+        getFileBrowserFrameSource(value);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function getVolumeFrameSource(volume: AdminVolumeState | undefined): string | undefined {
+    if (!volume || volume.status !== 'ready' || !volume.frameUrl || !isSafeFrameUrl(volume.frameUrl)) {
+        return undefined;
+    }
+    try {
+        return getFileBrowserFrameSource(volume.frameUrl);
+    } catch {
+        return undefined;
+    }
+}
+
+function escapeCspToken(value: string): string {
+    return /^[a-z][a-z\d+.-]*:\/\/[^\s;]+$/i.test(value) ? value : '\'none\'';
 }
 
 function renderDefaultBanners(defaultImages: AdminDefaultImage[], images: ImageListItem[]): string {
@@ -934,4 +1019,26 @@ body.vscode-high-contrast { color-scheme: dark; }
 .image-toolbar, .tab-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 .toolbar-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .form-row.type-image-row .select-wrap { width: 100%; }
+.volume-panel { min-width: 0; }
+.volume-status-card { display: grid; place-items: center; min-height: 300px; padding: 42px 24px; border: 1px solid var(--outline); border-radius: 14px; background: var(--surface-raised); text-align: center; }
+.volume-status-card h3 { margin-bottom: 8px; font-size: 18px; }
+.volume-status-card p { max-width: 560px; margin-bottom: 18px; color: var(--muted); white-space: pre-line; }
+.volume-error-card { border-color: var(--danger); box-shadow: inset 0 2px 0 var(--danger); }
+.volume-status-icon { display: inline-grid; place-items: center; width: 34px; height: 34px; margin-bottom: 16px; border-radius: 50%; color: var(--primary-text); background: var(--primary); font-weight: 700; }
+.volume-status-icon.error { background: var(--danger); }
+.volume-frame-card { display: grid; gap: 10px; min-width: 0; }
+.volume-frame-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 35px; color: var(--muted); }
+.volume-frame-toolbar > span:first-child { color: var(--text); font-size: 13px; font-weight: 600; }
+.volume-frame-shell { position: relative; min-height: min(70vh, 760px); overflow: hidden; border: 1px solid var(--outline); border-radius: 12px; background: #fff; }
+.volume-frame-shell iframe { display: block; width: 100%; height: min(70vh, 760px); min-height: 520px; border: 0; background: #fff; }
+.volume-frame-loading, .volume-frame-error { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; align-content: center; gap: 4px; padding: 24px; background: var(--surface-raised); text-align: center; }
+.volume-frame-loading[hidden], .volume-frame-error[hidden] { display: none; }
+.volume-frame-loading .spinner { margin-bottom: 8px; }
+.volume-frame-error { color: var(--text); }
+.volume-frame-error strong { font-size: 16px; }
+.volume-frame-error p { margin: 4px 0 14px; color: var(--muted); }
+@media (max-width: 520px) {
+    .volume-frame-shell, .volume-frame-shell iframe { min-height: 420px; height: 65vh; }
+    .volume-frame-toolbar { align-items: flex-start; flex-direction: column; }
+}
 `;
