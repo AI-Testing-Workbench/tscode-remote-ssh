@@ -160,7 +160,7 @@ function renderVolumeExternal(volume: AdminVolumeState): string {
     return `<div class="volume-status-card volume-external-card" data-volume-status="external">
         <span class="volume-status-icon" aria-hidden="true">i</span>
         <h3>FileBrowser Quantum 无法在插件内登录</h3>
-        <p>当前仅配置了 API Key，无法自动登录。请前往浏览器访问。</p>
+        <p>仅配置 API Key，插件无法完成网页登录。请前往浏览器访问。</p>
         <button class="primary-button" type="button" data-action="openVolumeBrowser">在浏览器中打开</button>
     </div>`;
 }
