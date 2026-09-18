@@ -1085,8 +1085,8 @@ describe('AdminPanel', () => {
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
         const userApi = createUserApi(true);
         vi.mocked(userApi.checkAdmin)
-            .mockResolvedValueOnce({ admin: true })
-            .mockResolvedValueOnce({ admin: false });
+            .mockResolvedValueOnce({ admin: true, limit: 'none' })
+            .mockResolvedValueOnce({ admin: false, limit: 'user' });
         const adminApi = createAdminApi();
         const adminPanel = createPanel({
             userApiFactory: vi.fn(() => userApi),
@@ -1510,7 +1510,7 @@ function createUserApi(admin: boolean): UserRestApi {
         getContainerIds: vi.fn(),
         getContainerStatuses: vi.fn(),
         getContainer: vi.fn(),
-        checkAdmin: vi.fn(async () => ({ admin })),
+        checkAdmin: vi.fn(async () => ({ admin, limit: admin ? 'none' as const : 'user' as const })),
         startContainer: vi.fn(),
         stopContainer: vi.fn(),
         restartContainer: vi.fn(),

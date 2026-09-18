@@ -108,6 +108,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
     private sshAgentSock: string | undefined;
     private proxyCommandProcess: cp.ChildProcessWithoutNullStreams | undefined;
     private agentForwardSession: ssh2.ClientChannel | undefined;
+    private activeHost: string | undefined;
 
     private socksTunnel: SSHTunnelConfig | undefined;
     private tunnels: TunnelInfo[] = [];
@@ -254,6 +255,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     authHandler: (arg0, arg1, arg2) => (sshAuthHandler(arg0, arg1, arg2), undefined),
                 });
                 await this.sshConnection.connect();
+                this.activeHost = sshDest.hostname;
 
                 const envVariables: Record<string, string | null> = {};
                 if (agentForward) {
@@ -363,6 +365,19 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 }
             }
         });
+    }
+
+    /**
+     * Return an SFTP subsystem for the currently authenticated remote host.
+     * The resolver owns the SSH connection; callers only own the subsystem and
+     * must end it after their transfer completes.
+     */
+    public async getSftp(host: string): Promise<ssh2.SFTPWrapper> {
+        const normalizedHost = typeof host === 'string' ? host.trim().toLowerCase() : '';
+        if (!this.sshConnection || !this.activeHost || normalizedHost !== this.activeHost.trim().toLowerCase()) {
+            throw new Error(`容器 "${host}" 尚未建立连接`);
+        }
+        return this.sshConnection.sftp();
     }
 
     private openAgentForwardSession(): Promise<string | undefined> {
@@ -608,6 +623,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
     }
 
     dispose() {
+        this.activeHost = undefined;
         disposeAll(this.tunnels);
         this.agentForwardSession?.close();
         this.agentForwardSession = undefined;

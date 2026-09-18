@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 type ExtensionManifest = {
+    api?: string;
     activationEvents: string[];
     contributes: {
         commands: Array<{ command: string }>;
@@ -24,6 +25,10 @@ const manifest = JSON.parse(
 ) as ExtensionManifest;
 
 describe('extension manifest', () => {
+    it('does not disable the public extension API', () => {
+        expect(manifest.api).toBeUndefined();
+    });
+
     it('declares every menu command', () => {
         const commandIds = new Set(manifest.contributes.commands.map(({ command }) => command));
         const menuCommandIds = Object.values(manifest.contributes.menus)

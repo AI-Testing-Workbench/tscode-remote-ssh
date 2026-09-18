@@ -88,18 +88,20 @@ describe('extension activation API', () => {
         const exports = await activate(context);
 
         expect(Object.keys(exports).sort()).toEqual([
+            'checkAdmin',
             'createContainer',
             'deleteContainer',
+            'getActiveContainerIds',
             'getContainer',
-            'getContainerIds',
             'restartContainer',
             'startContainer',
             'stopContainer',
+            'syncFiles',
         ]);
         expect((exports as unknown as Record<string, unknown>).admin).toBeUndefined();
-        expect((exports as unknown as Record<string, unknown>).checkAdmin).toBeUndefined();
+        expect((exports as unknown as Record<string, unknown>).getContainerIds).toBeUndefined();
 
-        await expect(exports.getContainerIds()).rejects.toMatchObject({
+        await expect(exports.getActiveContainerIds()).rejects.toMatchObject({
             code: 'api_url_missing',
             message: '未配置后端 云端沙箱 管理服务的 API 地址',
         });

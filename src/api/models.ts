@@ -69,12 +69,33 @@ export interface CreateContainerResponse {
     expires_at?: string | null;
 }
 
+export type PublicContainerCallback = () => void | Promise<void>;
+
+export interface PublicCreateContainerCallbacks {
+    postCompleted?: PublicContainerCallback;
+    gitInitialized?: PublicContainerCallback;
+    containerPrepared?: PublicContainerCallback;
+}
+
 export interface AdminCheckRequest {
     user_id: string;
 }
 
 export interface AdminCheckResponse {
     admin: boolean;
+    limit: 'user' | 'repository' | 'none';
+}
+
+export type PublicFileSyncDirection = 'upload' | 'download';
+export type PublicFileSyncConflict = 'overwrite' | 'skip';
+
+export interface FileSyncResult {
+    direction: PublicFileSyncDirection;
+    copied: number;
+    skipped: number;
+    deleted: number;
+    bytesTransferred: number;
+    complete: boolean;
 }
 
 export interface AdminCreateContainerRequest {

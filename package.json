@@ -317,7 +317,6 @@
 	"allowScripts": {
 		"fsevents": true
 	},
-	"api": "none",
 	"enabledApiProposals": [
 		"resolvers",
 		"contribViewsRemote"
