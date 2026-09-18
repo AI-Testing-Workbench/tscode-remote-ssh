@@ -353,6 +353,34 @@ describe('RestClient', () => {
         });
     });
 
+    it('includes the upload request and Node transport details for connection failures', async () => {
+        const reset = Object.assign(new Error('read ECONNRESET'), {
+            code: 'ECONNRESET',
+            errno: -4077,
+            syscall: 'read',
+        });
+        const { transport } = createTransport(reset);
+        const client = new RestClient('https://api.example.test', { transport });
+
+        const error = await client.admin.uploadImage({
+            file: Buffer.from('tar'),
+            filename: 'image.tar',
+            auto_push: false,
+        }).catch(value => value);
+
+        expect(error).toMatchObject({
+            request: { method: 'POST', path: '/admin/images/upload' },
+            cause: reset,
+        });
+        expect(formatRestClientError(error)).toBe(
+            '后端 云端沙箱 服务请求失败\n'
+            + '请联系支持团队解决\n'
+            + '请求: POST /admin/images/upload\n'
+            + '错误详情: 后端 云端沙箱 管理服务请求失败\n'
+            + '底层错误: read ECONNRESET (错误码: ECONNRESET，errno: -4077，系统调用: read)',
+        );
+    });
+
     it('reports timeout responses from the backend clearly for ordinary requests too', async () => {
         const { transport } = createTransport(jsonResponse(504, {
             code: 'backend_timeout',
@@ -373,6 +401,7 @@ describe('RestClient', () => {
         expect(formatRestClientError(error)).toBe(
             '后端 云端沙箱 服务请求失败\n'
             + '请联系支持团队解决\n'
+            + '请求: GET /admin/images\n'
             + '错误详情: 后端 云端沙箱 管理服务请求超时 (已等待 15 秒，HTTP 状态码 504，仍未收到响应)，正在重试中...\n'
             + '服务仍在处理 (错误码: backend_timeout，HTTP 状态码 504)',
         );

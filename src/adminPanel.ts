@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import * as fsPromises from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { Log } from './common/logger';
@@ -12,7 +13,7 @@ import {
     UploadImageFileInput,
     VolumeStatusResponse,
 } from './api/models';
-import { AdminRestApi, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
+import { AdminRestApi, formatRestClientError, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
 import { FileBrowserBridge, getFileBrowserFrameSource, validateFileBrowserUrl, type FileBrowserBridgeSession } from './filebrowserBridge';
 import {
     ContainerOperationAction,
@@ -571,7 +572,21 @@ export class AdminPanel implements vscode.Disposable {
             namespace: optionalText(message.namespace),
             auto_push: asBoolean(message.autoPush, true),
         };
-        await adminApi.uploadImage(input);
+        try {
+            await adminApi.uploadImage(input);
+        } catch (error) {
+            logAdminError(this.logger, '管理员镜像上传失败', error, {
+                endpoint: 'POST /admin/images/upload',
+                phase: getUploadErrorPhase(error),
+                filename: selected.filename,
+                fileSize: await getUploadFileSize(selected.fsPath),
+                autoPush: input.auto_push,
+                registryConfigured: Boolean(input.registry),
+                namespaceConfigured: Boolean(input.namespace),
+                detail: formatRestClientError(error),
+            });
+            throw error;
+        }
         if (!this.isActive(panel, generation)) {
             return false;
         }
@@ -1550,6 +1565,34 @@ function getRequestId(value: unknown): string | undefined {
 
 function getErrorMessage(error: unknown): string {
     return formatContainerInitializationError(error);
+}
+
+function getUploadErrorPhase(error: unknown): string {
+    if (!(error instanceof RestClientError)) {
+        return 'unknown';
+    }
+    switch (error.kind) {
+        case 'configuration':
+            return 'configuration';
+        case 'request':
+            return 'prepare_request';
+        case 'network':
+            return 'transport_or_response_wait';
+        case 'http':
+            return 'server_response';
+        case 'response':
+            return 'parse_response';
+    }
+    return 'unknown';
+}
+
+async function getUploadFileSize(filePath: string): Promise<number | undefined> {
+    try {
+        const stats = await fsPromises.stat(filePath);
+        return stats.isFile() ? stats.size : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 function logAdminError(logger: PanelLogger | undefined, message: string, error: unknown, data: unknown): void {

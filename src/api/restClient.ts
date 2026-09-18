@@ -68,10 +68,16 @@ export class RestClientError extends Error {
         message: string,
         public readonly statusCode?: number,
         public readonly cause?: unknown,
+        public readonly request?: RestRequestContext,
     ) {
         super(message);
         this.name = 'RestClientError';
     }
+}
+
+export interface RestRequestContext {
+    method: 'GET' | 'POST';
+    path: string;
 }
 
 export function formatRestClientError(error: unknown, fallback = '云端沙箱 服务操作失败'): string {
@@ -81,17 +87,39 @@ export function formatRestClientError(error: unknown, fallback = '云端沙箱 �
 
     if (error.kind === 'http' || error.kind === 'response') {
         const metadata = formatErrorMetadata(error.code, error.statusCode);
-        return `后端 云端沙箱 服务请求失败\n请联系支持团队解决\n${error.message}${metadata ? ` (${metadata})` : ''}`;
+        return [
+            '后端 云端沙箱 服务请求失败',
+            '请联系支持团队解决',
+            formatRequestContext(error.request),
+            `${error.message}${metadata ? ` (${metadata})` : ''}`,
+            formatCauseDetails(error.cause),
+        ].filter(Boolean).join('\n');
     }
     if (error.kind === 'network') {
         const apiError = getApiError(error.cause);
         if (apiError) {
             const metadata = formatErrorMetadata(apiError.code, error.statusCode);
-            return `后端 云端沙箱 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}\n${apiError.message}${metadata ? ` (${metadata})` : ''}`;
+            return [
+                '后端 云端沙箱 服务请求失败',
+                '请联系支持团队解决',
+                formatRequestContext(error.request),
+                `错误详情: ${error.message}`,
+                `${apiError.message}${metadata ? ` (${metadata})` : ''}`,
+            ].filter(Boolean).join('\n');
         }
-        return `后端 云端沙箱 服务请求失败\n请联系支持团队解决\n错误详情: ${error.message}`;
+        return [
+            '后端 云端沙箱 服务请求失败',
+            '请联系支持团队解决',
+            formatRequestContext(error.request),
+            `错误详情: ${error.message}`,
+            formatCauseDetails(error.cause),
+        ].filter(Boolean).join('\n');
     }
-    return error.message || fallback;
+    return [
+        formatRequestContext(error.request),
+        error.message || fallback,
+        formatCauseDetails(error.cause),
+    ].filter(Boolean).join('\n');
 }
 
 export interface RestHttpRequest {
@@ -406,23 +434,28 @@ export class RestClient {
     }
 
     private async uploadImage(input: UploadImageRequest): Promise<void> {
-        if ('filePath' in input) {
-            const multipart = await buildMultipartFileBody(input);
+        const request: RestRequestContext = { method: 'POST', path: '/admin/images/upload' };
+        try {
+            if ('filePath' in input) {
+                const multipart = await buildMultipartFileBody(input);
+                await this.requestNoContent('POST', '/admin/images/upload', {
+                    bodyStream: multipart.body,
+                    bodyLength: multipart.contentLength,
+                    headers: { 'Content-Type': multipart.contentType },
+                    timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
+                });
+                return;
+            }
+
+            const multipart = buildMultipartBody(input);
             await this.requestNoContent('POST', '/admin/images/upload', {
-                bodyStream: multipart.body,
-                bodyLength: multipart.contentLength,
+                body: multipart.body,
                 headers: { 'Content-Type': multipart.contentType },
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
             });
-            return;
+        } catch (error) {
+            throw withRequestContext(error, request);
         }
-
-        const multipart = buildMultipartBody(input);
-        await this.requestNoContent('POST', '/admin/images/upload', {
-            body: multipart.body,
-            headers: { 'Content-Type': multipart.contentType },
-            timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
-        });
     }
 
     private async requestJson<T>(method: 'GET' | 'POST', path: string, options?: RequestOptions): Promise<T> {
@@ -432,6 +465,9 @@ export class RestClient {
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
                 '后端 云端沙箱 管理服务返回空响应',
+                undefined,
+                undefined,
+                { method, path },
             );
         }
         return response as T;
@@ -448,6 +484,9 @@ export class RestClient {
                 'response',
                 REST_ERROR_CODES.INVALID_RESPONSE,
                 '后端 云端沙箱 管理服务返回了无效的文本响应',
+                undefined,
+                undefined,
+                { method, path },
             );
         }
         return response;
@@ -455,6 +494,7 @@ export class RestClient {
 
     private async send(method: 'GET' | 'POST', path: string, options: RequestOptions = {}): Promise<unknown | undefined> {
         const url = this.buildUrl(path, options.query);
+        const request: RestRequestContext = { method, path };
         const headers: Record<string, string> = {
             Accept: options.responseType === 'text' ? 'text/plain' : 'application/json',
             ...options.headers,
@@ -471,6 +511,9 @@ export class RestClient {
                     'request',
                     REST_ERROR_CODES.REQUEST,
                     '请求不能同时包含 JSON 和 multipart 内容',
+                    undefined,
+                    undefined,
+                    request,
                 );
             }
 
@@ -483,6 +526,7 @@ export class RestClient {
                     '请求体无法序列化',
                     undefined,
                     error,
+                    request,
                 );
             }
             headers['Content-Type'] = 'application/json';
@@ -493,6 +537,9 @@ export class RestClient {
                 'request',
                 REST_ERROR_CODES.REQUEST,
                 '请求不能同时包含内存和流式请求体',
+                undefined,
+                undefined,
+                request,
             );
         }
         if (bodyStream !== undefined
@@ -501,6 +548,9 @@ export class RestClient {
                 'request',
                 REST_ERROR_CODES.REQUEST,
                 '流式请求缺少有效的请求体长度',
+                undefined,
+                undefined,
+                request,
             );
         }
 
@@ -531,6 +581,7 @@ export class RestClient {
                     formatTimeoutMessage(path, options.timeoutMs ?? this.timeoutMs),
                     undefined,
                     error,
+                    request,
                 );
             }
             throw new RestClientError(
@@ -539,6 +590,7 @@ export class RestClient {
                 '后端 云端沙箱 管理服务请求失败',
                 undefined,
                 error,
+                request,
             );
         }
 
@@ -564,6 +616,7 @@ export class RestClient {
                     formatTimeoutMessage(path, options.timeoutMs ?? this.timeoutMs, response.statusCode),
                     response.statusCode,
                     apiError,
+                    request,
                 );
             }
             throw new RestClientError(
@@ -571,6 +624,8 @@ export class RestClient {
                 apiError?.code ?? REST_ERROR_CODES.HTTP,
                 apiError?.message ?? `后端 云端沙箱 管理服务请求失败 (HTTP ${response.statusCode})`,
                 response.statusCode,
+                undefined,
+                request,
             );
         }
 
@@ -587,6 +642,8 @@ export class RestClient {
                 REST_ERROR_CODES.INVALID_RESPONSE,
                 '后端 云端沙箱 管理服务返回了无效的 JSON',
                 response.statusCode,
+                undefined,
+                request,
             );
         }
         return parsedBody;
@@ -728,7 +785,7 @@ function normalizeVolumeStatus(value: unknown): VolumeStatusResponse {
 }
 
 function getApiError(value: unknown): ErrorResponse | undefined {
-    if (!isRecord(value) || typeof value.code !== 'string' || typeof value.message !== 'string') {
+    if (value instanceof Error || !isRecord(value) || typeof value.code !== 'string' || typeof value.message !== 'string') {
         return undefined;
     }
     return {
@@ -739,6 +796,52 @@ function getApiError(value: unknown): ErrorResponse | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
+}
+
+function formatRequestContext(request: RestRequestContext | undefined): string | undefined {
+    return request ? `请求: ${request.method} ${request.path}` : undefined;
+}
+
+function formatCauseDetails(cause: unknown): string | undefined {
+    if (!(cause instanceof Error) && !isRecord(cause)) {
+        return undefined;
+    }
+
+    const value = cause as Record<string, unknown>;
+    const message = typeof value.message === 'string' ? value.message : '';
+    const metadata = [
+        typeof value.code === 'string' ? `错误码: ${value.code}` : '',
+        typeof value.errno === 'number' || typeof value.errno === 'string' ? `errno: ${value.errno}` : '',
+        typeof value.syscall === 'string' ? `系统调用: ${value.syscall}` : '',
+        typeof value.address === 'string' ? `地址: ${value.address}` : '',
+        typeof value.port === 'number' || typeof value.port === 'string' ? `端口: ${value.port}` : '',
+    ].filter(Boolean);
+    if (metadata.length === 0) {
+        return undefined;
+    }
+    const safeMessage = typeof value.syscall === 'string' && PATH_BEARING_SYSCALLS.has(value.syscall)
+        ? `${value.syscall} 操作失败`
+        : message;
+    return `底层错误: ${safeMessage || '未知错误'}${metadata.length ? ` (${metadata.join('，')})` : ''}`;
+}
+
+const PATH_BEARING_SYSCALLS = new Set(['access', 'chmod', 'lstat', 'mkdir', 'open', 'readFile', 'realpath', 'rmdir', 'stat', 'unlink']);
+
+function withRequestContext(error: unknown, request: RestRequestContext): RestClientError {
+    if (error instanceof RestClientError) {
+        if (error.request) {
+            return error;
+        }
+        return new RestClientError(error.kind, error.code, error.message, error.statusCode, error.cause, request);
+    }
+    return new RestClientError(
+        'request',
+        REST_ERROR_CODES.REQUEST,
+        '请求执行失败',
+        undefined,
+        error,
+        request,
+    );
 }
 
 class RequestTimeoutError extends Error {

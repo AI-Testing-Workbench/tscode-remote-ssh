@@ -304,6 +304,52 @@ describe('AdminPanel', () => {
         );
     });
 
+    it('logs detailed image upload failures without exposing the local file path', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const reset = Object.assign(new Error('read ECONNRESET'), {
+            code: 'ECONNRESET',
+            errno: -4077,
+            syscall: 'read',
+        });
+        adminApi.uploadImage = vi.fn(async () => {
+            throw new RestClientError(
+                'network',
+                REST_ERROR_CODES.NETWORK,
+                '后端 云端沙箱 服务请求失败',
+                undefined,
+                reset,
+                { method: 'POST', path: '/admin/images/upload' },
+            );
+        });
+        const logger = { error: vi.fn() };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            logger,
+            showOpenDialog: vi.fn(async () => [{ fsPath: 'C:\\tmp\\release.tar.gz' } as never]),
+        });
+
+        await adminPanel.open();
+        await send(panel, { command: 'uploadImage', registry: 'registry.test:5000', namespace: 'testagent', autoPush: false });
+
+        expect(adminApi.uploadImage).toHaveBeenCalledOnce();
+        await vi.waitFor(() => expect(logger.error).toHaveBeenCalledWith(
+            '管理员镜像上传失败',
+            expect.objectContaining({
+                endpoint: 'POST /admin/images/upload',
+                phase: 'transport_or_response_wait',
+                filename: 'release.tar.gz',
+                fileSize: undefined,
+                autoPush: false,
+                registryConfigured: true,
+                namespaceConfigured: true,
+                detail: expect.stringContaining('底层错误: read ECONNRESET'),
+            }),
+        ));
+        expect(logger.error.mock.calls.flatMap(call => call).join('\n')).not.toContain('C:\\tmp\\release.tar.gz');
+    });
+
     it('shows the backend error below the error summary', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
