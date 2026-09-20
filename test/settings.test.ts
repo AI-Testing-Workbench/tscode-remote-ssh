@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { getRemoteSettings } from '../src/settings';
+import { DEFAULT_BACKEND_API_URL_BASE64, getRemoteSettings } from '../src/settings';
 import * as vscode from './mocks/vscode';
 
 describe('remote settings', () => {
     beforeEach(() => {
         vscode.resetConfiguration();
+    });
+
+    it('decodes the Base64-encoded backend API default', () => {
+        expect(getRemoteSettings().backendApiUrl).toBe(Buffer.from(DEFAULT_BACKEND_API_URL_BASE64, 'base64').toString('utf8'));
     });
 
     it('returns the configured values without mixing setting types', () => {
@@ -37,7 +41,7 @@ describe('remote settings', () => {
         vscode.setConfigurationValue('tscode.remote', 'disableClientValidation', 'false');
 
         expect(getRemoteSettings()).toEqual({
-            backendApiUrl: '',
+            backendApiUrl: Buffer.from(DEFAULT_BACKEND_API_URL_BASE64, 'base64').toString('utf8'),
             userName: 'root',
             skipKnownHostsCheck: true,
             historyLimit: 5,

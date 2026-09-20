@@ -104,12 +104,6 @@
 					"default": "",
 					"scope": "application"
 				},
-				"tscode.remote.configFile": {
-					"type": "string",
-					"description": "指定插件使用的配置文件的绝对路径。",
-					"default": "~/.local/share/testagent/config",
-					"scope": "application"
-				},
 				"tscode.remote.connectTimeout": {
 					"type": "number",
 					"description": "指定用于连接 云端沙箱 服务的超时时间 (秒)。",

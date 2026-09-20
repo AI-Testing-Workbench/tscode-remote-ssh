@@ -17,6 +17,7 @@ import { runDocker } from './utils/run-docker';
 import { getMappedPort } from './utils/get-mapped-port';
 import { waitForSSHReady } from './utils/wait-for-ssh-ready';
 import { prepareAlpineServerRuntime, prepareServerPath } from './utils/prepare-server';
+import { getConfiguredContainerConfigPath } from '../src/containerConfig';
 
 const TEST_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(TEST_DIRECTORY, 'fixtures', 'default');
@@ -120,6 +121,9 @@ for (const file of files.value) {
       const includedSSHConfig = client.files['/etc/ssh/config.d/hosts'];
       if (sshConfig) {
         fixtureFiles['/etc/ssh/ssh_config'] = sshConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
+        if (!client.hosts) {
+          fixtureFiles[getConfiguredContainerConfigPath()] = sshConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
+        }
       }
       if (includedSSHConfig) {
         fixtureFiles['/etc/ssh/config.d/hosts'] = includedSSHConfig.replace(/(Port\s+)2222\b/g, `$1${hostPort}`);
@@ -140,7 +144,8 @@ for (const file of files.value) {
             `  ContainerId fixture-container-${index}`,
           ].join('\n');
         }).join('\n\n');
-        fixtureFiles['/etc/ssh/ssh_config'] = `${fixtureFiles['/etc/ssh/ssh_config'] ?? ''}\n\n${containerConfig}\n`;
+        const containerConfigPath = getConfiguredContainerConfigPath();
+        fixtureFiles[containerConfigPath] = `${fixtureFiles[containerConfigPath] ?? ''}\n\n${containerConfig}\n`;
       }
       if (client.hosts && sshConfig && includedSSHConfig) {
         const defaultSSHConfigPath = path.resolve(os.homedir(), '.ssh', 'config');
@@ -155,7 +160,6 @@ for (const file of files.value) {
         ...fixtureFiles,
         '/data/vscodium/extensions/open-remote-ssh/src/scripts/server-setup.sh': SERVER_SETUP,
       });
-      vscode.setConfigurationValue('tscode.remote', 'configFile', '/etc/ssh/ssh_config');
       vscode.window.setPassword(server.password);
 
       if (client.hosts) {

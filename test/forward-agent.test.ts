@@ -14,6 +14,7 @@ import { runDocker } from './utils/run-docker';
 import { getMappedPort } from './utils/get-mapped-port';
 import { waitForSSHReady } from './utils/wait-for-ssh-ready';
 import { prepareServerPath } from './utils/prepare-server';
+import { getConfiguredContainerConfigPath } from '../src/containerConfig';
 
 const SERVER_SETUP_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/scripts/server-setup.sh');
 const serverSetup = fse.readFile(SERVER_SETUP_PATH, 'utf8');
@@ -100,7 +101,7 @@ afterAll(() => {
 
 it('forwards the agent through a socket that stays alive', async () => {
   vol.fromJSON({
-    '/etc/ssh/ssh_config': [
+    [getConfiguredContainerConfigPath()]: [
       'Host test',
       '  HostName 127.0.0.1',
       `  Port ${hostPort}`,
@@ -112,8 +113,6 @@ it('forwards the agent through a socket that stays alive', async () => {
     '/bin/vscodium/app/product.json': PRODUCT_JSON,
     '/data/vscodium/extensions/open-remote-ssh/src/scripts/server-setup.sh': SERVER_SETUP,
   });
-  vscode.setConfigurationValue('tscode.remote', 'configFile', '/etc/ssh/ssh_config');
-
   vscode.window.setPassword(PASSWORD);
 
   const preparationConnection = new SSHConnection({

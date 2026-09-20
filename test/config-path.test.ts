@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
     ContainerConfig,
-    DEFAULT_CONTAINER_CONFIG_SETTING,
+    DEFAULT_CONTAINER_CONFIG_PATH,
     getConfiguredContainerConfigPath,
 } from '../src/containerConfig';
 import { expandPath } from '../src/common/files';
@@ -35,22 +35,18 @@ describe('SSH config path setting', () => {
         }
     });
 
-    it('uses the dedicated default when configFile is not overridden', () => {
-        const defaultPath = path.resolve(os.homedir(), '.local', 'share', 'testagent', 'config');
+    it('uses the hardcoded sandbox SSH config path', () => {
+        const defaultPath = path.resolve(os.homedir(), '.local', 'share', 'testagent', 'sandbox.config');
         expect(getConfiguredContainerConfigPath()).toBe(defaultPath);
-        expect(DEFAULT_CONTAINER_CONFIG_SETTING).toBe('~/.local/share/testagent/config');
+        expect(DEFAULT_CONTAINER_CONFIG_PATH).toBe('~/.local/share/testagent/sandbox.config');
     });
 
-    it('uses a config file inside an existing configFile directory', async () => {
+    it('ignores the removed configFile setting', async () => {
         const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-config-directory-'));
         temporaryDirectories.push(directory);
         vscode.setConfigurationValue('tscode.remote', 'configFile', directory);
 
-        const expectedPath = path.join(directory, 'config');
-        expect(getConfiguredContainerConfigPath()).toBe(expectedPath);
-        const store = new ContainerConfig();
-        await expect(store.read()).resolves.toMatchObject({ originalText: '' });
-        expect(store.filePath).toBe(expectedPath);
+        expect(getConfiguredContainerConfigPath()).toBe(path.resolve(os.homedir(), '.local', 'share', 'testagent', 'sandbox.config'));
     });
 
     it('expands tilde, Unix variables, braced variables, and Windows variables', () => {
@@ -62,13 +58,12 @@ describe('SSH config path setting', () => {
         expect(expandPath(`%${environmentVariable}%\\config`)).toBe(`${process.env[environmentVariable]}\\config`);
     });
 
-    it('resolves an expanded custom configFile path to an absolute path', () => {
+    it('keeps path expansion available for other file settings', () => {
         process.env[environmentVariable] = path.join(os.tmpdir(), 'testagent-config-root');
-        vscode.setConfigurationValue('tscode.remote', 'configFile', `$${environmentVariable}/ssh/config`);
 
-        const expectedPath = path.resolve(process.env[environmentVariable] ?? '', 'ssh', 'config');
-        expect(getConfiguredContainerConfigPath()).toBe(expectedPath);
-        expect(getSSHConfigPath()).toBe(expectedPath);
-        expect(new ContainerConfig().filePath).toBe(expectedPath);
+        const expectedPath = `${process.env[environmentVariable]}/ssh/config`;
+        expect(expandPath(`$${environmentVariable}/ssh/config`)).toBe(expectedPath);
+        expect(getSSHConfigPath()).toBe(getConfiguredContainerConfigPath());
+        expect(new ContainerConfig().filePath).toBe(getConfiguredContainerConfigPath());
     });
 });

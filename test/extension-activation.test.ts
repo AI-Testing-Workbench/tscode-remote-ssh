@@ -99,13 +99,6 @@ describe('extension activation API', () => {
         expect((exports as unknown as Record<string, unknown>).admin).toBeUndefined();
         expect((exports as unknown as Record<string, unknown>).checkAdmin).toBeUndefined();
 
-        await expect(exports.getContainerIds()).rejects.toMatchObject({
-            code: 'api_url_missing',
-            message: '未配置后端 云端沙箱 管理服务的 API 地址',
-        });
-        const outputChannel = vscode.window.createOutputChannel.mock.results[0]?.value;
-        expect(outputChannel.appendLine).not.toHaveBeenCalledWith(expect.stringContaining('获取云端状态'));
-
         deactivate();
     });
 });

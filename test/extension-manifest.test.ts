@@ -44,7 +44,6 @@ describe('extension manifest', () => {
             'tscode.remote.statusSyncInterval': { type: 'number', default: 5 },
             'tscode.remote.debug': { type: 'boolean', default: false },
             'tscode.remote.disableClientValidation': { type: 'boolean', default: true },
-            'tscode.remote.configFile': { type: 'string', default: '~/.local/share/testagent/config' },
         });
 
         for (const key of [
@@ -55,7 +54,6 @@ describe('extension manifest', () => {
             'tscode.remote.statusSyncInterval',
             'tscode.remote.debug',
             'tscode.remote.disableClientValidation',
-            'tscode.remote.configFile',
         ]) {
             expect(properties[key].description).toBeTruthy();
         }

@@ -2,9 +2,12 @@ import * as vscode from 'vscode';
 import * as os from 'node:os';
 
 export const REMOTE_CONFIGURATION_SECTION = 'tscode.remote';
+export const DEFAULT_BACKEND_API_URL_BASE64 = 'aHR0cDovL3RzY29kZS1nYXRld2F5LnBhYXN1YXQuY21iY2hpbmEuY24vc2FuZGJveA==';
+
+const DEFAULT_BACKEND_API_URL = Buffer.from(DEFAULT_BACKEND_API_URL_BASE64, 'base64').toString('utf8');
 
 export const REMOTE_SETTING_DEFAULTS = {
-    backendApiUrl: '',
+    backendApiUrl: DEFAULT_BACKEND_API_URL,
     userName: 'root',
     skipKnownHostsCheck: true,
     historyLimit: 5,
@@ -26,7 +29,8 @@ export interface RemoteSettings {
 export function getRemoteSettings(
     configuration: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration(REMOTE_CONFIGURATION_SECTION)
 ): RemoteSettings {
-    const backendApiUrl = configuration.get<unknown>('backendApiUrl', REMOTE_SETTING_DEFAULTS.backendApiUrl);
+    const backendApiUrl = configuration.get<unknown>('backendApiUrl', '');
+    const configuredBackendApiUrl = typeof backendApiUrl === 'string' ? backendApiUrl.trim() : '';
     const userName = configuration.get<unknown>('userName', REMOTE_SETTING_DEFAULTS.userName);
     const skipKnownHostsCheck = configuration.get<unknown>('skipKnownHostsCheck', REMOTE_SETTING_DEFAULTS.skipKnownHostsCheck);
     const historyLimit = configuration.get<unknown>('historyLimit', REMOTE_SETTING_DEFAULTS.historyLimit);
@@ -35,8 +39,8 @@ export function getRemoteSettings(
     const disableClientValidation = configuration.get<unknown>('disableClientValidation', REMOTE_SETTING_DEFAULTS.disableClientValidation);
 
     return {
-        backendApiUrl: typeof backendApiUrl === 'string'
-            ? backendApiUrl.trim()
+        backendApiUrl: configuredBackendApiUrl
+            ? decodeDefaultBackendApiUrl(configuredBackendApiUrl)
             : REMOTE_SETTING_DEFAULTS.backendApiUrl,
         userName: typeof userName === 'string'
             ? userName.trim()
@@ -55,6 +59,10 @@ export function getRemoteSettings(
             ? disableClientValidation
             : REMOTE_SETTING_DEFAULTS.disableClientValidation,
     };
+}
+
+function decodeDefaultBackendApiUrl(value: string): string {
+    return value === DEFAULT_BACKEND_API_URL_BASE64 ? DEFAULT_BACKEND_API_URL : value;
 }
 
 export function getEffectiveRemoteUserName(configuredUserName: string): string {

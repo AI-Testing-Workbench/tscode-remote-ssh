@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectToContainer, openRemoteSSHWindow, promptOpenRemoteSSHWindow } from '../src/commands';
-import { ContainerConfig } from '../src/containerConfig';
+import { ContainerConfig, getConfiguredContainerConfigPath } from '../src/containerConfig';
 import SSHDestination from '../src/ssh/sshDestination';
 import * as vscode from './mocks/vscode';
 
@@ -160,7 +160,7 @@ describe('openRemoteSSHWindow', () => {
     it('lists only 云端沙箱 services from the dedicated config', async () => {
         const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-command-'));
         temporaryDirectories.push(directory);
-        const configPath = path.join(directory, 'config');
+        const configPath = path.join(directory, 'sandbox.config');
         await fs.writeFile(configPath, [
             'Host "云端沙箱 Service"',
             '\tHostName 10.0.0.1',
@@ -175,7 +175,6 @@ describe('openRemoteSSHWindow', () => {
             '\tHostName ordinary.example.test',
             '',
         ].join('\n'), 'utf8');
-        vscode.setConfigurationValue('tscode.remote', 'configFile', configPath);
         const configured = new ContainerConfig(configPath);
         const document = await configured.read();
         expect(configured.list(document.config)).toEqual([
@@ -191,7 +190,7 @@ describe('openRemoteSSHWindow', () => {
                 expiresAt: '2026-09-01T00:00:00.000Z',
             },
         ]);
-        expect(new ContainerConfig().filePath).toBe(configPath);
+        expect(new ContainerConfig().filePath).toBe(getConfiguredContainerConfigPath());
 
         let hideListener: (() => void) | undefined;
         const quickPick = {
@@ -212,12 +211,17 @@ describe('openRemoteSSHWindow', () => {
         };
         vscode.window.createQuickPick.mockReturnValue(quickPick as never);
 
-        const pending = promptOpenRemoteSSHWindow(false);
-        await vi.waitFor(() => expect(vscode.window.createQuickPick).toHaveBeenCalledOnce());
+        const readSpy = vi.spyOn(ContainerConfig.prototype, 'read').mockResolvedValue(document);
+        try {
+            const pending = promptOpenRemoteSSHWindow(false);
+            await vi.waitFor(() => expect(vscode.window.createQuickPick).toHaveBeenCalledOnce());
 
-        expect(quickPick.items).toEqual([{ label: '云端沙箱 Service' }]);
-        hideListener?.();
-        await pending;
-        expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+            expect(quickPick.items).toEqual([{ label: '云端沙箱 Service' }]);
+            hideListener?.();
+            await pending;
+            expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+        } finally {
+            readSpy.mockRestore();
+        }
     });
 });
