@@ -92,6 +92,7 @@
 		"onCommand:openremotessh.refreshContainers",
 		"onCommand:openremotessh.showLog",
 		"onResolveRemoteAuthority:ssh-remote",
+		"onUri",
 		"onView:sshHosts"
 	],
 	"contributes": {

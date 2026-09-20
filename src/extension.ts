@@ -3,6 +3,7 @@ import {Log} from './common/logger';
 import {REMOTE_SSH_AUTHORITY, RemoteSSHResolver} from './authResolver';
 import {connectToContainer, openSSHConfigFile, promptOpenRemoteSSHWindow} from './commands';
 import {getRemoteWorkspaceLocationData, RemoteLocationHistory} from './remoteLocationHistory';
+import {handleOpenRecentUri} from './openRecentUri';
 import {type CloudModeOptions, initializeCloudMode, refreshCloudMode} from './cloudMode';
 import {RestClient} from './api/restClient';
 import {ContainerConfig} from './containerConfig';
@@ -142,6 +143,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     if (locationData) {
         await locationHistory.addLocation(locationData[0], locationData[1]);
     }
+
+    context.subscriptions.push(vscode.window.registerUriHandler({
+        handleUri: uri => handleOpenRecentUri(uri, locationHistory, logger),
+    }));
 
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindow', () => promptOpenRemoteSSHWindow(false)));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindowInCurrentWindow', () => promptOpenRemoteSSHWindow(true)));

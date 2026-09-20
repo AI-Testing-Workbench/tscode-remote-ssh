@@ -16,6 +16,10 @@ export class RemoteLocationHistory {
         return this.remoteLocationHistory[host] || [];
     }
 
+    all(): Record<string, string[]> {
+        return this.remoteLocationHistory;
+    }
+
     async addLocation(host: string, path: string) {
         const hostLocations = this.remoteLocationHistory[host] || [];
 

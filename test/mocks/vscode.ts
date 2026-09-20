@@ -108,6 +108,7 @@ const window = {
     }),
     createTreeView: vi.fn(() => ({ dispose: vi.fn() })),
     registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
+    registerUriHandler: vi.fn(() => ({ dispose: vi.fn() })),
     createWebviewPanel: vi.fn(),
     showOpenDialog: vi.fn(),
 };
