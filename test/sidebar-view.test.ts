@@ -743,9 +743,8 @@ describe('SidebarViewProvider', () => {
         }));
         const values = ['https://gitee.com/alice/repo.git', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => ['授权使用 TestAgent 码云通用账户']);
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
-        const provider = createProvider({ state, config, publicApi, sync, showInputBox, showQuickPick });
+        const provider = createProvider({ state, config, publicApi, sync, showInputBox });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -756,11 +755,9 @@ describe('SidebarViewProvider', () => {
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
-            authorize_general_account: true,
         }, { initializationSignal: expect.any(AbortSignal) });
         expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址 (HTTP协议，可选)' }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云分支 (可选)' }));
-        expect(showQuickPick).toHaveBeenCalledWith(['授权使用 TestAgent 码云通用账户'], expect.objectContaining({ canPickMany: true }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
             host: 'alice/repo',
@@ -791,8 +788,7 @@ describe('SidebarViewProvider', () => {
         }));
         const values = ['https://github.com/JustWorkingAndWorking/testagent-cloud-remote-ssh.git', 'develop'];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => []);
-        const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
+        const provider = createProvider({ config, publicApi, showInputBox });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -804,7 +800,6 @@ describe('SidebarViewProvider', () => {
             gitee_user: 'JustWorkingAndWorking',
             gitee_repository: 'testagent-cloud-remote-ssh',
             gitee_branch: 'develop',
-            authorize_general_account: false,
         }, { initializationSignal: expect.any(AbortSignal) });
     });
 
@@ -819,15 +814,13 @@ describe('SidebarViewProvider', () => {
         }));
         const values = ['   '];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => []);
-        const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
+        const provider = createProvider({ config, publicApi, showInputBox });
 
         await provider.createContainerFromPrompt();
 
         expect(showInputBox).toHaveBeenCalledOnce();
-        expect(showQuickPick).toHaveBeenCalledOnce();
         expect(publicApi.createContainer).toHaveBeenCalledWith(
-            { authorize_general_account: false },
+            {},
             { initializationSignal: expect.any(AbortSignal) },
         );
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
@@ -842,13 +835,11 @@ describe('SidebarViewProvider', () => {
         const publicApi = createPublicApi();
         const values = ['alice'];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => []);
-        const provider = createProvider({ publicApi, showInputBox, showQuickPick });
+        const provider = createProvider({ publicApi, showInputBox });
 
         await provider.createContainerFromPrompt();
 
         expect(showInputBox).toHaveBeenCalledOnce();
-        expect(showQuickPick).not.toHaveBeenCalled();
         expect(publicApi.createContainer).not.toHaveBeenCalled();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云仓库地址格式无效', { modal: true });
     });
@@ -864,8 +855,7 @@ describe('SidebarViewProvider', () => {
         }));
         const values = ['https://gitee.com/alice/repo', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
-        const showQuickPick = vi.fn(async () => []);
-        const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
+        const provider = createProvider({ config, publicApi, showInputBox });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -888,7 +878,6 @@ describe('SidebarViewProvider', () => {
         const provider = createProvider({
             publicApi,
             showInputBox: vi.fn(async () => ''),
-            showQuickPick: vi.fn(async () => []),
         });
 
         await provider.createContainerFromPrompt();
@@ -921,7 +910,6 @@ describe('SidebarViewProvider', () => {
             publicApi,
             config,
             showInputBox: vi.fn(async () => values.shift()),
-            showQuickPick: vi.fn(async () => []),
         });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
@@ -957,7 +945,6 @@ describe('SidebarViewProvider', () => {
             config,
             sync,
             showInputBox: vi.fn(async () => ''),
-            showQuickPick: vi.fn(async () => []),
         });
 
         const creating = provider.createContainerFromPrompt();
@@ -999,7 +986,6 @@ describe('SidebarViewProvider', () => {
             publicApi,
             config,
             showInputBox: vi.fn(async () => ''),
-            showQuickPick: vi.fn(async () => []),
         });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
@@ -1216,7 +1202,6 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
         onDisconnect: options.onDisconnect,
         operationRegistry: options.operationRegistry,
         showInputBox: options.showInputBox,
-        showQuickPick: options.showQuickPick,
     });
 }
 
@@ -1244,10 +1229,6 @@ interface ProviderTestOptions {
     onDisconnect: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox: (options: import('vscode').InputBoxOptions) => Thenable<string | undefined>;
-    showQuickPick: (
-        items: readonly string[],
-        options: import('vscode').QuickPickOptions & { canPickMany: true },
-    ) => Thenable<string[] | undefined>;
     view: ReturnType<typeof createWebviewView>;
 }
 

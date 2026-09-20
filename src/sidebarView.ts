@@ -87,10 +87,6 @@ export interface SidebarViewOptions {
     onDisconnect?: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox?: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
-    showQuickPick?: (
-        items: readonly string[],
-        options: vscode.QuickPickOptions & { canPickMany: true },
-    ) => Thenable<string[] | undefined>;
 }
 
 interface SidebarViewContext {
@@ -115,10 +111,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly onDisconnect: (() => void | Promise<void>) | undefined;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
-    private readonly showQuickPick: (
-        items: readonly string[],
-        options: vscode.QuickPickOptions & { canPickMany: true },
-    ) => Thenable<string[] | undefined>;
     private readonly stateSubscription: { dispose: () => void };
     private readonly operationSubscription: { dispose: () => void };
     private readonly optimisticallyRemovedContainerIds = new Set<string>();
@@ -155,7 +147,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.onDisconnect = options.onDisconnect;
         this.operationRegistry = options.operationRegistry;
         this.showInputBox = options.showInputBox ?? (inputOptions => vscode.window.showInputBox(inputOptions));
-        this.showQuickPick = options.showQuickPick ?? ((items, quickPickOptions) => vscode.window.showQuickPick(items, quickPickOptions));
         this.stateSubscription = this.state.subscribe(() => this.handleSyncStateUpdated());
         this.operationSubscription = this.operationRegistry?.subscribe(() => this.render()) ?? { dispose: () => undefined };
     }
@@ -787,18 +778,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             }
             normalizedGiteeBranch = giteeBranch.trim();
         }
-        const authorization = await this.showQuickPick(['授权使用 TestAgent 码云通用账户'], {
-            title,
-            placeHolder: '勾选以使用 TestAgent 码云通用账户执行 git 命令',
-            canPickMany: true,
-        });
-        if (authorization === undefined) {
-            return;
-        }
-        if (!this.isActiveView(context)) {
-            return;
-        }
-
         const initializationController = new AbortController();
         this.initializationControllers.set(initializationController, context);
         const createdSuccessfully = await Promise.resolve(vscode.window.withProgress({
@@ -811,7 +790,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
                 ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
                 ...(normalizedGiteeBranch ? { gitee_branch: normalizedGiteeBranch } : {}),
-                authorize_general_account: authorization.includes('授权使用 TestAgent 码云通用账户'),
             }, { initializationSignal: initializationController.signal });
             if (!this.isActiveView(context)) {
                 return false;
