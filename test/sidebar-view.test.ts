@@ -92,6 +92,8 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
         expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
+        expect(view.webview.html).toContain('data-action="clearExpired"');
+        expect(view.webview.html.indexOf('data-action="clearExpired"')).toBeLessThan(view.webview.html.indexOf('data-action="refresh"'));
         expect(view.webview.html).not.toContain('<h1 class="page-title">');
         expect(view.webview.html).not.toContain('REMOTE WORKSPACE');
         expect(view.webview.html).not.toContain('YOUR SERVICES');
@@ -680,6 +682,36 @@ describe('SidebarViewProvider', () => {
         expect(publicApi.deleteContainer).not.toHaveBeenCalled();
     });
 
+    it('clears all expired local entries without calling a remote delete API', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [
+                syncedContainer('history-1', 'missing', false, '2026-09-01T00:00:00.000Z'),
+                syncedContainer('history-2', 'missing', false, '2026-09-02T00:00:00.000Z'),
+            ],
+            changed: false,
+        });
+        const config = createConfig([
+            { ...configuredContainer('history-1'), expiresAt: '2026-09-01T00:00:00.000Z' },
+            { ...configuredContainer('history-2'), expiresAt: '2026-09-02T00:00:00.000Z' },
+            configuredContainer('active-1'),
+        ]);
+        const publicApi = createPublicApi();
+        const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
+        const provider = createProvider({ state, config, publicApi, sync });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'clearExpired' });
+        await flushMessages();
+
+        expect(config.removeContainer).toHaveBeenNthCalledWith(1, expect.anything(), 'history-1');
+        expect(config.removeContainer).toHaveBeenNthCalledWith(2, expect.anything(), 'history-2');
+        expect(config.write).toHaveBeenCalledOnce();
+        expect(publicApi.deleteContainer).not.toHaveBeenCalled();
+        expect(sync.refresh).toHaveBeenCalledOnce();
+    });
+
     it('shows the deletion banner only for a service missing from the cloud', async () => {
         const state = new SidebarSyncState();
         state.update({
@@ -1078,7 +1110,7 @@ describe('Webview script', () => {
 
         expect(messages).toEqual([]);
         expect(restartButton.classList.contains('is-confirming')).toBe(true);
-        expect(restartButton.innerHTML).toBe('确认');
+        expect(restartButton.innerHTML).toBe('确认?');
 
         restartButton.fire('click', { target: restartButton });
 

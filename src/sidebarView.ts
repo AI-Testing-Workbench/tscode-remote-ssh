@@ -546,6 +546,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 case 'removeHistory':
                     await this.removeHistory(containerId);
                     return;
+                case 'clearExpired':
+                    await this.removeExpiredContainers();
+                    return;
                 default:
                     return;
             }
@@ -693,6 +696,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (removed) {
             this.optimisticallyRemoveContainer(containerId);
         }
+        await this.refreshAfterMutation();
+    }
+
+    private async removeExpiredContainers(): Promise<void> {
+        await this.runMutation(async () => {
+            const document = await this.config.read();
+            const expiredContainerIds = [...new Set(this.config.list(document.config)
+                .filter(entry => Boolean(entry.expiresAt))
+                .map(entry => entry.containerId))];
+            let changed = false;
+            for (const containerId of expiredContainerIds) {
+                changed = this.config.removeContainer(document.config, containerId) || changed;
+            }
+            if (changed) {
+                await this.config.write(document);
+            }
+        });
         await this.refreshAfterMutation();
     }
 
@@ -1010,12 +1030,19 @@ function renderSidebarHtml(
             </div>`;
     const adminButton = showAdmin ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin') : '';
     const configButton = showAdmin ? renderToolbarButton('openConfig', '打开配置文件', 'config') : '';
+    const clearExpiredButton = renderToolbarButton(
+        'clearExpired',
+        '清空过期条目',
+        'delete',
+        !containers.some(container => !container.remote && Boolean(container.expiresAt)),
+    );
     return renderDocument(`
         <main class="sidebar">
             <header class="app-bar">
                 <div class="toolbar-actions" role="toolbar">
                     ${adminButton}
                     ${configButton}
+                    ${clearExpiredButton}
                     ${renderToolbarButton('refresh', '刷新页面', 'refresh')}
                 </div>
             </header>
@@ -1024,8 +1051,8 @@ function renderSidebarHtml(
     `);
 }
 
-function renderToolbarButton(action: string, label: string, icon: SidebarIcon): string {
-    return `<button class="icon-button" data-action="${action}" title="${escapeHtml(label)}">${renderIcon(icon)}</button>`;
+function renderToolbarButton(action: string, label: string, icon: SidebarIcon, disabled = false): string {
+    return `<button class="icon-button" data-action="${action}" title="${escapeHtml(label)}"${disabled ? ' disabled' : ''}>${renderIcon(icon)}</button>`;
 }
 
 function renderContainerCard(container: SyncedContainer, operationInFlight: boolean): string {
