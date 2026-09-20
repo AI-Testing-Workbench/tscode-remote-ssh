@@ -55,6 +55,30 @@ describe('openRemoteSSHWindow', () => {
         );
     });
 
+    it('opens the repository folder below the configured path when a repository is cloned', async () => {
+        vscode.setConfigurationValue('tscode.remote', 'defaultPath', '/app');
+
+        await expect(openRemoteSSHWindow('dev', true, 'repo')).resolves.toBeUndefined();
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'vscode.openFolder',
+            { scheme: 'vscode-remote', authority: 'ssh-remote+dev', path: '/app/repo' },
+            { forceNewWindow: false }
+        );
+    });
+
+    it('keeps the configured path when no repository is available', async () => {
+        vscode.setConfigurationValue('tscode.remote', 'defaultPath', '/app');
+
+        await expect(openRemoteSSHWindow('dev', true)).resolves.toBeUndefined();
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'vscode.openFolder',
+            { scheme: 'vscode-remote', authority: 'ssh-remote+dev', path: '/app' },
+            { forceNewWindow: false }
+        );
+    });
+
     it('propagates a remote window command failure', async () => {
         const failure = new Error('window command failed');
         vscode.commands.executeCommand.mockRejectedValueOnce(failure);

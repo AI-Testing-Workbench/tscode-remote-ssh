@@ -345,7 +345,7 @@ describe('SidebarViewProvider', () => {
         const state = new SidebarSyncState();
         state.update({
             containers: [
-                syncedContainer('slash-alias', 'running', true),
+                syncedContainer('slash-alias', 'running', true, undefined, undefined, undefined, { giteeRepository: 'repo' }),
                 syncedContainer('space-alias', 'running', true),
             ],
             changed: false,
@@ -363,7 +363,7 @@ describe('SidebarViewProvider', () => {
         view.fireMessage({ command: 'connect', containerId: 'space-alias' });
         await flushMessages();
 
-        expect(onConnect).toHaveBeenNthCalledWith(1, 'alice/repo');
+        expect(onConnect).toHaveBeenNthCalledWith(1, 'alice/repo', 'repo');
         expect(onConnect).toHaveBeenNthCalledWith(2, 'TestAgent Cloud Service');
     });
 
@@ -1148,7 +1148,7 @@ interface ProviderTestOptions {
     isDisconnected: () => boolean;
     onOpenConfig: () => void | Promise<void>;
     onOpenAdmin: () => void | Promise<void>;
-    onConnect: (host: string) => void | Promise<void>;
+    onConnect: (host: string, giteeRepository?: string) => void | Promise<void>;
     onDisconnect: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox: (options: import('vscode').InputBoxOptions) => Thenable<string | undefined>;

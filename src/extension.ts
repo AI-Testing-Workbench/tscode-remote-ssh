@@ -106,7 +106,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         onOpenAdmin: () => {
             void adminPanel.open();
         },
-        onConnect: host => connectToContainer(host, () => activeSidebarView?.refreshCloudMode()),
+        onConnect: (host, giteeRepository) => connectToContainer(
+            host,
+            () => activeSidebarView?.refreshCloudMode(),
+            giteeRepository,
+        ),
         onDisconnect: async () => {
             await vscode.commands.executeCommand('workbench.action.remote.close');
         },

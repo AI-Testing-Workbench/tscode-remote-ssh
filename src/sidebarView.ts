@@ -83,7 +83,7 @@ export interface SidebarViewOptions {
     isDisconnected?: () => boolean;
     onOpenConfig?: () => void | Promise<void>;
     onOpenAdmin?: () => void | Promise<void>;
-    onConnect?: (host: string) => void | Promise<void>;
+    onConnect?: (host: string, giteeRepository?: string) => void | Promise<void>;
     onDisconnect?: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox?: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
@@ -111,7 +111,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly isDisconnected: () => boolean;
     private readonly onOpenConfig: (() => void | Promise<void>) | undefined;
     private readonly onOpenAdmin: (() => void | Promise<void>) | undefined;
-    private readonly onConnect: ((host: string) => void | Promise<void>) | undefined;
+    private readonly onConnect: ((host: string, giteeRepository?: string) => void | Promise<void>) | undefined;
     private readonly onDisconnect: (() => void | Promise<void>) | undefined;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
@@ -594,7 +594,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
         this.beginContainerOperation(container.containerId);
         try {
-            await this.onConnect?.(configuredEntry.host.trim());
+            const host = configuredEntry.host.trim();
+            const giteeRepository = container.giteeRepository?.trim();
+            if (giteeRepository) {
+                await this.onConnect?.(host, giteeRepository);
+            } else {
+                await this.onConnect?.(host);
+            }
         } finally {
             this.endContainerOperation(container.containerId);
             this.render();

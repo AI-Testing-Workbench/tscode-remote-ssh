@@ -23,6 +23,7 @@ const OPEN_IN_NEW_WINDOW = '新建窗口打开';
 export async function connectToContainer(
     host: string,
     refreshSidebar?: () => void | Promise<void>,
+    giteeRepository?: string,
 ): Promise<void> {
     let reuseWindow = !hasOpenWorkspace();
     if (!reuseWindow) {
@@ -38,7 +39,7 @@ export async function connectToContainer(
     }
 
     const sshDest = SSHDestination.parse(host);
-    await openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow);
+    await openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow, giteeRepository);
     if (reuseWindow) {
         await refreshSidebar?.();
     }
@@ -98,10 +99,10 @@ async function promptForHost(): Promise<string | undefined> {
     });
 }
 
-export function openRemoteSSHWindow(host: string, reuseWindow: boolean): Thenable<unknown> {
+export function openRemoteSSHWindow(host: string, reuseWindow: boolean, giteeRepository?: string): Thenable<unknown> {
     const defaultPath = vscode.workspace.getConfiguration('tscode.remote').get<string>('defaultPath', '');
     if (defaultPath) {
-        return openRemoteSSHLocationWindow(host, defaultPath, reuseWindow);
+        return openRemoteSSHLocationWindow(host, appendRepositoryPath(defaultPath, giteeRepository), reuseWindow);
     }
 
     return vscode.commands.executeCommand('vscode.newWindow', { remoteAuthority: getRemoteAuthority(host), reuseWindow });
@@ -109,6 +110,27 @@ export function openRemoteSSHWindow(host: string, reuseWindow: boolean): Thenabl
 
 export function openRemoteSSHLocationWindow(host: string, path: string, reuseWindow: boolean): Thenable<unknown> {
     return vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.from({ scheme: 'vscode-remote', authority: getRemoteAuthority(host), path }), { forceNewWindow: !reuseWindow });
+}
+
+function appendRepositoryPath(defaultPath: string, giteeRepository?: string): string {
+    const repository = giteeRepository?.trim();
+    if (!repository || !isSafeRepositoryDirectoryName(repository)) {
+        return defaultPath;
+    }
+
+    const basePath = defaultPath.replace(/\/+$/, '');
+    return `${basePath || '/'}${basePath ? '/' : ''}${repository}`;
+}
+
+function isSafeRepositoryDirectoryName(value: string): boolean {
+    return value !== '.'
+        && value !== '..'
+        && !value.includes('..')
+        && !/[\\/?#%\s]/.test(value)
+        && !Array.from(value).some(character => {
+            const code = character.charCodeAt(0);
+            return code < 32 || code === 127;
+        });
 }
 
 export async function addNewHost() {

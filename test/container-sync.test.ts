@@ -42,6 +42,7 @@ describe('ContainerSync', () => {
             {
                 containerId: 'container-1',
                 host: 'alice/repo',
+                giteeRepository: 'repo',
                 hostName: '10.0.0.1',
                 port: 22,
                 status: 'running',

@@ -21,6 +21,7 @@ export interface ContainerSyncError {
 export interface SyncedContainer {
     containerId: string;
     host: string;
+    giteeRepository?: string;
     hostName?: string;
     status: string;
     endpoint?: string | null;
@@ -539,6 +540,7 @@ export class ContainerSync {
             return {
                 containerId,
                 host,
+                ...(response?.gitee_repository?.trim() ? { giteeRepository: response.gitee_repository.trim() } : {}),
                 ...(hostName ? { hostName } : {}),
                 ...(port !== undefined ? { port } : {}),
                 status: response?.status ?? 'unknown',
