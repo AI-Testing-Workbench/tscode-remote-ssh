@@ -92,14 +92,35 @@ export function getContainerHostName(
 export function getUniqueHostName(baseName: string, usedNames: Set<string>): string {
     const normalizedBaseName = baseName.trim() || DEFAULT_CONTAINER_HOST_NAME;
     const normalizedUsedNames = new Set(Array.from(usedNames, normalizeHostName));
+    const normalizedSuffixPrefix = `${normalizeHostName(normalizedBaseName)} (`;
+    let highestSuffix = 0;
+    for (const usedName of normalizedUsedNames) {
+        if (!usedName.startsWith(normalizedSuffixPrefix) || !usedName.endsWith(')')) {
+            continue;
+        }
+        const suffixText = usedName.slice(normalizedSuffixPrefix.length, -1);
+        if (!/^\d+$/.test(suffixText)) {
+            continue;
+        }
+        const suffix = Number(suffixText);
+        if (Number.isSafeInteger(suffix)) {
+            highestSuffix = Math.max(highestSuffix, suffix);
+        }
+    }
+
     let candidate = normalizedBaseName;
-    let suffix = 1;
+    if (!normalizedUsedNames.has(normalizeHostName(candidate)) && highestSuffix === 0) {
+        usedNames.add(candidate);
+        return candidate;
+    }
+
+    let suffix = highestSuffix + 1;
+    candidate = `${normalizedBaseName} (${suffix})`;
     while (normalizedUsedNames.has(normalizeHostName(candidate))) {
-        candidate = `${normalizedBaseName} (${suffix})`;
         suffix += 1;
+        candidate = `${normalizedBaseName} (${suffix})`;
     }
     usedNames.add(candidate);
-    normalizedUsedNames.add(normalizeHostName(candidate));
     return candidate;
 }
 
@@ -596,13 +617,8 @@ export class ContainerSync {
         remoteStatuses: Map<string, RemoteStatusResult>,
         localEntries: ContainerConfigEntry[],
     ): Map<string, HostAssignment> {
-        const remoteIdSet = new Set(remoteIds);
-        const usedNames = new Set<string>();
-        for (const entry of localEntries) {
-            if (!remoteIdSet.has(entry.containerId) && entry.host.trim()) {
-                usedNames.add(entry.host);
-            }
-        }
+        const usedNames = new Set(localEntries.map(entry => entry.host).filter(host => host.trim()));
+        const assignedNames = new Set<string>();
 
         const assignments = new Map<string, HostAssignment>();
         const localById = indexEntries(localEntries);
@@ -615,8 +631,13 @@ export class ContainerSync {
             const baseName = response
                 ? getContainerHostName(response.gitee_user, response.gitee_repository)
                 : localEntry?.host ?? DEFAULT_CONTAINER_HOST_NAME;
+            const existingHost = localEntry?.host.trim();
+            const host = existingHost && !assignedNames.has(normalizeHostName(existingHost))
+                ? existingHost
+                : getUniqueHostName(baseName, usedNames);
+            assignedNames.add(normalizeHostName(host));
             assignments.set(containerId, {
-                host: getUniqueHostName(baseName, usedNames),
+                host,
                 ...(hostName ? { hostName } : {}),
                 ...(port !== undefined ? { port } : {}),
             });

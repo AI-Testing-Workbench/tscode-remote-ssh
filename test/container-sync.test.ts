@@ -147,7 +147,7 @@ describe('ContainerSync', () => {
         const returned = await sync.sync();
         expect(returned.containers[0]).toMatchObject({
             containerId: 'container-3',
-            host: '云端沙箱 服务',
+            host: '10.0.0.3',
             hostName: '10.0.0.3',
             port: 22,
             status: 'running',
@@ -290,6 +290,32 @@ describe('ContainerSync', () => {
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(3);
     });
 
+    it('keeps existing Host aliases when a new duplicate service appears', async () => {
+        const store = await createStore();
+        let containers = [
+            status('one', 'running', '10.0.0.1:22', 'alice', 'repo'),
+            status('two', 'running', '10.0.0.2:22', 'alice', 'repo'),
+        ];
+        const sync = createSync(store, {
+            getContainerStatuses: vi.fn(async () => ({ containers })),
+        });
+
+        await sync.sync();
+        containers = [
+            status('two', 'running', '10.0.0.2:22', 'alice', 'repo'),
+            status('one', 'running', '10.0.0.1:22', 'alice', 'repo'),
+            status('three', 'running', '10.0.0.3:22', 'alice', 'repo'),
+        ];
+
+        const result = await sync.sync();
+
+        expect(new Map(result.containers.map(container => [container.containerId, container.host]))).toEqual(new Map([
+            ['one', 'alice/repo'],
+            ['two', 'alice/repo (1)'],
+            ['three', 'alice/repo (2)'],
+        ]));
+    });
+
     it('repairs duplicate Host aliases already present in the config', async () => {
         const store = await createStore();
         const document = await store.read();
@@ -317,6 +343,8 @@ describe('ContainerSync', () => {
 
     it('adds a suffix when an existing Host differs only by case or whitespace', () => {
         expect(getUniqueHostName('alice/repo', new Set([' Alice/Repo ']))).toBe('alice/repo (1)');
+        expect(getUniqueHostName('alice/repo', new Set(['alice/repo', 'alice/repo (2)']))).toBe('alice/repo (3)');
+        expect(getUniqueHostName('alice/repo', new Set(['alice/repo (1)', 'alice/repo (2)']))).toBe('alice/repo (3)');
     });
 
     it('notifies once and skips new config entries for invalid endpoints', async () => {
