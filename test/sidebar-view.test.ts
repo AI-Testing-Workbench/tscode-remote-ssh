@@ -107,6 +107,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('border-radius: 12px');
         expect(view.webview.html).toContain('.action-button { position: relative;');
         expect(view.webview.html).toContain('button.is-loading');
+        expect(view.webview.html).toContain('.action-button.is-confirming');
         expect(view.webview.html).toContain('justify-content: center');
         expect(view.webview.html).toContain('.app-bar { display: flex; align-items: center;');
         expect(view.webview.html).toContain('.sidebar { width: 100%; max-width: none; margin: 0; }');
@@ -1045,6 +1046,61 @@ describe('Webview script', () => {
         expect(connectButton.hasAttribute('disabled')).toBe(true);
         expect(connectButton.classList.contains('is-loading')).toBe(true);
     });
+
+    it('requires confirmation for restart and delete, and expires it after five seconds', () => {
+        vi.useFakeTimers();
+        const messages: unknown[] = [];
+        const restartButton = createScriptElement({
+            'data-action': 'restart',
+            'data-container-id': 'container-1',
+        }, '<svg>restart</svg>重启');
+        const deleteButton = createScriptElement({
+            'data-action': 'delete',
+            'data-container-id': 'container-1',
+        }, '<svg>delete</svg>销毁');
+        const document = {
+            querySelectorAll: (selector: string): ScriptElement[] => selector === '[data-action]'
+                ? [restartButton, deleteButton]
+                : [],
+        };
+
+        new Script(WEBVIEW_SCRIPT).runInNewContext({
+            acquireVsCodeApi: () => ({ postMessage: (message: unknown) => messages.push(message) }),
+            document,
+            window: {
+                addEventListener: () => undefined,
+                clearTimeout,
+                setTimeout,
+            },
+        });
+
+        restartButton.fire('click', { target: restartButton });
+
+        expect(messages).toEqual([]);
+        expect(restartButton.classList.contains('is-confirming')).toBe(true);
+        expect(restartButton.innerHTML).toBe('确认');
+
+        restartButton.fire('click', { target: restartButton });
+
+        expect(messages).toEqual([{ command: 'restart', containerId: 'container-1', requestId: '1' }]);
+        expect(restartButton.classList.contains('is-loading')).toBe(true);
+
+        deleteButton.fire('click', { target: deleteButton });
+        expect(deleteButton.classList.contains('is-confirming')).toBe(true);
+        vi.advanceTimersByTime(5000);
+
+        expect(deleteButton.classList.contains('is-confirming')).toBe(false);
+        expect(deleteButton.innerHTML).toBe('<svg>delete</svg>销毁');
+        expect(messages).toHaveLength(1);
+
+        deleteButton.fire('click', { target: deleteButton });
+        deleteButton.fire('click', { target: deleteButton });
+
+        expect(messages).toEqual([
+            { command: 'restart', containerId: 'container-1', requestId: '1' },
+            { command: 'delete', containerId: 'container-1', requestId: '2' },
+        ]);
+    });
 });
 
 function syncedContainer(
@@ -1071,10 +1127,12 @@ function syncedContainer(
 }
 
 interface ScriptElement {
+    innerHTML: string;
     addEventListener(type: string, listener: (event: { target: ScriptElement }) => void): void;
     classList: {
         add(value: string): void;
         contains(value: string): boolean;
+        remove(value: string): void;
     };
     fire(type: string, event: { target: ScriptElement }): void;
     getAttribute(name: string): string | null;
@@ -1083,14 +1141,16 @@ interface ScriptElement {
     setAttribute(name: string, value: string): void;
 }
 
-function createScriptElement(initialAttributes: Record<string, string>): ScriptElement {
+function createScriptElement(initialAttributes: Record<string, string>, innerHTML = ''): ScriptElement {
     const attributes = new Map(Object.entries(initialAttributes));
     const classes = new Set<string>();
     const listeners = new Map<string, (event: { target: ScriptElement }) => void>();
     return {
+        innerHTML,
         classList: {
             add: value => classes.add(value),
             contains: value => classes.has(value),
+            remove: value => classes.delete(value),
         },
         fire: (type, event) => listeners.get(type)?.(event),
         getAttribute: name => attributes.get(name) ?? null,

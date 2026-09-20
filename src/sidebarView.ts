@@ -1301,6 +1301,8 @@ function renderDocument(body: string): string {
         .card-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
         .action-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: var(--outline); }
         .action-button .icon { width: 16px; height: 16px; }
+        .action-button.is-confirming { color: var(--error); border-color: var(--error); background: transparent; }
+        .action-button.is-confirming:hover { color: var(--error); border-color: var(--error); background: var(--surface-container-high); }
         .action-primary { border-color: var(--outline); color: var(--on-primary); background: var(--primary); }
         .action-primary:hover { border-color: var(--outline); color: var(--on-primary); background: var(--primary); opacity: .9; }
         button.is-loading { pointer-events: none; color: transparent; opacity: .8; }

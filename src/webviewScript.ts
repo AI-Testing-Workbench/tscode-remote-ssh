@@ -2,6 +2,7 @@ export const WEBVIEW_SCRIPT = String.raw`
 /* global acquireVsCodeApi, document, window */
 const vscode = acquireVsCodeApi();
 let nextRequestId = 0;
+const confirmationTimers = new WeakMap();
 const post = (command, containerId) => {
     if (!command) return;
     const requestId = String(++nextRequestId);
@@ -14,6 +15,31 @@ const startLoading = actionButton => {
     actionButton.setAttribute('disabled', '');
     actionButton.setAttribute('aria-busy', 'true');
     return true;
+};
+const requiresConfirmation = action => action === 'restart' || action === 'delete';
+const confirmDestructiveAction = actionButton => {
+    if (actionButton.hasAttribute('disabled') || actionButton.classList.contains('is-loading')) return false;
+    const existingConfirmation = confirmationTimers.get(actionButton);
+    if (existingConfirmation) {
+        window.clearTimeout(existingConfirmation.timeoutId);
+        confirmationTimers.delete(actionButton);
+        actionButton.innerHTML = existingConfirmation.originalHtml;
+        actionButton.classList.remove('is-confirming');
+        return true;
+    }
+
+    const originalHtml = actionButton.innerHTML;
+    const timeoutId = window.setTimeout(() => {
+        const confirmation = confirmationTimers.get(actionButton);
+        if (!confirmation || confirmation.timeoutId !== timeoutId) return;
+        confirmationTimers.delete(actionButton);
+        actionButton.innerHTML = confirmation.originalHtml;
+        actionButton.classList.remove('is-confirming');
+    }, 5000);
+    confirmationTimers.set(actionButton, { originalHtml, timeoutId });
+    actionButton.innerHTML = '确认?';
+    actionButton.classList.add('is-confirming');
+    return false;
 };
 const blocksConnection = action => action === 'restart' || action === 'start' || action === 'stop' || action === 'delete';
 const updateConnectionButtons = (containerId, locked) => {
@@ -31,8 +57,9 @@ const updateConnectionButtons = (containerId, locked) => {
 };
 document.querySelectorAll('[data-action]').forEach(actionButton => {
     actionButton.addEventListener('click', () => {
-        if (!startLoading(actionButton)) return;
         const action = actionButton.getAttribute('data-action');
+        if (requiresConfirmation(action) && !confirmDestructiveAction(actionButton)) return;
+        if (!startLoading(actionButton)) return;
         const containerId = actionButton.getAttribute('data-container-id');
         if (blocksConnection(action)) updateConnectionButtons(containerId, true);
         const requestId = post(action, containerId);
