@@ -739,7 +739,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         const title = '创建新 云端沙箱 服务';
         const giteeInput = await this.showInputBox({
             title,
-            prompt: '码云仓库地址 (HTTP协议，可选)',
+            prompt: '码云仓库地址 (HTTP协议)',
             placeHolder: '',
         });
         if (giteeInput === undefined) {
