@@ -408,7 +408,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
         if (!this.pageReady) {
-            this.setWebviewHtml(renderLoadingHtml());
+            if (containers.length) {
+                this.setWebviewHtml(renderSidebarHtml(
+                    containers,
+                    this.adminAllowed,
+                    activeOperationIds,
+                ));
+            } else {
+                this.setWebviewHtml(renderLoadingHtml());
+            }
             return;
         }
 
@@ -1365,32 +1373,40 @@ function stripWebviewNonces(html: string): string {
 }
 
 function getStatusClass(container: SyncedContainer): string {
+    const status = container.status.toLowerCase();
+    if (status === 'syncing') {
+        return 'pending';
+    }
     if (container.error) {
-        return container.status.toLowerCase() === 'unknown' ? 'unknown error' : 'error';
+        return status === 'unknown' ? 'unknown error' : 'error';
     }
     if (!container.remote || container.status === 'missing') {
         return 'missing';
     }
-    if (container.status.toLowerCase() === 'running') {
+    if (status === 'running') {
         return 'running';
     }
-    if (container.status.toLowerCase() === 'stopped') {
+    if (status === 'stopped') {
         return 'stopped';
     }
-    if (container.status.toLowerCase() === 'failed') {
+    if (status === 'failed') {
         return 'failed';
     }
-    if (['pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring'].includes(container.status.toLowerCase())) {
+    if (['pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring'].includes(status)) {
         return 'pending';
     }
     return 'unknown';
 }
 
 function getStatusLabel(container: SyncedContainer): string {
-    if (!container.remote || container.status === 'missing') {
+    const status = container.status.toLowerCase();
+    if (status === 'syncing') {
+        return '同步中';
+    }
+    if (!container.remote || status === 'missing') {
         return '已过期';
     }
-    switch (container.status.toLowerCase()) {
+    switch (status) {
         case 'running':
             return '运行中';
         case 'stopped':

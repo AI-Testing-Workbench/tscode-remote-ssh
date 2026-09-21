@@ -143,6 +143,7 @@ export class ContainerSync {
     private disposed = false;
     private syncGeneration = 0;
     private operationGeneration = 0;
+    private initialLocalSnapshotLoaded = false;
     private readonly locallyDeletedContainerIds = new Set<string>();
     private readonly invalidEndpointNotifications = new Set<string>();
 
@@ -317,6 +318,19 @@ export class ContainerSync {
 
     private async performSync(syncGeneration: number, operationGeneration: number): Promise<ContainerSyncResult> {
         const settings = this.safeSettings();
+        let document;
+        try {
+            document = await this.config.read();
+        } catch (error) {
+            return this.resultWithError(toSyncError(error, 'config_error', '读取服务配置失败'));
+        }
+
+        const localEntries = this.config.list(document.config);
+        if (!this.isCurrentSync(syncGeneration, operationGeneration)) {
+            return this.disposedResult();
+        }
+        this.publishInitialLocalSnapshot(localEntries);
+
         if (!settings.backendApiUrl) {
             return this.resultWithError(API_URL_ERROR);
         }
@@ -334,14 +348,6 @@ export class ContainerSync {
             return this.disposedResult();
         }
 
-        let document;
-        try {
-            document = await this.config.read();
-        } catch (error) {
-            return this.resultWithError(toSyncError(error, 'config_error', '读取服务配置失败'));
-        }
-
-        const localEntries = this.config.list(document.config);
         let userApi: UserRestApi;
         try {
             userApi = this.userApiFactory
@@ -602,6 +608,32 @@ export class ContainerSync {
             remote: false,
             error,
         }));
+    }
+
+    private publishInitialLocalSnapshot(entries: ContainerConfigEntry[]): void {
+        if (this.initialLocalSnapshotLoaded) {
+            return;
+        }
+        this.initialLocalSnapshotLoaded = true;
+        if (!entries.length) {
+            return;
+        }
+        try {
+            this.onSync?.({
+                containers: Array.from(indexEntries(entries).values(), entry => ({
+                    containerId: entry.containerId,
+                    host: entry.host,
+                    ...(entry.hostName ? { hostName: entry.hostName } : {}),
+                    ...(entry.port !== undefined ? { port: entry.port } : {}),
+                    status: entry.expiresAt ? 'missing' : 'syncing',
+                    expiresAt: entry.expiresAt,
+                    remote: false,
+                })),
+                changed: false,
+            });
+        } catch {
+            // A sidebar listener must not prevent the backend sync from starting.
+        }
     }
 
     private resultWithError(error: ContainerSyncError): ContainerSyncResult {

@@ -220,6 +220,70 @@ describe('ContainerSync', () => {
         expect(result.containers).toEqual([]);
     });
 
+    it('publishes local services as syncing before requesting remote status', async () => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, {
+            containerId: 'local-1',
+            host: 'local-service',
+            hostName: '10.0.0.1',
+            port: 22,
+        });
+        await store.write(document);
+
+        let resolveUserId: ((userId: string) => void) | undefined;
+        let resolveStatuses: ((value: { containers: ContainerStatusResponse[] }) => void) | undefined;
+        const getCurrentUserId = vi.fn(() => new Promise<string>(resolve => {
+            resolveUserId = resolve;
+        }));
+        const getContainerStatuses = vi.fn(() => new Promise<{ containers: ContainerStatusResponse[] }>(resolve => {
+            resolveStatuses = resolve;
+        }));
+        const onSync = vi.fn();
+        const sync = new ContainerSync({
+            config: store,
+            userIdProvider: { getCurrentUserId },
+            userApi: { getContainerStatuses } as unknown as UserRestApi,
+            getSettings: () => ({
+                backendApiUrl: 'http://api.example.test',
+                userName: 'root',
+                skipKnownHostsCheck: true,
+                historyLimit: 5,
+                statusSyncInterval: 5,
+                debug: false,
+                disableClientValidation: true,
+            }),
+            onSync,
+        });
+
+        const pending = sync.sync();
+        await vi.waitFor(() => expect(onSync).toHaveBeenCalledOnce());
+        expect(onSync).toHaveBeenCalledWith({
+            containers: [{
+                containerId: 'local-1',
+                host: 'local-service',
+                hostName: '10.0.0.1',
+                port: 22,
+                status: 'syncing',
+                remote: false,
+            }],
+            changed: false,
+        });
+        expect(getContainerStatuses).not.toHaveBeenCalled();
+
+        resolveUserId?.('user-1');
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledOnce());
+        resolveStatuses?.({ containers: [status('local-1', 'running', '10.0.0.1:22', '', '')] });
+
+        const result = await pending;
+        expect(result.containers[0]).toMatchObject({
+            containerId: 'local-1',
+            status: 'running',
+            remote: true,
+        });
+        expect(onSync).toHaveBeenCalledTimes(2);
+    });
+
     it('recovers on the next sync after a transient status failure', async () => {
         const store = await createStore();
         let calls = 0;

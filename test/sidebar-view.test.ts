@@ -54,6 +54,7 @@ describe('SidebarViewProvider', () => {
                 syncedContainer('stopped-1', 'stopped', true),
                 syncedContainer('failed-1', 'failed', true),
                 syncedContainer('pending-1', 'pending', true),
+                syncedContainer('syncing-1', 'syncing', false),
                 syncedContainer('error-1', 'unknown', true, undefined, {
                     code: 'status_failed',
                     message: '云端沙箱 服务状态查询失败',
@@ -80,6 +81,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('status-dot unknown error');
         expect(view.webview.html).toContain('status-dot missing');
         expect(view.webview.html).toContain('<span class="status-label">准备中</span>');
+        expect(view.webview.html).toContain('<span class="status-dot pending"></span>\n                    <span class="status-label">同步中</span>');
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.failed, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
         expect(view.webview.html).toContain('post(\'connect\'');
@@ -88,6 +90,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="connect" data-container-id="stopped-1" data-connectable="false" disabled>/);
         expect(view.webview.html).toMatch(/data-action="connect" data-container-id="failed-1" data-connectable="false" disabled>/);
         expect(view.webview.html).toMatch(/data-action="connect" data-container-id="pending-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="syncing-1" data-connectable="false" disabled>/);
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="failed-1" disabled>/);
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
         expect(view.webview.html).not.toContain('data-action="openConfig"');
@@ -141,6 +144,59 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('还没有 云端沙箱 服务');
         expect(view.webview.html).toContain('当前没有可用的容器');
         expect(view.webview.html).not.toContain('请使用 测小智TestAgent 插件进行创建');
+    });
+
+    it('renders local syncing cards before user initialization completes', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('syncing-1', 'syncing', false)],
+            changed: false,
+        });
+        let resolveUserId: ((userId: string) => void) | undefined;
+        const view = createWebviewView();
+        const provider = createProvider({
+            state,
+            userIdProvider: {
+                getCurrentUserId: () => new Promise<string>(resolve => {
+                    resolveUserId = resolve;
+                }),
+            },
+            view,
+        });
+
+        const resolving = provider.resolveWebviewView(view as never);
+        await vi.waitFor(() => expect(view.webview.html).toContain('<span class="status-label">同步中</span>'));
+        expect(view.webview.html).toContain('data-container-id="syncing-1"');
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="syncing-1" data-connectable="false" disabled>/);
+
+        resolveUserId?.('user-1');
+        await resolving;
+    });
+
+    it('keeps the error page when the initial sync fails after local cards render', async () => {
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('syncing-1', 'syncing', false)],
+            changed: false,
+        });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+
+        await provider.resolveWebviewView(view as never);
+        expect(view.webview.html).toContain('<span class="status-label">同步中</span>');
+
+        state.update({
+            containers: [syncedContainer('syncing-1', 'unknown', false, undefined, {
+                code: 'sync_failed',
+                message: '获取服务清单失败',
+            })],
+            changed: false,
+            error: { code: 'sync_failed', message: '获取服务清单失败' },
+        });
+
+        expect(view.webview.html).toContain('class="error-page"');
+        expect(view.webview.html).toContain('获取服务清单失败');
+        expect(view.webview.html).not.toContain('同步中');
     });
 
     it('overlays an administrator lifecycle operation and hides a transient sync error', async () => {
@@ -756,7 +812,7 @@ describe('SidebarViewProvider', () => {
             gitee_repository: 'repo',
             gitee_branch: 'main',
         }, { initializationSignal: expect.any(AbortSignal) });
-        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址 (HTTP协议，可选)' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址 (HTTP协议)' }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云分支 (可选)' }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
