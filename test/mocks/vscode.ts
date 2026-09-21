@@ -117,6 +117,12 @@ const ViewColumn = {
     Active: -1,
 };
 
+const ConfigurationTarget = {
+    Global: 1,
+    Workspace: 2,
+    WorkspaceFolder: 3,
+};
+
 const Uri = {
     from: vi.fn((components: { scheme: string; authority: string; path: string }) => components),
     parse: vi.fn((value: string) => ({ value })),
@@ -132,7 +138,15 @@ const workspace = {
                 ? configurationValues.get(settingKey)
                 : defaultValue;
         }),
-        update: vi.fn(() => Promise.resolve())
+        update: vi.fn((key: string, value: unknown) => {
+            const settingKey = `${section}.${key}`;
+            if (value === undefined) {
+                configurationValues.delete(settingKey);
+            } else {
+                configurationValues.set(settingKey, value);
+            }
+            return Promise.resolve();
+        })
     })),
     registerResourceLabelFormatter: vi.fn(),
     registerRemoteAuthorityResolver: vi.fn(() => ({ dispose: vi.fn() })),
@@ -149,6 +163,7 @@ export {
     ResolvedAuthority,
     resetConfiguration,
     setConfigurationValue,
+    ConfigurationTarget,
     Uri,
     ViewColumn,
     window,

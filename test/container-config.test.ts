@@ -1,16 +1,20 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SSHConfig from 'ssh-config';
 import {
     CONTAINER_ID_DIRECTIVE,
     ContainerConfig,
+    ContainerConfigFileSystem,
     getContainerConfigEntries,
+    getConfiguredContainerConfigPath,
+    getLegacyContainerConfigPath,
     IGNORE_UNKNOWN_VALUE,
     NULL_KNOWN_HOSTS_FILE,
     USER_KNOWN_HOSTS_FILE_DIRECTIVE,
 } from '../src/containerConfig';
+import * as vscode from './mocks/vscode';
 
 const temporaryDirectories: string[] = [];
 
@@ -24,6 +28,10 @@ afterEach(async () => {
 });
 
 describe('ContainerConfig', () => {
+    beforeEach(() => {
+        vscode.resetConfiguration();
+    });
+
     it('creates a missing file, adds a container block, and writes skip settings', async () => {
         const store = await createStore();
         const document = await store.read();
@@ -229,6 +237,97 @@ describe('ContainerConfig', () => {
         expect(store.setSkipKnownHostsCheck(enabled, true)).toBe(true);
         expect(SSHConfig.stringify(enabled)).toContain('StrictHostKeyChecking no');
         expect(SSHConfig.stringify(enabled)).toContain(`${USER_KNOWN_HOSTS_FILE_DIRECTIVE} ${NULL_KNOWN_HOSTS_FILE}`);
+    });
+
+    it('moves the legacy config when the new file does not exist', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-config-migration-'));
+        temporaryDirectories.push(directory);
+        const legacyPath = path.join(directory, 'config');
+        const newPath = path.join(directory, 'sandbox.config');
+        const legacyText = [
+            '# legacy service config',
+            'Host legacy-service',
+            '\tHostName 10.0.0.20',
+            '\tContainerId legacy-1',
+            '',
+        ].join('\n');
+        await fs.writeFile(legacyPath, legacyText, 'utf8');
+
+        const store = new ContainerConfig(newPath, undefined, legacyPath);
+        const document = await store.read();
+
+        expect(document.originalText).toBe(legacyText);
+        expect(getContainerConfigEntries(document.config)).toEqual([{
+            containerId: 'legacy-1',
+            host: 'legacy-service',
+            hostName: '10.0.0.20',
+        }]);
+        expect(await fs.readFile(newPath, 'utf8')).toBe(legacyText);
+        await expect(fs.access(legacyPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('ignores the legacy config when the new file already exists and removes it', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-config-migration-'));
+        temporaryDirectories.push(directory);
+        const legacyPath = path.join(directory, 'config');
+        const newPath = path.join(directory, 'sandbox.config');
+        const currentText = 'Host current-service\n\tContainerId current-1\n';
+        await fs.writeFile(legacyPath, 'Host legacy-service\n\tContainerId legacy-1\n', 'utf8');
+        await fs.writeFile(newPath, currentText, 'utf8');
+
+        const store = new ContainerConfig(newPath, undefined, legacyPath);
+        const document = await store.read();
+
+        expect(document.originalText).toBe(currentText);
+        expect(store.list(document.config).map(entry => entry.containerId)).toEqual(['current-1']);
+        expect(await fs.readFile(newPath, 'utf8')).toBe(currentText);
+        await expect(fs.access(legacyPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('does not expose a legacy path when the old configFile setting is absent', () => {
+        expect(getLegacyContainerConfigPath()).toBeUndefined();
+    });
+
+    it('removes the legacy configFile setting after migrating its configured file', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-config-setting-migration-'));
+        temporaryDirectories.push(directory);
+        const legacyPath = path.join(directory, 'config');
+        const newPath = getConfiguredContainerConfigPath();
+        const files = new Map<string, string>([[legacyPath, 'Host legacy-service\n\tContainerId legacy-1\n']]);
+        vscode.setConfigurationValue('tscode.remote', 'configFile', legacyPath);
+        const fileSystem: ContainerConfigFileSystem = {
+            mkdir: vi.fn(async () => undefined),
+            readFile: vi.fn(async filePath => {
+                const content = files.get(filePath);
+                if (content !== undefined) {
+                    return content;
+                }
+                throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+            }),
+            writeFile: vi.fn(async (filePath, content) => {
+                files.set(filePath, content);
+            }),
+            rename: vi.fn(async (oldPath, newFilePath) => {
+                const content = files.get(oldPath);
+                if (content === undefined) {
+                    throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+                }
+                files.set(newFilePath, content);
+                files.delete(oldPath);
+            }),
+            unlink: vi.fn(async filePath => {
+                if (!files.delete(filePath)) {
+                    throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+                }
+            }),
+        };
+
+        const document = await new ContainerConfig(newPath, fileSystem).read();
+
+        expect(getContainerConfigEntries(document.config)).toEqual([{ containerId: 'legacy-1', host: 'legacy-service' }]);
+        expect(files.has(legacyPath)).toBe(false);
+        expect(files.has(newPath)).toBe(true);
+        expect(getLegacyContainerConfigPath()).toBeUndefined();
     });
 });
 

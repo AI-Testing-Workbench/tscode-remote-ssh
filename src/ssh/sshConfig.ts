@@ -5,7 +5,7 @@ import SSHConfig, { Directive, Line, Section } from 'ssh-config';
 import { exists as fileExists, normalizeToSlash, untildify } from '../common/files';
 import { isWindows } from '../common/platform';
 import { glob } from 'glob';
-import { getConfiguredContainerConfigPath } from '../containerConfig';
+import { ContainerConfig, getConfiguredContainerConfigPath } from '../containerConfig';
 
 // Only a few directives might return an array
 // https://github.com/cyjake/ssh-config/blob/master/src/ssh-config.ts#L10
@@ -129,6 +129,7 @@ export default class SSHConfiguration {
 
     static async loadFromFS(): Promise<SSHConfiguration> {
         const userConfigPath = getSSHConfigPath();
+        await new ContainerConfig(userConfigPath).read();
         const config = new SSHConfig();
         if (userConfigPath !== defaultSSHConfigPath) {
             config.push(...await parseSSHConfigFromFile(defaultSSHConfigPath, true));

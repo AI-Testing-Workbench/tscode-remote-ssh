@@ -135,6 +135,7 @@ function isSafeRepositoryDirectoryName(value: string): boolean {
 
 export async function addNewHost() {
     const sshConfigPath = getSSHConfigPath();
+    await new ContainerConfig(sshConfigPath).read();
     if (!await fileExists(sshConfigPath)) {
         await fs.promises.appendFile(sshConfigPath, '');
     }
@@ -165,6 +166,7 @@ export async function addNewHost() {
 
 export async function openSSHConfigFile() {
     const sshConfigPath = getSSHConfigPath();
+    await new ContainerConfig(sshConfigPath).read();
     if (!await fileExists(sshConfigPath)) {
         await fs.promises.appendFile(sshConfigPath, '');
     }

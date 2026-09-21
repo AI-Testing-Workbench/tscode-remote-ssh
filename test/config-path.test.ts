@@ -6,6 +6,7 @@ import {
     ContainerConfig,
     DEFAULT_CONTAINER_CONFIG_PATH,
     getConfiguredContainerConfigPath,
+    getLegacyContainerConfigPath,
 } from '../src/containerConfig';
 import { expandPath } from '../src/common/files';
 import { getSSHConfigPath } from '../src/ssh/sshConfig';
@@ -47,6 +48,16 @@ describe('SSH config path setting', () => {
         vscode.setConfigurationValue('tscode.remote', 'configFile', directory);
 
         expect(getConfiguredContainerConfigPath()).toBe(path.resolve(os.homedir(), '.local', 'share', 'testagent', 'sandbox.config'));
+    });
+
+    it('reads the legacy configFile setting only for migration', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'testagent-legacy-config-'));
+        temporaryDirectories.push(directory);
+        const legacyPath = path.join(directory, 'config');
+        vscode.setConfigurationValue('tscode.remote', 'configFile', legacyPath);
+
+        expect(getLegacyContainerConfigPath()).toBe(legacyPath);
+        expect(getConfiguredContainerConfigPath()).not.toBe(legacyPath);
     });
 
     it('expands tilde, Unix variables, braced variables, and Windows variables', () => {

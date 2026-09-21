@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as vscode from 'vscode';
 import SSHConfig, { Directive, Line, Section } from 'ssh-config';
 import { expandPath } from './common/files';
 
@@ -11,6 +12,9 @@ export const SKIP_KNOWN_HOSTS_DIRECTIVE = 'StrictHostKeyChecking';
 export const USER_KNOWN_HOSTS_FILE_DIRECTIVE = 'UserKnownHostsFile';
 export const USER_DIRECTIVE = 'User';
 export const NULL_KNOWN_HOSTS_FILE = '/dev/null';
+
+const LEGACY_CONFIG_SETTING = 'configFile';
+const LEGACY_CONFIGURATION_SECTIONS = ['tscode.remote', 'testagnet.remote'];
 
 export interface ContainerConfigEntry {
     containerId: string;
@@ -42,6 +46,11 @@ export function getConfiguredContainerConfigPath(): string {
     return path.resolve(expandPath(DEFAULT_CONTAINER_CONFIG_PATH));
 }
 
+export function getLegacyContainerConfigPath(): string | undefined {
+    const configuredPath = getLegacyConfigSetting();
+    return configuredPath ? resolveLegacyConfiguredPath(configuredPath) : undefined;
+}
+
 export function getContainerConfigEntries(config: SSHConfig): ContainerConfigEntry[] {
     const entries: ContainerConfigEntry[] = [];
     for (const line of config) {
@@ -70,15 +79,23 @@ export function getContainerConfigEntries(config: SSHConfig): ContainerConfigEnt
 
 export class ContainerConfig {
     private readonly fileSystem: ContainerConfigFileSystem;
+    private readonly legacyFilePath?: string;
+    private readonly legacyConfigurationSections: string[];
 
     constructor(
         public readonly filePath: string = getConfiguredContainerConfigPath(),
         fileSystem: ContainerConfigFileSystem = nodeFileSystem,
+        legacyFilePath?: string,
     ) {
         this.fileSystem = fileSystem;
+        const usesDefaultConfig = legacyFilePath === undefined
+            && path.resolve(filePath) === getConfiguredContainerConfigPath();
+        this.legacyFilePath = legacyFilePath ?? (usesDefaultConfig ? getLegacyContainerConfigPath() : undefined);
+        this.legacyConfigurationSections = usesDefaultConfig ? getLegacyConfigSettingSections() : [];
     }
 
     public async read(): Promise<ContainerConfigDocument> {
+        await this.migrateLegacyConfig();
         await this.fileSystem.mkdir(path.dirname(this.filePath), { recursive: true });
 
         let originalText: string;
@@ -103,6 +120,49 @@ export class ContainerConfig {
             config: SSHConfig.parse(originalText),
             originalText,
         };
+    }
+
+    private async migrateLegacyConfig(): Promise<void> {
+        const legacyFilePath = this.legacyFilePath;
+        if (!legacyFilePath || path.resolve(legacyFilePath) === path.resolve(this.filePath)) {
+            await this.removeLegacyConfigSettings();
+            return;
+        }
+
+        const legacyText = await readIfPresent(this.fileSystem, legacyFilePath);
+        if (legacyText === undefined) {
+            await this.removeLegacyConfigSettings();
+            return;
+        }
+
+        const currentText = await readIfPresent(this.fileSystem, this.filePath);
+        if (currentText === undefined) {
+            await this.fileSystem.mkdir(path.dirname(this.filePath), { recursive: true });
+            try {
+                await this.fileSystem.writeFile(this.filePath, legacyText, { flag: 'wx', mode: 0o600 });
+            } catch (error) {
+                if (getErrorCode(error) !== 'EEXIST') {
+                    throw error;
+                }
+            }
+        }
+
+        await unlinkIfPresent(this.fileSystem, legacyFilePath);
+        await this.removeLegacyConfigSettings();
+    }
+
+    private async removeLegacyConfigSettings(): Promise<void> {
+        for (const section of this.legacyConfigurationSections) {
+            try {
+                await vscode.workspace.getConfiguration(section).update(
+                    LEGACY_CONFIG_SETTING,
+                    undefined,
+                    vscode.ConfigurationTarget.Global,
+                );
+            } catch {
+                // Removing a stale setting must not block configuration migration.
+            }
+        }
     }
 
     public async write(document: ContainerConfigDocument): Promise<boolean> {
@@ -623,6 +683,35 @@ function getErrorCode(error: unknown): string | undefined {
     return undefined;
 }
 
+function getLegacyConfigSetting(): string | undefined {
+    for (const section of LEGACY_CONFIGURATION_SECTIONS) {
+        const value = vscode.workspace.getConfiguration(section).get<unknown>(LEGACY_CONFIG_SETTING);
+        if (typeof value === 'string' && value.trim()) {
+            return value.trim();
+        }
+    }
+    return undefined;
+}
+
+function getLegacyConfigSettingSections(): string[] {
+    return LEGACY_CONFIGURATION_SECTIONS.filter(section => {
+        const value = vscode.workspace.getConfiguration(section).get<unknown>(LEGACY_CONFIG_SETTING);
+        return typeof value === 'string' && value.trim().length > 0;
+    });
+}
+
+function resolveLegacyConfiguredPath(configuredPath: string): string {
+    const resolvedPath = path.resolve(expandPath(configuredPath));
+    try {
+        if (fs.statSync(resolvedPath).isDirectory()) {
+            return path.join(resolvedPath, 'config');
+        }
+    } catch {
+        // A missing path is the normal case for a legacy installation.
+    }
+    return resolvedPath;
+}
+
 function parsePort(value: string | undefined): number | undefined {
     if (!value || !/^\d+$/.test(value)) {
         return undefined;
@@ -638,6 +727,17 @@ async function unlinkIfPresent(fileSystem: ContainerConfigFileSystem, filePath: 
         if (getErrorCode(error) !== 'ENOENT') {
             throw error;
         }
+    }
+}
+
+async function readIfPresent(fileSystem: ContainerConfigFileSystem, filePath: string): Promise<string | undefined> {
+    try {
+        return await fileSystem.readFile(filePath);
+    } catch (error) {
+        if (getErrorCode(error) === 'ENOENT') {
+            return undefined;
+        }
+        throw error;
     }
 }
 
