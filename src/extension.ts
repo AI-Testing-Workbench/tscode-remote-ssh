@@ -24,7 +24,7 @@ let activeAdminPanel: AdminPanel | undefined;
 let activeInitializationController: AbortController | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<TestAgentRemoteApi> {
-    const logger = new Log('TestAgent - Remote');
+    const logger = new Log('TSCode Remote');
     context.subscriptions.push(logger);
     const cloudModeOptions: CloudModeOptions = {
         onFileCheckError: error => logger.error('检查云端模式标记文件失败，按非云端模式处理', error),

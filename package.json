@@ -120,7 +120,7 @@
 				},
 				"tscode.remote.disableClientValidation": {
 					"type": "boolean",
-					"description": "是否禁用 TestAgent 本地与云端版本校验功能。",
+					"description": "是否禁用 TSCode 本地与云端版本校验功能。",
 					"default": true,
 					"scope": "application"
 				},
