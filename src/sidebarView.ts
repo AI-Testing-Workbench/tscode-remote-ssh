@@ -1010,7 +1010,7 @@ function renderSidebarHtml(
     const cards = containers.length
         ? containers.map(container => renderContainerCard(container, inFlightContainerIds.has(container.containerId))).join('')
         : `<div class="empty-state">
-                ${renderIcon('cloud')}
+                <div class="cloud-icon empty-cloud-icon" aria-hidden="true">${renderIcon('cloud')}</div>
                 <strong>还没有 云端沙箱 服务</strong>
                 <span>当前没有可用的容器</span>
             </div>`;
@@ -1281,6 +1281,8 @@ function renderDocument(body: string): string {
         .section-kicker { display: block; color: var(--on-surface-variant); font-size: 10px; font-weight: 700; letter-spacing: .14em; line-height: 1.2; }
         .toolbar-actions { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; padding: 2px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); }
         .icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
+        .icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 0; }
+        .icon-button[data-action="clearExpired"] .icon { width: 22px; height: 22px; }
         .icon-button:hover { border: 0; color: var(--on-surface); background: var(--surface-container-high); }
         .container-list { display: flex; flex-direction: column; gap: 12px; }
         .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); }
@@ -1331,7 +1333,7 @@ function renderDocument(body: string): string {
         .history-remove .icon { width: 15px; height: 15px; }
         .empty-state, .loading, .cloud-card { text-align: center; }
         .empty-state { display: flex; align-items: center; flex-direction: column; gap: 5px; padding: 38px 18px; border: 1px dashed var(--outline); border-radius: 12px; color: var(--on-surface-variant); }
-        .empty-state .icon { width: 30px; height: 30px; margin-bottom: 7px; color: var(--primary); }
+        .empty-state .cloud-icon { margin-bottom: 7px; color: var(--primary); }
         .empty-state strong { color: var(--on-surface); font-size: 14px; }
         .cloud-card { min-height: 150px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; padding: 14px; border: 2px solid var(--warning); border-radius: 16px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
         .cloud-icon { width: 84px; height: 84px; display: grid; place-items: center; border-radius: 12px; color: var(--warning); background: var(--surface-container-high); }

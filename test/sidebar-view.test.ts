@@ -117,6 +117,9 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('.app-bar { display: flex; align-items: center;');
         expect(view.webview.html).toContain('.sidebar { width: 100%; max-width: none; margin: 0; }');
         expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px;');
+        expect(view.webview.html).toContain('.icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px;');
+        expect(view.webview.html).toContain('.icon-button[data-action="clearExpired"] .icon { width: 22px; height: 22px; }');
+        expect(view.webview.html).toContain('.empty-state .cloud-icon { margin-bottom: 7px; color: var(--primary); }');
         expect(view.webview.html).toContain('border: 1px solid var(--outline)');
         expect(view.webview.html).toContain('font-family: var(--vscode-font-family,');
         expect(view.webview.html).not.toContain('--vscode-editorWidget-background');
@@ -143,6 +146,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('class="empty-state"');
         expect(view.webview.html).toContain('还没有 云端沙箱 服务');
         expect(view.webview.html).toContain('当前没有可用的容器');
+        expect(view.webview.html).toContain('<div class="cloud-icon empty-cloud-icon" aria-hidden="true">');
         expect(view.webview.html).not.toContain('请使用 测小智TestAgent 插件进行创建');
     });
 
