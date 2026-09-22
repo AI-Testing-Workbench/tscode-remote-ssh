@@ -187,6 +187,39 @@ describe('AdminPanel', () => {
         expect(panel.webview.html).not.toContain('<iframe');
     });
 
+    it('does not rebuild the volume iframe when the active volume tab is clicked again', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.getVolumeStatus = vi.fn(async () => ({
+            enabled: true,
+            filebrowser_url: 'https://filebrowser.example.test/files',
+            filebrowser_api_key: null,
+            filebrowser_username: 'volume-admin',
+            filebrowser_password: 'volume-password',
+        }));
+        const session = { frameUrl: 'http://127.0.0.1:39123/ticket/ticket-value', dispose: vi.fn() };
+        const bridge = {
+            createSession: vi.fn(async () => session),
+            dispose: vi.fn(),
+        };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            fileBrowserBridge: bridge,
+        });
+
+        await adminPanel.open();
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+        const volumeHtml = panel.webview.html;
+
+        await send(panel, { command: 'selectTab', tab: 'volume' });
+
+        expect(panel.webview.html).toBe(volumeHtml);
+        expect(adminApi.getVolumeStatus).toHaveBeenCalledOnce();
+        expect(bridge.createSession).toHaveBeenCalledOnce();
+        expect(session.dispose).not.toHaveBeenCalled();
+    });
+
     it('renders a visible error page when the FileBrowser bridge cannot reach the manager', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);

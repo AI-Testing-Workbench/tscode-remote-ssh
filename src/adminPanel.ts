@@ -796,6 +796,9 @@ export class AdminPanel implements vscode.Disposable {
             return;
         }
         const previousTab = this.state.activeTab;
+        if (previousTab === value) {
+            return;
+        }
         if (previousTab === 'volume' && value !== 'volume') {
             this.volumeRequestGeneration++;
             this.disposeVolumeSession();
