@@ -27,7 +27,7 @@ export async function connectToContainer(
     host: string,
     refreshSidebar?: () => void | Promise<void>,
     giteeRepository?: string,
-): Promise<void> {
+): Promise<boolean> {
     let reuseWindow = !hasOpenWorkspace();
     if (!reuseWindow) {
         const choice = await vscode.window.showInformationMessage(
@@ -37,7 +37,7 @@ export async function connectToContainer(
             OPEN_IN_NEW_WINDOW,
         );
         if (!choice) {
-            return;
+            return false;
         }
         reuseWindow = choice === OPEN_IN_CURRENT_WINDOW;
     }
@@ -49,6 +49,7 @@ export async function connectToContainer(
         await waitForRemoteAuthority(authority);
         await refreshSidebar?.();
     }
+    return true;
 }
 
 /**

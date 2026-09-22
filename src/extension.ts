@@ -104,9 +104,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         onOpenConfig: async () => {
             await openSSHConfigFile();
         },
-        onOpenAdmin: () => {
-            void adminPanel.open();
-        },
+        onOpenAdmin: () => adminPanel.open(),
         onConnect: (host, giteeRepository) => connectToContainer(
             host,
             () => activeSidebarView?.refreshCloudMode(),

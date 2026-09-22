@@ -93,7 +93,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="connect" data-container-id="syncing-1" data-connectable="false" disabled>/);
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="failed-1" disabled>/);
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
-        expect(view.webview.html).not.toContain('data-action="openConfig"');
+        expect(view.webview.html).toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(view.webview.html).toContain('data-action="clearExpired"');
         expect(view.webview.html.indexOf('data-action="clearExpired"')).toBeLessThan(view.webview.html.indexOf('data-action="refresh"'));
@@ -320,6 +320,34 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('data-action="refresh"');
     });
 
+    it('starts and stops polling when the mode changes', async () => {
+        let cloudMode = false;
+        const start = vi.fn();
+        const stop = vi.fn();
+        const view = createWebviewView();
+        const getCloudMode = vi.fn(() => cloudMode);
+        const provider = createProvider({
+            view,
+            getCloudMode,
+            sync: {
+                refresh: vi.fn(async () => ({ containers: [], changed: false })),
+                start,
+                stop,
+            },
+        });
+
+        await provider.resolveWebviewView(view as never);
+        cloudMode = true;
+        view.fireVisibility(true);
+        await flushMessages();
+        cloudMode = false;
+        view.fireVisibility(true);
+        await flushMessages();
+
+        expect(stop).toHaveBeenCalledOnce();
+        expect(start).toHaveBeenCalledOnce();
+    });
+
     it('refreshes cloud mode on demand after opening a remote connection', async () => {
         let cloudMode = false;
         const view = createWebviewView();
@@ -355,8 +383,28 @@ describe('SidebarViewProvider', () => {
         expect(errorStyle).not.toContain('background');
         expect(errorStyle).not.toContain('box-shadow');
         expect(view.webview.html).not.toContain('.cloud-card, .error-page {');
-        expect(view.webview.html).not.toContain('data-action="refresh"');
+        expect(view.webview.html).toContain('data-action="refresh"');
         expect(userIdProvider.getCurrentUserId).not.toHaveBeenCalled();
+    });
+
+    it('retries page preparation from the error page', async () => {
+        let backendApiUrl = '';
+        const view = createWebviewView();
+        const provider = createProvider({ view, getSettings: () => settings(backendApiUrl) });
+
+        await provider.resolveWebviewView(view as never);
+        expect(view.webview.html).toContain('data-action="refresh"');
+
+        backendApiUrl = 'https://api.example.test';
+        view.fireMessage({ command: 'refresh', requestId: 'error-retry-1' });
+        await flushMessages();
+
+        expect(view.webview.html).not.toContain('未配置后端 云端沙箱 管理服务的 API 地址');
+        expect(view.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'refresh',
+            requestId: 'error-retry-1',
+            outcome: 'succeeded',
+        }));
     });
 
     it('does not replace the webview when a scheduled refresh has no visible changes', async () => {
@@ -480,6 +528,62 @@ describe('SidebarViewProvider', () => {
 
         resolveConnect?.();
         await flushMessages();
+    });
+
+    it('keeps a refresh action loading when state rendering occurs during the request', async () => {
+        let resolveRefresh: ((value: ContainerSyncResult) => void) | undefined;
+        const refresh = vi.fn(() => new Promise<ContainerSyncResult>(resolve => {
+            resolveRefresh = resolve;
+        }));
+        const state = new SidebarSyncState();
+        state.update({ containers: [], changed: false });
+        const provider = createProvider({ state, sync: { refresh } });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'refresh', requestId: 'refresh-1' });
+        await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+        expect(view.webview.html).toContain('class="icon-button is-loading" data-action="refresh"');
+
+        state.update({ containers: [], changed: false });
+
+        expect(view.webview.html).toContain('class="icon-button is-loading" data-action="refresh"');
+        resolveRefresh?.({ containers: [], changed: false });
+        await flushMessages();
+
+        expect(view.webview.html).not.toContain('class="icon-button is-loading" data-action="refresh"');
+        expect(view.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'operationComplete',
+            action: 'refresh',
+            requestId: 'refresh-1',
+            outcome: 'succeeded',
+        }));
+    });
+
+    it('keeps the current message session after a visibility refresh', async () => {
+        let resolveRefresh: ((value: ContainerSyncResult) => void) | undefined;
+        const refresh = vi.fn(() => new Promise<ContainerSyncResult>(resolve => {
+            resolveRefresh = resolve;
+        }));
+        const state = new SidebarSyncState();
+        state.update({ containers: [], changed: false });
+        const provider = createProvider({ state, sync: { refresh } });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'refresh', requestId: 'refresh-visibility-1' });
+        await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+        view.fireVisibility(true);
+        await flushMessages();
+
+        resolveRefresh?.({ containers: [], changed: false });
+        await flushMessages();
+
+        expect(view.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'operationComplete',
+            action: 'refresh',
+            requestId: 'refresh-visibility-1',
+        }));
     });
 
     it('does not finish an old page initialization after the view is disposed', async () => {
@@ -624,6 +728,127 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="true">/);
     });
 
+    it('allows refresh while the remote restart request is still pending', async () => {
+        let resolveRestart: (() => void) | undefined;
+        const publicApi = createPublicApi();
+        publicApi.restartContainer = vi.fn(() => new Promise<void>(resolve => {
+            resolveRestart = resolve;
+        }));
+        const refresh = vi.fn(async () => ({ containers: [], changed: false }));
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('refreshable-1', 'running', true)], changed: false });
+        const provider = createProvider({
+            state,
+            publicApi,
+            sync: { refresh },
+        });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'restart', containerId: 'refreshable-1', requestId: 'restart-refresh-1' });
+        await vi.waitFor(() => expect(publicApi.restartContainer).toHaveBeenCalledOnce());
+        view.fireMessage({ command: 'refresh', requestId: 'refresh-during-restart-1' });
+        await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+
+        resolveRestart?.();
+        await flushMessages();
+    });
+
+    it('allows another container to connect while the first container restarts', async () => {
+        let resolveRestart: (() => void) | undefined;
+        const publicApi = createPublicApi();
+        publicApi.restartContainer = vi.fn(() => new Promise<void>(resolve => {
+            resolveRestart = resolve;
+        }));
+        const onConnect = vi.fn(async () => undefined);
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [
+                syncedContainer('restart-1', 'running', true),
+                syncedContainer('connect-2', 'running', true),
+            ],
+            changed: false,
+        });
+        const operationRegistry = new ContainerOperationRegistry();
+        const provider = createProvider({
+            state,
+            publicApi,
+            operationRegistry,
+            onConnect,
+            config: createConfig([configuredContainer('restart-1'), configuredContainer('connect-2')]),
+        });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'restart', containerId: 'restart-1', requestId: 'restart-1' });
+        await vi.waitFor(() => expect(publicApi.restartContainer).toHaveBeenCalledOnce());
+        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="connect-2" data-connectable="true">/);
+        view.fireMessage({ command: 'connect', containerId: 'connect-2', requestId: '1' });
+        await vi.waitFor(() => expect(onConnect).toHaveBeenCalledOnce());
+
+        expect(onConnect).toHaveBeenCalledWith('host-connect-2');
+        resolveRestart?.();
+        await flushMessages();
+    });
+
+    it('reports a cancelled connection without showing an error', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('cancelled-1', 'running', true)], changed: false });
+        const onConnect = vi.fn(async () => false);
+        const view = createWebviewView();
+        const provider = createProvider({
+            state,
+            view,
+            onConnect,
+            config: createConfig([configuredContainer('cancelled-1')]),
+        });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'connect', containerId: 'cancelled-1', requestId: 'cancelled-1' });
+        await flushMessages();
+
+        expect(onConnect).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+        expect(view.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'connect',
+            requestId: 'cancelled-1',
+            outcome: 'cancelled',
+        }));
+    });
+
+    it('keeps lifecycle controls in reconciling until sync confirms the restart', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('restarting-1', 'running', true)], changed: false });
+        const operationRegistry = new ContainerOperationRegistry();
+        const reconcileContainerOperation = vi.fn(async () => false);
+        const publicApi = createPublicApi();
+        const view = createWebviewView();
+        const provider = createProvider({
+            state,
+            view,
+            publicApi,
+            operationRegistry,
+            sync: {
+                refresh: vi.fn(async () => ({ containers: [], changed: false })),
+                reconcileContainerOperation,
+            },
+        });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'restart', containerId: 'restarting-1', requestId: 'restart-1' });
+        await flushMessages();
+
+        expect(reconcileContainerOperation).toHaveBeenCalledOnce();
+        expect(operationRegistry.get('restarting-1')?.phase).toBe('reconciling');
+        expect(view.webview.html).toContain('重启中');
+        expect(view.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'restart',
+            requestId: 'restart-1',
+            outcome: 'pending',
+        }));
+        provider.dispose();
+    });
+
     it('removes the local config entry after deleting a remote service', async () => {
         const state = new SidebarSyncState();
         state.update({
@@ -702,6 +927,29 @@ describe('SidebarViewProvider', () => {
         expect(vscode.env.openExternal).toHaveBeenCalledOnce();
     });
 
+    it('reports when the external browser rejects a noVNC link', async () => {
+        const novncUrl = 'http://127.0.0.1:59864/proxy/6080/vnc.html';
+        const state = new SidebarSyncState();
+        state.update({
+            containers: [syncedContainer('autotest-1', 'running', true, undefined, undefined, undefined, { novncUrl })],
+            changed: false,
+        });
+        vscode.env.openExternal.mockResolvedValueOnce(false);
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'openNovnc', containerId: 'autotest-1', requestId: 'novnc-1' });
+        await flushMessages();
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('无法打开沙箱访问链接', { modal: true });
+        expect(view.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'openNovnc',
+            requestId: 'novnc-1',
+            outcome: 'failed',
+        }));
+    });
+
     it('shows the administrator entry only after /user/check grants access', async () => {
         const state = new SidebarSyncState();
         state.update({ containers: [], changed: false });
@@ -719,6 +967,35 @@ describe('SidebarViewProvider', () => {
         view.fireMessage({ command: 'openAdmin' });
         await flushMessages();
         expect(onOpenAdmin).toHaveBeenCalledOnce();
+    });
+
+    it('waits for the administrator page to finish opening', async () => {
+        let resolveOpen: (() => void) | undefined;
+        const onOpenAdmin = vi.fn(() => new Promise<void>(resolve => {
+            resolveOpen = resolve;
+        }));
+        const state = new SidebarSyncState();
+        state.update({ containers: [], changed: false });
+        const userApi = createUserApi(true);
+        const view = createWebviewView();
+        const provider = createProvider({ state, userApi, onOpenAdmin, view });
+
+        await provider.resolveWebviewView(view as never);
+        await flushMessages();
+        view.fireMessage({ command: 'openAdmin', requestId: 'admin-1' });
+        await flushMessages();
+
+        expect(onOpenAdmin).toHaveBeenCalledOnce();
+        expect(view.webview.postMessage).not.toHaveBeenCalled();
+
+        resolveOpen?.();
+        await flushMessages();
+
+        expect(view.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'openAdmin',
+            requestId: 'admin-1',
+            outcome: 'succeeded',
+        }));
     });
 
     it('removes a history entry locally without calling a remote delete API', async () => {
@@ -1125,6 +1402,141 @@ describe('Webview script', () => {
         expect(connectButton.classList.contains('is-loading')).toBe(true);
     });
 
+    it('sets the request ID before a synchronous completion message is delivered', () => {
+        const messages: unknown[] = [];
+        let messageListener: ((event: { data: unknown }) => void) | undefined;
+        const refreshButton = createScriptElement({ 'data-action': 'refresh' });
+        const document = {
+            querySelectorAll: (selector: string): ScriptElement[] => selector === '[data-action]'
+                ? [refreshButton]
+                : [],
+        };
+
+        new Script(WEBVIEW_SCRIPT).runInNewContext({
+            acquireVsCodeApi: () => ({
+                postMessage: (message: Record<string, unknown>) => {
+                    messages.push(message);
+                    messageListener?.({ data: { command: 'operationComplete', action: 'refresh', requestId: '1', outcome: 'succeeded' } });
+                },
+            }),
+            document,
+            window: {
+                addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => {
+                    messageListener = listener;
+                },
+            },
+        });
+
+        refreshButton.fire('click', { target: refreshButton });
+
+        expect(messages).toEqual([{ command: 'refresh', containerId: null, requestId: '1' }]);
+        expect(refreshButton.classList.contains('is-loading')).toBe(false);
+        expect(refreshButton.hasAttribute('disabled')).toBe(false);
+        expect(refreshButton.getAttribute('data-request-id')).toBeNull();
+    });
+
+    it('does not unlock a connection button from an old lifecycle completion', () => {
+        const messages: unknown[] = [];
+        let messageListener: ((event: { data: unknown }) => void) | undefined;
+        const card = createScriptElement({
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const connectButton = createScriptElement({
+            'data-action': 'connect',
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const restartButton = createScriptElement({
+            'data-action': 'restart',
+            'data-container-id': 'container-1',
+        }, '<svg>restart</svg>重启');
+        const document = {
+            querySelectorAll: (selector: string): ScriptElement[] => {
+                if (selector === '[data-action]') {
+                    return [connectButton, restartButton];
+                }
+                if (selector === '.container-card[data-container-id]') {
+                    return [card];
+                }
+                if (selector === '[data-action="connect"]') {
+                    return [connectButton];
+                }
+                return [];
+            },
+        };
+
+        new Script(WEBVIEW_SCRIPT).runInNewContext({
+            acquireVsCodeApi: () => ({ postMessage: (message: unknown) => messages.push(message) }),
+            document,
+            window: {
+                addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => {
+                    messageListener = listener;
+                },
+                clearTimeout,
+                setTimeout,
+            },
+        });
+
+        restartButton.fire('click', { target: restartButton });
+        restartButton.fire('click', { target: restartButton });
+        expect(connectButton.hasAttribute('disabled')).toBe(true);
+
+        messageListener?.({
+            data: {
+                command: 'operationComplete',
+                action: 'restart',
+                containerId: 'container-1',
+                requestId: 'old-request',
+            },
+        });
+
+        expect(connectButton.hasAttribute('disabled')).toBe(true);
+        expect(messages).toEqual([{ command: 'restart', containerId: 'container-1', requestId: '1' }]);
+    });
+
+    it('does not connect when a card child action is double-clicked', () => {
+        const messages: unknown[] = [];
+        const card = createScriptElement({
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const connectButton = createScriptElement({
+            'data-action': 'connect',
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const openButton = createScriptElement({
+            'data-action': 'openNovnc',
+            'data-container-id': 'container-1',
+        });
+        const document = {
+            querySelectorAll: (selector: string): ScriptElement[] => {
+                if (selector === '[data-action]') {
+                    return [connectButton, openButton];
+                }
+                if (selector === '.container-card[data-container-id]') {
+                    return [card];
+                }
+                if (selector === '[data-action="connect"]') {
+                    return [connectButton];
+                }
+                return [];
+            },
+        };
+
+        new Script(WEBVIEW_SCRIPT).runInNewContext({
+            acquireVsCodeApi: () => ({ postMessage: (message: unknown) => messages.push(message) }),
+            document,
+            window: { addEventListener: () => undefined },
+        });
+
+        card.fire('dblclick', { target: openButton });
+
+        expect(messages).toEqual([]);
+        expect(connectButton.classList.contains('is-loading')).toBe(false);
+    });
+
     it('requires confirmation for restart and delete, and expires it after five seconds', () => {
         vi.useFakeTimers();
         const messages: unknown[] = [];
@@ -1178,6 +1590,49 @@ describe('Webview script', () => {
             { command: 'restart', containerId: 'container-1', requestId: '1' },
             { command: 'delete', containerId: 'container-1', requestId: '2' },
         ]);
+    });
+
+    it('restores destructive confirmation after the document is rebuilt', () => {
+        vi.useFakeTimers();
+        let viewState: Record<string, unknown> = {};
+        const messages: unknown[] = [];
+        const api = {
+            getState: () => viewState,
+            setState: (state: Record<string, unknown>) => {
+                viewState = state;
+            },
+            postMessage: (message: unknown) => messages.push(message),
+        };
+        const run = (button: ScriptElement) => new Script(WEBVIEW_SCRIPT).runInNewContext({
+            acquireVsCodeApi: () => api,
+            document: {
+                querySelectorAll: (selector: string): ScriptElement[] => selector === '[data-action]' ? [button] : [],
+            },
+            window: {
+                addEventListener: () => undefined,
+                clearTimeout,
+                setTimeout,
+            },
+        });
+
+        const firstButton = createScriptElement({
+            'data-action': 'restart',
+            'data-container-id': 'container-1',
+        }, '<svg>restart</svg>重启');
+        run(firstButton);
+        firstButton.fire('click', { target: firstButton });
+
+        const rebuiltButton = createScriptElement({
+            'data-action': 'restart',
+            'data-container-id': 'container-1',
+        }, '<svg>restart</svg>重启');
+        run(rebuiltButton);
+        expect(rebuiltButton.innerHTML).toBe('确认?');
+        expect(rebuiltButton.classList.contains('is-confirming')).toBe(true);
+
+        rebuiltButton.fire('click', { target: rebuiltButton });
+
+        expect(messages).toEqual([{ command: 'restart', containerId: 'container-1', requestId: '1' }]);
     });
 });
 
@@ -1269,8 +1724,11 @@ interface ProviderTestOptions {
     state: SidebarSyncState;
     sync: {
         refresh: () => Promise<ContainerSyncResult>;
+        start?: () => void;
+        stop?: () => void;
         refreshAfterMutation?: () => Promise<ContainerSyncResult>;
         runMutation?: <T>(operation: () => Promise<T>) => Promise<T>;
+        reconcileContainerOperation?: (operation: import('../src/containerOperations').ContainerOperationState) => Promise<boolean>;
         markContainerDeleted?: (containerId: string) => void;
         clearContainerDeleted?: (containerId: string) => void;
     };
@@ -1285,7 +1743,7 @@ interface ProviderTestOptions {
     isDisconnected: () => boolean;
     onOpenConfig: () => void | Promise<void>;
     onOpenAdmin: () => void | Promise<void>;
-    onConnect: (host: string, giteeRepository?: string) => void | Promise<void>;
+    onConnect: (host: string, giteeRepository?: string) => void | Promise<void | boolean>;
     onDisconnect: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox: (options: import('vscode').InputBoxOptions) => Thenable<string | undefined>;

@@ -303,6 +303,14 @@ export class ContainerSync {
         void this.sync();
     }
 
+    public stop(): void {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = undefined;
+        }
+        this.syncGeneration += 1;
+    }
+
     public dispose(): void {
         this.disposed = true;
         this.syncGeneration += 1;

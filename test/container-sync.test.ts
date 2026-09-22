@@ -540,7 +540,7 @@ describe('ContainerSync', () => {
         expect(onSync).not.toHaveBeenCalled();
     });
 
-    it('starts one configured timer, performs an immediate sync, and clears the timer on dispose', async () => {
+    it('starts, pauses, resumes, and disposes the configured timer', async () => {
         vi.useFakeTimers();
         const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
         const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
@@ -561,10 +561,19 @@ describe('ContainerSync', () => {
         await vi.advanceTimersByTimeAsync(2500);
         await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledTimes(2));
 
-        sync.dispose();
+        sync.stop();
         expect(clearIntervalSpy).toHaveBeenCalledOnce();
         await vi.advanceTimersByTimeAsync(10_000);
         expect(getContainerStatuses).toHaveBeenCalledTimes(2);
+
+        sync.start();
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledTimes(3));
+        expect(setIntervalSpy).toHaveBeenCalledTimes(2);
+
+        sync.dispose();
+        expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(getContainerStatuses).toHaveBeenCalledTimes(3);
     });
 
     it('does not notify the sidebar after an in-flight sync is disposed', async () => {

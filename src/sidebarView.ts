@@ -72,7 +72,7 @@ export class SidebarSyncState {
 
 export interface SidebarViewOptions {
     state: SidebarSyncState;
-    sync: Pick<ContainerSync, 'refresh'> & Partial<Pick<ContainerSync, 'refreshAfterMutation' | 'runMutation' | 'markContainerDeleted' | 'clearContainerDeleted'>>;
+    sync: Pick<ContainerSync, 'refresh'> & Partial<Pick<ContainerSync, 'start' | 'stop' | 'refreshAfterMutation' | 'runMutation' | 'reconcileContainerOperation' | 'markContainerDeleted' | 'clearContainerDeleted'>>;
     config: ContainerConfig;
     publicApi: PublicUserContainerApi;
     userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
@@ -83,7 +83,7 @@ export interface SidebarViewOptions {
     isDisconnected?: () => boolean;
     onOpenConfig?: () => void | Promise<void>;
     onOpenAdmin?: () => void | Promise<void>;
-    onConnect?: (host: string, giteeRepository?: string) => void | Promise<void>;
+    onConnect?: (host: string, giteeRepository?: string) => void | Promise<void | boolean>;
     onDisconnect?: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox?: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
@@ -92,11 +92,26 @@ export interface SidebarViewOptions {
 interface SidebarViewContext {
     webviewView: vscode.WebviewView;
     generation: number;
+    pageGeneration: number;
 }
+
+interface SidebarActionState {
+    action: string;
+    containerId?: string;
+    requestId?: string;
+}
+
+type SidebarActionOutcome = 'succeeded' | 'pending' | 'failed' | 'cancelled' | 'busy';
+
+class SidebarActionCancelledError extends Error {
+    public readonly code = 'cancelled';
+}
+
+const SIDEBAR_RECONCILIATION_TIMEOUT_MS = 60_000;
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
     private readonly state: SidebarSyncState;
-    private readonly sync: Pick<ContainerSync, 'refresh'> & Partial<Pick<ContainerSync, 'refreshAfterMutation' | 'runMutation' | 'markContainerDeleted' | 'clearContainerDeleted'>>;
+    private readonly sync: Pick<ContainerSync, 'refresh'> & Partial<Pick<ContainerSync, 'start' | 'stop' | 'refreshAfterMutation' | 'runMutation' | 'reconcileContainerOperation' | 'markContainerDeleted' | 'clearContainerDeleted'>>;
     private readonly config: ContainerConfig;
     private readonly publicApi: PublicUserContainerApi;
     private readonly userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
@@ -107,7 +122,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly isDisconnected: () => boolean;
     private readonly onOpenConfig: (() => void | Promise<void>) | undefined;
     private readonly onOpenAdmin: (() => void | Promise<void>) | undefined;
-    private readonly onConnect: ((host: string, giteeRepository?: string) => void | Promise<void>) | undefined;
+    private readonly onConnect: ((host: string, giteeRepository?: string) => void | Promise<void | boolean>) | undefined;
     private readonly onDisconnect: (() => void | Promise<void>) | undefined;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
@@ -115,7 +130,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly operationSubscription: { dispose: () => void };
     private readonly optimisticallyRemovedContainerIds = new Set<string>();
     private readonly activeRequestIds = new Set<string>();
+    private readonly activeActions = new Map<string, SidebarActionState>();
     private readonly initializationControllers = new Map<AbortController, SidebarViewContext | undefined>();
+    private readonly reconciliationTimers = new Map<string, { operationId: number; timer: ReturnType<typeof setTimeout> }>();
 
     private webviewView: vscode.WebviewView | undefined;
     private messageSubscription: vscode.Disposable | undefined;
@@ -128,6 +145,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private pageReady = false;
     private adminAllowed = false;
     private viewGeneration = 0;
+    private pageGeneration = 0;
+    private anonymousActionSequence = 0;
     private disposed = false;
 
     constructor(options: SidebarViewOptions) {
@@ -148,7 +167,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.operationRegistry = options.operationRegistry;
         this.showInputBox = options.showInputBox ?? (inputOptions => vscode.window.showInputBox(inputOptions));
         this.stateSubscription = this.state.subscribe(() => this.handleSyncStateUpdated());
-        this.operationSubscription = this.operationRegistry?.subscribe(() => this.render()) ?? { dispose: () => undefined };
+        this.operationSubscription = this.operationRegistry?.subscribe(event => {
+            if (event.type === 'completed') {
+                this.clearReconciliationTimer(event.operation.containerId, event.operation.operationId);
+            }
+            this.render();
+        }) ?? { dispose: () => undefined };
     }
 
     public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
@@ -157,7 +181,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const generation = ++this.viewGeneration;
-        const context: SidebarViewContext = { webviewView, generation };
+        const pageGeneration = ++this.pageGeneration;
+        const context: SidebarViewContext = { webviewView, generation, pageGeneration };
         this.messageSubscription?.dispose();
         this.viewDisposeSubscription?.dispose();
         this.viewVisibilitySubscription?.dispose();
@@ -165,6 +190,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.pageReady = false;
         this.pageError = undefined;
         this.adminAllowed = false;
+        this.activeRequestIds.clear();
+        this.activeActions.clear();
         this.viewDisposeSubscription = webviewView.onDidDispose(() => {
             if (this.webviewView !== webviewView) {
                 return;
@@ -178,13 +205,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             this.viewVisibilitySubscription = undefined;
             this.adminCheckInFlight = undefined;
             this.activeRequestIds.clear();
+            this.activeActions.clear();
             this.abortInitializations(context);
         });
         const cloudMode = await this.getCloudMode();
         if (!this.isActiveView(context)) {
             return;
         }
+        const previousCloudMode = this.cloudMode;
         this.cloudMode = cloudMode;
+        if (previousCloudMode !== cloudMode) {
+            if (cloudMode) {
+                this.sync.stop?.();
+            } else {
+                this.sync.start?.();
+            }
+        }
 
         webviewView.webview.options = {
             enableScripts: true,
@@ -192,11 +228,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             localResourceRoots: [],
         };
         this.messageSubscription = webviewView.webview.onDidReceiveMessage(message => {
-            void this.handleMessage(context, message);
+            const currentContext = this.getViewContext();
+            if (!currentContext || currentContext.webviewView !== webviewView) {
+                return;
+            }
+            void this.handleMessage(currentContext, message);
         });
         this.viewVisibilitySubscription = webviewView.onDidChangeVisibility?.(() => {
             if (webviewView.visible && this.webviewView === webviewView) {
-                void this.refreshForVisibleView({ webviewView, generation: this.viewGeneration });
+                const currentContext = this.getViewContext();
+                if (currentContext) {
+                    void this.refreshForVisibleView(currentContext);
+                }
             }
         });
 
@@ -223,11 +266,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     public async refreshCloudMode(): Promise<void> {
-        const webviewView = this.webviewView;
-        if (!webviewView || this.disposed) {
+        const context = this.getViewContext();
+        if (!context) {
             return;
         }
-        await this.refreshForVisibleView({ webviewView, generation: this.viewGeneration });
+        await this.refreshForVisibleView(context);
     }
 
     public dispose(): void {
@@ -246,7 +289,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.containerOperationCounts.clear();
         this.optimisticallyRemovedContainerIds.clear();
         this.activeRequestIds.clear();
+        this.activeActions.clear();
+        this.clearReconciliationTimers();
         this.viewGeneration++;
+        this.pageGeneration++;
         this.adminCheckInFlight = undefined;
         this.webviewView = undefined;
         this.abortInitializations();
@@ -259,14 +305,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.abortInitializations(context);
         const refreshedContext: SidebarViewContext = {
             webviewView: context.webviewView,
-            generation: ++this.viewGeneration,
+            generation: context.generation,
+            pageGeneration: ++this.pageGeneration,
         };
 
         const cloudMode = await this.getCloudMode();
-        if (!this.isActiveView(refreshedContext)) {
+        if (!this.isCurrentPage(refreshedContext)) {
             return;
         }
+        const previousCloudMode = this.cloudMode;
         this.cloudMode = cloudMode;
+        if (previousCloudMode !== cloudMode) {
+            if (cloudMode) {
+                this.sync.stop?.();
+            } else {
+                this.sync.start?.();
+            }
+        }
         this.pageReady = false;
         this.pageError = undefined;
         this.adminAllowed = false;
@@ -275,7 +330,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private async preparePage(context?: SidebarViewContext): Promise<void> {
-        if (!this.isActiveView(context)) {
+        if (!this.isCurrentPage(context)) {
             return;
         }
 
@@ -295,7 +350,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             settings = this.getSettings();
         } catch (error) {
             console.error('侧边栏页面准备失败', error);
-            if (!this.isActiveView(context)) {
+            if (!this.isCurrentPage(context)) {
                 return;
             }
             this.pageError = toSidebarError(error, 'settings_error', '读取 云端沙箱 服务设置失败');
@@ -304,7 +359,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         if (!settings.backendApiUrl) {
-            if (!this.isActiveView(context)) {
+            if (!this.isCurrentPage(context)) {
                 return;
             }
             this.pageError = {
@@ -319,7 +374,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         try {
             userId = await this.userIdProvider.getCurrentUserId();
         } catch (error) {
-            if (!this.isActiveView(context)) {
+            if (!this.isCurrentPage(context)) {
                 return;
             }
             this.pageError = toSidebarError(error, 'user_id_missing', '未获取到当前用户 ID');
@@ -327,7 +382,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
         if (!userId) {
-            if (!this.isActiveView(context)) {
+            if (!this.isCurrentPage(context)) {
                 return;
             }
             this.pageError = {
@@ -338,7 +393,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
 
-        if (!this.isActiveView(context)) {
+        if (!this.isCurrentPage(context)) {
             return;
         }
         this.pageReady = true;
@@ -347,7 +402,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private async checkAdmin(userId: string, baseUrl: string, context?: SidebarViewContext): Promise<void> {
-        if (!this.isActiveView(context) || this.cloudMode) {
+        if (!this.isCurrentPage(context) || this.cloudMode) {
             return;
         }
 
@@ -360,13 +415,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         const promise = (async () => {
             try {
                 const response = await this.userApiFactory(baseUrl).checkAdmin({ user_id: userId });
-                if (this.isActiveView(context)) {
+                if (this.isCurrentPage(context)) {
                     this.adminAllowed = response.admin;
                     this.render();
                 }
             } catch (error) {
                 console.error('侧边栏管理员权限检查失败', error);
-                if (this.isActiveView(context)) {
+                if (this.isCurrentPage(context)) {
                     this.adminAllowed = false;
                     this.render();
                 }
@@ -389,7 +444,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         if (this.cloudMode) {
-            this.setWebviewHtml(renderCloudHtml());
+            this.setWebviewHtml(renderCloudHtml(this.activeActions));
             return;
         }
 
@@ -403,7 +458,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         ]);
         const hasActiveOperation = activeOperationIds.size > 0;
         const error = this.pageError ?? result.error;
-        if (error && !hasActiveOperation) {
+        if (error && !hasActiveOperation && this.activeActions.size === 0) {
             this.setWebviewHtml(renderErrorHtml(error.message));
             return;
         }
@@ -413,6 +468,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     containers,
                     this.adminAllowed,
                     activeOperationIds,
+                    this.activeActions,
                 ));
             } else {
                 this.setWebviewHtml(renderLoadingHtml());
@@ -424,6 +480,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             containers,
             this.adminAllowed,
             activeOperationIds,
+            this.activeActions,
         ));
     }
 
@@ -468,6 +525,51 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.sync.clearContainerDeleted?.(containerId);
     }
 
+    private async reconcileContainerOperation(operation: ContainerOperationState): Promise<boolean> {
+        if (this.sync.reconcileContainerOperation) {
+            return this.sync.reconcileContainerOperation(operation);
+        }
+        await this.refreshAfterMutation();
+        return true;
+    }
+
+    private scheduleReconciliationTimeout(operation: ContainerOperationState): void {
+        this.clearReconciliationTimer(operation.containerId);
+        const timer = setTimeout(() => {
+            const entry = this.reconciliationTimers.get(operation.containerId);
+            if (!entry || entry.operationId !== operation.operationId) {
+                return;
+            }
+            this.reconciliationTimers.delete(operation.containerId);
+            const current = this.operationRegistry?.get(operation.containerId);
+            if (!current || current.operationId !== operation.operationId || current.phase !== 'reconciling') {
+                return;
+            }
+            this.operationRegistry?.complete(operation.containerId, 'failed', operation.operationId);
+            void vscode.window.showErrorMessage(
+                `服务 "${operation.containerId}" 的${getContainerOperationStatus(operation.action)}状态确认超时，请刷新后重试`,
+                { modal: true },
+            );
+        }, SIDEBAR_RECONCILIATION_TIMEOUT_MS);
+        this.reconciliationTimers.set(operation.containerId, { operationId: operation.operationId, timer });
+    }
+
+    private clearReconciliationTimer(containerId: string, operationId?: number): void {
+        const entry = this.reconciliationTimers.get(containerId);
+        if (!entry || operationId !== undefined && entry.operationId !== operationId) {
+            return;
+        }
+        clearTimeout(entry.timer);
+        this.reconciliationTimers.delete(containerId);
+    }
+
+    private clearReconciliationTimers(): void {
+        for (const entry of this.reconciliationTimers.values()) {
+            clearTimeout(entry.timer);
+        }
+        this.reconciliationTimers.clear();
+    }
+
     private applyOperationOverlay(container: SyncedContainer): SyncedContainer {
         const operation = this.operationRegistry?.get(container.containerId);
         if (!operation) {
@@ -479,6 +581,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             status: getContainerOperationStatus(operation.action),
             error: undefined,
         };
+    }
+
+    private findActiveActionKey(action: string, containerId?: string): string | undefined {
+        for (const [key, state] of this.activeActions) {
+            if (state.action === action && state.containerId === containerId) {
+                return key;
+            }
+        }
+        return undefined;
     }
 
     private setWebviewHtml(html: string): void {
@@ -496,18 +607,33 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return;
         }
 
+        const action = message.command;
         const containerId = typeof message.containerId === 'string' ? message.containerId : undefined;
         const requestId = typeof message.requestId === 'string' ? message.requestId.trim() || undefined : undefined;
-        const requestKey = requestId ? `${context.generation}:${requestId}` : undefined;
+        const requestKey = requestId
+            ? `${context.generation}:${action}:${containerId ?? ''}:${requestId}`
+            : undefined;
         if (requestKey && this.activeRequestIds.has(requestKey)) {
+            this.completeWebviewAction(context, action, containerId, requestId, 'busy');
+            return;
+        }
+        if (this.findActiveActionKey(action, containerId)
+            && !['connect', 'restart', 'delete'].includes(action)) {
+            this.completeWebviewAction(context, action, containerId, requestId, 'busy');
             return;
         }
         if (requestKey) {
             this.activeRequestIds.add(requestKey);
         }
+        const actionKey = requestKey ?? `${context.generation}:anonymous:${++this.anonymousActionSequence}`;
+        this.activeActions.set(actionKey, { action, containerId, requestId });
+        this.render();
+        let outcome: SidebarActionOutcome = 'succeeded';
         try {
-            switch (message.command) {
+            switch (action) {
                 case 'refresh':
+                    this.pageError = undefined;
+                    this.render();
                     if (!this.pageReady) {
                         await this.preparePage(context);
                     } else {
@@ -515,20 +641,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     }
                     return;
                 case 'openConfig':
-                    await this.onOpenConfig?.();
+                    if (this.cloudMode || !this.onOpenConfig) {
+                        throw new Error('当前模式不支持打开配置文件');
+                    }
+                    await this.onOpenConfig();
                     return;
                 case 'openAdmin':
-                    if (this.adminAllowed) {
-                        await this.onOpenAdmin?.();
+                    if (!this.adminAllowed || !this.onOpenAdmin) {
+                        throw new Error('当前用户没有管理员权限');
                     }
+                    await this.onOpenAdmin();
                     return;
                 case 'create':
                     await this.createContainerFromPrompt(context);
                     return;
                 case 'disconnect':
-                    if (this.cloudMode) {
-                        await this.onDisconnect?.();
+                    if (!this.cloudMode || !this.onDisconnect) {
+                        throw new Error('当前模式不支持断开连接');
                     }
+                    await this.onDisconnect();
                     return;
                 case 'connect':
                     await this.connectContainer(containerId);
@@ -537,10 +668,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     await this.openNovncUrl(containerId);
                     return;
                 case 'restart':
-                    await this.runContainerAction(containerId, 'restart', id => this.publicApi.restartContainer(id));
+                    outcome = await this.runContainerAction(containerId, 'restart', id => this.publicApi.restartContainer(id));
                     return;
                 case 'delete':
-                    await this.deleteContainer(containerId);
+                    outcome = await this.deleteContainer(containerId);
                     return;
                 case 'removeHistory':
                     await this.removeHistory(containerId);
@@ -549,17 +680,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     await this.removeExpiredContainers();
                     return;
                 default:
-                    return;
+                    throw new Error(`不支持的侧栏操作：${action}`);
             }
         } catch (error) {
-            if (this.isActiveView(context)) {
+            outcome = error instanceof SidebarActionCancelledError ? 'cancelled' : 'failed';
+            if (outcome === 'failed' && this.isActiveView(context)) {
                 this.showError(error);
             }
         } finally {
             if (requestKey) {
                 this.activeRequestIds.delete(requestKey);
             }
-            this.completeWebviewAction(context, message.command, containerId, requestId);
+            this.activeActions.delete(actionKey);
+            this.render();
+            this.completeWebviewAction(context, action, containerId, requestId, outcome);
         }
     }
 
@@ -594,14 +728,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
             throw new Error(`服务 "${container.containerId}" 正在执行操作，暂时无法连接`);
         }
+        if (!this.onConnect) {
+            throw new Error('当前环境没有可用的连接处理器');
+        }
         this.beginContainerOperation(container.containerId);
         try {
             const host = configuredEntry.host.trim();
             const giteeRepository = container.giteeRepository?.trim();
+            let started: void | boolean;
             if (giteeRepository) {
-                await this.onConnect?.(host, giteeRepository);
+                started = await this.onConnect(host, giteeRepository);
             } else {
-                await this.onConnect?.(host);
+                started = await this.onConnect(host);
+            }
+            if (started === false) {
+                throw new SidebarActionCancelledError('连接已取消');
             }
         } finally {
             this.endContainerOperation(container.containerId);
@@ -611,21 +752,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
     private async openNovncUrl(containerId: string | undefined): Promise<void> {
         const container = this.findContainer(containerId);
-        if (!container?.novncUrl) {
+        if (!container?.remote || !container.novncUrl) {
             throw new Error('当前服务没有可用的沙箱访问链接');
         }
         const url = container.novncUrl.trim();
         if (!/^https?:\/\//i.test(url)) {
             throw new Error('沙箱访问链接格式无效');
         }
-        await vscode.env.openExternal(vscode.Uri.parse(url));
+        const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+        if (!opened) {
+            throw new Error('无法打开沙箱访问链接');
+        }
     }
 
     private async runContainerAction(
         containerId: string | undefined,
         operationAction: ContainerOperationAction,
         action: (containerId: string) => Promise<void>,
-    ): Promise<void> {
+    ): Promise<'succeeded' | 'pending'> {
         const container = this.findContainer(containerId);
         if (!container || !container.remote) {
             throw new Error('服务已被删除，无法执行此操作');
@@ -633,7 +777,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!containerId) {
             throw new Error('缺少容器 ID');
         }
-        if (container.status.toLowerCase() === 'failed') {
+        if (operationAction === 'restart' && container.status.toLowerCase() === 'failed') {
             throw new Error(`服务 "${container.containerId}" 处于失败状态，不能重启`);
         }
         if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
@@ -642,18 +786,34 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         const operation = this.claimContainerOperation(containerId, operationAction);
         this.beginContainerOperation(containerId);
         let succeeded = false;
+        let reconciling = false;
         try {
-            await this.runMutation(() => action(containerId));
-            await this.refreshAfterMutation();
-            succeeded = true;
+            // Lifecycle API requests must not hold the local config mutation gate.
+            // Status refreshes are needed to reconcile the operation while it runs.
+            await action(containerId);
+            if (operation) {
+                const currentOperation = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
+                if (currentOperation) {
+                    this.scheduleReconciliationTimeout(currentOperation);
+                    const confirmed = await this.reconcileContainerOperation(currentOperation);
+                    reconciling = !confirmed;
+                    succeeded = confirmed;
+                }
+            } else {
+                await this.refreshAfterMutation();
+                succeeded = true;
+            }
         } finally {
-            this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
+            if (!reconciling) {
+                this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
+            }
             this.endContainerOperation(containerId);
             this.render();
         }
+        return reconciling ? 'pending' : 'succeeded';
     }
 
-    private async deleteContainer(containerId: string | undefined): Promise<void> {
+    private async deleteContainer(containerId: string | undefined): Promise<'succeeded' | 'pending'> {
         if (!containerId) {
             throw new Error('缺少容器 ID');
         }
@@ -669,27 +829,43 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.markContainerDeleted(containerId);
         this.optimisticallyRemoveContainer(containerId);
         let succeeded = false;
+        let reconciling = false;
         try {
-            await this.runMutation(async () => {
-                await this.publicApi.deleteContainer(containerId);
-                await this.removeContainerFromConfig(containerId);
-            });
-            await this.refreshAfterMutation();
-            succeeded = true;
+            await this.publicApi.deleteContainer(containerId);
+            await this.runMutation(() => this.removeContainerFromConfig(containerId));
+            if (operation) {
+                const currentOperation = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
+                if (currentOperation) {
+                    this.scheduleReconciliationTimeout(currentOperation);
+                    const confirmed = await this.reconcileContainerOperation(currentOperation);
+                    reconciling = !confirmed;
+                    succeeded = confirmed;
+                }
+            } else {
+                await this.refreshAfterMutation();
+                succeeded = true;
+            }
         } catch (error) {
             this.clearContainerDeleted(containerId);
             this.restoreOptimisticallyRemovedContainer(containerId);
             throw error;
         } finally {
-            this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
+            if (!reconciling) {
+                this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
+            }
             this.endContainerOperation(containerId);
             this.render();
         }
+        return reconciling ? 'pending' : 'succeeded';
     }
 
     private async removeHistory(containerId: string | undefined): Promise<void> {
         if (!containerId) {
             throw new Error('缺少容器 ID');
+        }
+        const container = this.findContainer(containerId);
+        if (!container || container.remote || !container.expiresAt) {
+            throw new Error('当前条目不是可删除的本地历史条目');
         }
         const removed = await this.runMutation(() => this.removeContainerFromConfig(containerId));
         if (removed) {
@@ -929,6 +1105,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         action: string,
         containerId: string | undefined,
         requestId?: string,
+        outcome: SidebarActionOutcome = 'succeeded',
     ): void {
         if (!this.isActiveView(context)) {
             return;
@@ -936,6 +1113,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.postWebviewMessage({
             command: 'operationComplete',
             action,
+            outcome,
             ...(containerId ? { containerId } : {}),
             ...(requestId ? { requestId } : {}),
         });
@@ -959,13 +1137,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
     private getViewContext(): SidebarViewContext | undefined {
         return this.webviewView
-            ? { webviewView: this.webviewView, generation: this.viewGeneration }
+            ? {
+                webviewView: this.webviewView,
+                generation: this.viewGeneration,
+                pageGeneration: this.pageGeneration,
+            }
             : undefined;
     }
 
     private isActiveView(context?: SidebarViewContext): boolean {
         return !this.disposed
             && (!context || this.webviewView === context.webviewView && this.viewGeneration === context.generation);
+    }
+
+    private isCurrentPage(context?: SidebarViewContext): boolean {
+        return this.isActiveView(context)
+            && (!context || this.pageGeneration === context.pageGeneration);
     }
 
     private abortInitializations(context?: SidebarViewContext): void {
@@ -1002,25 +1189,59 @@ function renderIcon(icon: SidebarIcon): string {
     return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SIDEBAR_ICONS[icon]}</svg>`;
 }
 
+function findActiveAction(
+    activeActions: ReadonlyMap<string, SidebarActionState>,
+    action: string,
+    containerId?: string,
+): SidebarActionState | undefined {
+    for (const state of activeActions.values()) {
+        if (state.action !== action || state.containerId !== containerId) {
+            continue;
+        }
+        return state;
+    }
+    return undefined;
+}
+
+function renderActionStateAttributes(disabled: boolean, activeAction?: SidebarActionState): string {
+    const requestId = activeAction?.requestId;
+    return `${disabled || activeAction ? ' disabled' : ''}${activeAction ? ' aria-busy="true"' : ''}${requestId ? ` data-request-id="${escapeHtml(requestId)}"` : ''}`;
+}
+
 function renderSidebarHtml(
     containers: SyncedContainer[],
     showAdmin: boolean,
     inFlightContainerIds: ReadonlySet<string>,
+    activeActions: ReadonlyMap<string, SidebarActionState>,
 ): string {
     const cards = containers.length
-        ? containers.map(container => renderContainerCard(container, inFlightContainerIds.has(container.containerId))).join('')
+        ? containers.map(container => renderContainerCard(
+            container,
+            inFlightContainerIds.has(container.containerId),
+            activeActions,
+        )).join('')
         : `<div class="empty-state">
                 <div class="cloud-icon empty-cloud-icon" aria-hidden="true">${renderIcon('cloud')}</div>
                 <strong>还没有 云端沙箱 服务</strong>
                 <span>当前没有可用的容器</span>
             </div>`;
-    const adminButton = showAdmin ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin') : '';
-    const configButton = showAdmin ? renderToolbarButton('openConfig', '打开配置文件', 'config') : '';
+    const adminButton = showAdmin
+        ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin', false, findActiveAction(activeActions, 'openAdmin'))
+        : '';
+    const configButton = renderToolbarButton(
+        'openConfig',
+        '打开配置文件',
+        'config',
+        false,
+        findActiveAction(activeActions, 'openConfig'),
+    );
+    const clearExpiredAction = findActiveAction(activeActions, 'clearExpired');
     const clearExpiredButton = renderToolbarButton(
         'clearExpired',
         '清空过期条目',
         'delete',
         !containers.some(container => !container.remote && Boolean(container.expiresAt)),
+        clearExpiredAction,
     );
     return renderDocument(`
         <main class="sidebar">
@@ -1029,7 +1250,7 @@ function renderSidebarHtml(
                     ${adminButton}
                     ${configButton}
                     ${clearExpiredButton}
-                    ${renderToolbarButton('refresh', '刷新页面', 'refresh')}
+                    ${renderToolbarButton('refresh', '刷新页面', 'refresh', false, findActiveAction(activeActions, 'refresh'))}
                 </div>
             </header>
             <section class="container-list">${cards}</section>
@@ -1037,17 +1258,32 @@ function renderSidebarHtml(
     `);
 }
 
-function renderToolbarButton(action: string, label: string, icon: SidebarIcon, disabled = false): string {
-    return `<button class="icon-button" data-action="${action}" title="${escapeHtml(label)}"${disabled ? ' disabled' : ''}>${renderIcon(icon)}</button>`;
+function renderToolbarButton(
+    action: string,
+    label: string,
+    icon: SidebarIcon,
+    disabled = false,
+    activeAction?: SidebarActionState,
+): string {
+    const loading = activeAction ? ' is-loading' : '';
+    return `<button class="icon-button${loading}" data-action="${action}" title="${escapeHtml(label)}"${renderActionStateAttributes(disabled, activeAction)}>${renderIcon(icon)}</button>`;
 }
 
-function renderContainerCard(container: SyncedContainer, operationInFlight: boolean): string {
+function renderContainerCard(
+    container: SyncedContainer,
+    operationInFlight: boolean,
+    activeActions: ReadonlyMap<string, SidebarActionState>,
+): string {
     const statusClass = getStatusClass(container);
     const statusLabel = getStatusLabel(container);
     const usage = renderUsage(container);
     const expiration = renderExpirationStatus(container);
     const typeBadge = renderTypeBadge(container.containerType);
-    const sandboxAccess = renderSandboxAccess(container);
+    const connectAction = findActiveAction(activeActions, 'connect', container.containerId);
+    const restartAction = findActiveAction(activeActions, 'restart', container.containerId);
+    const deleteAction = findActiveAction(activeActions, 'delete', container.containerId);
+    const operationActionInFlight = operationInFlight || Boolean(connectAction || restartAction || deleteAction);
+    const sandboxAccess = renderSandboxAccess(container, activeActions);
     const containerId = escapeHtml(container.containerId);
     const host = escapeHtml(container.host || '未配置 Host');
     const canOperate = container.remote;
@@ -1055,17 +1291,16 @@ function renderContainerCard(container: SyncedContainer, operationInFlight: bool
         && container.status.toLowerCase() === 'running'
         && !container.error
         && !!container.host
-        && !operationInFlight;
-    const disabledOperation = canOperate && !operationInFlight ? '' : ' disabled';
-    const disabledRestart = canOperate && container.status.toLowerCase() !== 'failed' && !operationInFlight ? '' : ' disabled';
-    const disabledConnect = canConnect ? '' : ' disabled';
+        && !operationActionInFlight;
+    const canDelete = canOperate && !operationActionInFlight;
+    const canRestart = canOperate && container.status.toLowerCase() !== 'failed' && !operationActionInFlight;
     const error = container.error
         ? `<div class="card-error">${escapeHtml(container.error.message)}</div>`
         : '';
     const history = !container.remote && container.expiresAt
         ? `<div class="history-warning">
                 <span>${renderIcon('warning')}此服务已过期并被资源回收，请手动删除此本地条目</span>
-                <button class="history-remove" data-action="removeHistory" data-container-id="${containerId}" title="从本地条目中删除">${renderIcon('close')}</button>
+                ${renderHistoryRemoveButton(containerId, findActiveAction(activeActions, 'removeHistory', container.containerId))}
             </div>`
         : '';
     return `
@@ -1081,9 +1316,9 @@ function renderContainerCard(container: SyncedContainer, operationInFlight: bool
             </div>
             ${error}
             <div class="card-actions">
-                <button class="action-button action-primary" data-action="connect" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}"${disabledConnect}>${renderIcon('connect')}连接</button>
-                <button class="action-button" data-action="restart" data-container-id="${containerId}"${disabledRestart}>${renderIcon('restart')}重启</button>
-                <button class="action-button" data-action="delete" data-container-id="${containerId}"${disabledOperation}>${renderIcon('delete')}销毁</button>
+                <button class="action-button action-primary${connectAction ? ' is-loading' : ''}" data-action="connect" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}"${renderActionStateAttributes(!canConnect, connectAction)}>${renderIcon('connect')}连接</button>
+                <button class="action-button${restartAction ? ' is-loading' : ''}" data-action="restart" data-container-id="${containerId}"${renderActionStateAttributes(!canRestart, restartAction)}>${renderIcon('restart')}重启</button>
+                <button class="action-button${deleteAction ? ' is-loading' : ''}" data-action="delete" data-container-id="${containerId}"${renderActionStateAttributes(!canDelete, deleteAction)}>${renderIcon('delete')}销毁</button>
             </div>
             ${sandboxAccess}
             ${expiration}
@@ -1114,32 +1349,41 @@ function renderTypeBadge(containerType: string | null | undefined): string {
     return `<span class="type-badge type-badge-${variant}" title="${escapeHtml(containerType)}">${escapeHtml(label)}</span>`;
 }
 
-function renderSandboxAccess(container: SyncedContainer): string {
+function renderSandboxAccess(
+    container: SyncedContainer,
+    activeActions: ReadonlyMap<string, SidebarActionState>,
+): string {
     if (!container.remote || !container.novncUrl) {
         return '';
     }
+    const activeAction = findActiveAction(activeActions, 'openNovnc', container.containerId);
     return `
         <div class="sandbox-access-row">
-            <button class="sandbox-access-link" data-action="openNovnc" data-container-id="${escapeHtml(container.containerId)}" title="在浏览器中打开沙箱可视化访问链接">
+            <button class="sandbox-access-link${activeAction ? ' is-loading' : ''}" data-action="openNovnc" data-container-id="${escapeHtml(container.containerId)}" title="在浏览器中打开沙箱可视化访问链接"${renderActionStateAttributes(false, activeAction)}>
                 ${renderIcon('external')}沙箱访问
             </button>
         </div>
     `;
 }
 
-function renderCloudHtml(): string {
+function renderCloudHtml(activeActions: ReadonlyMap<string, SidebarActionState>): string {
+    const activeAction = findActiveAction(activeActions, 'disconnect');
     return renderDocument(`
         <main class="cloud-card">
             <div class="cloud-icon" aria-hidden="true">${renderIcon('cloud')}</div>
             <h1>当前已连接至 云端沙箱 服务中</h1>
             <p>所有改动均只在 云端沙箱 服务内生效！</p>
-            <button class="action-button action-primary" data-action="disconnect">${renderIcon('disconnect')}断开连接</button>
+            <button class="action-button action-primary${activeAction ? ' is-loading' : ''}" data-action="disconnect"${renderActionStateAttributes(false, activeAction)}>${renderIcon('disconnect')}断开连接</button>
         </main>
     `);
 }
 
+function renderHistoryRemoveButton(containerId: string, activeAction?: SidebarActionState): string {
+    return `<button class="history-remove${activeAction ? ' is-loading' : ''}" data-action="removeHistory" data-container-id="${containerId}" title="从本地条目中删除"${renderActionStateAttributes(false, activeAction)}>${renderIcon('close')}</button>`;
+}
+
 function renderErrorHtml(message: string): string {
-    return renderDocument(`<main class="error-page">${renderIcon('warning')}<span class="section-kicker">请联系支持团队处理</span><p>${escapeHtml(message)}</p></main>`);
+    return renderDocument(`<main class="error-page">${renderIcon('warning')}<span class="section-kicker">请联系支持团队处理</span><p>${escapeHtml(message)}</p><button class="action-button" data-action="refresh">${renderIcon('refresh')}刷新重试</button></main>`);
 }
 
 function renderLoadingHtml(): string {
