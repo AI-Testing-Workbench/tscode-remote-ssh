@@ -6,6 +6,9 @@ import { exists as fileExists } from './common/files';
 import SSHDestination from './ssh/sshDestination';
 import { ContainerConfig } from './containerConfig';
 
+const REMOTE_AUTHORITY_WAIT_TIMEOUT_MS = 30_000;
+const REMOTE_AUTHORITY_POLL_INTERVAL_MS = 100;
+
 export async function promptOpenRemoteSSHWindow(reuseWindow: boolean) {
     const host = await promptForHost();
 
@@ -14,7 +17,7 @@ export async function promptOpenRemoteSSHWindow(reuseWindow: boolean) {
     }
 
     const sshDest = SSHDestination.parse(host);
-    openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow);
+    await openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow);
 }
 
 const OPEN_IN_CURRENT_WINDOW = '当前窗口打开';
@@ -29,6 +32,7 @@ export async function connectToContainer(
     if (!reuseWindow) {
         const choice = await vscode.window.showInformationMessage(
             '当前窗口已打开工作区，请选择连接 云端沙箱 服务的方式',
+            { modal: true },
             OPEN_IN_CURRENT_WINDOW,
             OPEN_IN_NEW_WINDOW,
         );
@@ -39,8 +43,10 @@ export async function connectToContainer(
     }
 
     const sshDest = SSHDestination.parse(host);
+    const authority = getRemoteAuthority(sshDest.toEncodedString());
     await openRemoteSSHWindow(sshDest.toEncodedString(), reuseWindow, giteeRepository);
     if (reuseWindow) {
+        await waitForRemoteAuthority(authority);
         await refreshSidebar?.();
     }
 }
@@ -175,4 +181,38 @@ export async function openSSHConfigFile() {
 
 function hasOpenWorkspace(): boolean {
     return Boolean(vscode.workspace.workspaceFile) || (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+}
+
+function waitForRemoteAuthority(authority: string): Promise<void> {
+    if (vscode.env.remoteAuthority === authority) {
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const interval = setInterval(check, REMOTE_AUTHORITY_POLL_INTERVAL_MS);
+        const timeout = setTimeout(() => {
+            finish(new Error(`远程沙箱 未在 ${REMOTE_AUTHORITY_WAIT_TIMEOUT_MS / 1000} 秒内建立连接`), true);
+        }, REMOTE_AUTHORITY_WAIT_TIMEOUT_MS);
+
+        function check() {
+            if (vscode.env.remoteAuthority === authority) {
+                finish(undefined, false);
+            }
+        }
+
+        function finish(error: Error | undefined, failed: boolean) {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearInterval(interval);
+            clearTimeout(timeout);
+            if (failed) {
+                reject(error);
+            } else {
+                resolve();
+            }
+        }
+    });
 }

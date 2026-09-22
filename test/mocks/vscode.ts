@@ -23,12 +23,14 @@ function setConfigurationValue(section: string, key: string, value: unknown) {
 function resetConfiguration() {
     configurationValues.clear();
     $password = '';
+    env.remoteAuthority = undefined;
     workspace.workspaceFolders = undefined;
     workspace.workspaceFile = undefined;
 }
 
 const env = {
     appRoot: '/bin/vscodium/app',
+    remoteAuthority: undefined as string | undefined,
     clipboard: {
         writeText: vi.fn(() => Promise.resolve())
     },

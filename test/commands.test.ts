@@ -12,7 +12,13 @@ const temporaryDirectories: string[] = [];
 describe('openRemoteSSHWindow', () => {
     beforeEach(() => {
         vscode.commands.executeCommand.mockReset();
-        vscode.commands.executeCommand.mockResolvedValue(undefined);
+        vscode.commands.executeCommand.mockImplementation(async (_command, target, options) => {
+            const authority = options?.remoteAuthority ?? target?.remoteAuthority ?? target?.authority;
+            if (authority) {
+                vscode.env.remoteAuthority = authority;
+            }
+            return undefined;
+        });
         vscode.window.showInformationMessage.mockReset();
         vscode.Uri.from.mockClear();
         vscode.resetConfiguration();
@@ -124,6 +130,7 @@ describe('openRemoteSSHWindow', () => {
 
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
             '当前窗口已打开工作区，请选择连接 云端沙箱 服务的方式',
+            { modal: true },
             '当前窗口打开',
             '新建窗口打开',
         );
