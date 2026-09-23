@@ -14,6 +14,10 @@ const authentication = {
     getSession: vi.fn(),
 };
 
+const extensions = {
+    getExtension: vi.fn(),
+};
+
 const configurationValues = new Map<string, unknown>();
 
 function setConfigurationValue(section: string, key: string, value: unknown) {
@@ -159,6 +163,7 @@ export {
     commands,
     env,
     ExtensionContext,
+    extensions,
     ProgressLocation,
     RemoteAuthorityResolverContext,
     RemoteAuthorityResolverError,

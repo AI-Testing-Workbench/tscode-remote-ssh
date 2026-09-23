@@ -260,11 +260,9 @@ describe('SidebarViewProvider', () => {
 
     it('renders only the cloud card in cloud mode', async () => {
         const view = createWebviewView();
-        const userApiFactory = vi.fn(() => createUserApi(false));
         const provider = createProvider({
             cloudMode: true,
             view,
-            userApiFactory,
         });
 
         await provider.resolveWebviewView(view as never);
@@ -276,7 +274,6 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('data-action="disconnect"');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(view.webview.html).not.toContain('data-action="openConfig"');
-        expect(userApiFactory).not.toHaveBeenCalled();
     });
 
     it('dispatches cloud disconnect without touching container APIs or config', async () => {
@@ -604,19 +601,22 @@ describe('SidebarViewProvider', () => {
     });
 
     it('keeps the newest administrator check when a visibility refresh overlaps it', async () => {
-        let resolveFirstCheck: ((value: { admin: boolean }) => void) | undefined;
-        let resolveSecondCheck: ((value: { admin: boolean }) => void) | undefined;
-        const firstCheck = new Promise<{ admin: boolean }>(resolve => {
+        let resolveFirstCheck: ((value: { admin: boolean; limit: 'user' | 'none' }) => void) | undefined;
+        let resolveSecondCheck: ((value: { admin: boolean; limit: 'user' | 'none' }) => void) | undefined;
+        const firstCheck = new Promise<{ admin: boolean; limit: 'user' | 'none' }>(resolve => {
             resolveFirstCheck = resolve;
         });
-        const secondCheck = new Promise<{ admin: boolean }>(resolve => {
+        const secondCheck = new Promise<{ admin: boolean; limit: 'user' | 'none' }>(resolve => {
             resolveSecondCheck = resolve;
         });
         const checkAdmin = vi.fn()
             .mockImplementationOnce(() => firstCheck)
             .mockImplementationOnce(() => secondCheck);
         const provider = createProvider({
-            userApiFactory: vi.fn(() => ({ checkAdmin } as never)),
+            publicApi: {
+                ...createPublicApi(),
+                checkAdmin,
+            },
         });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
@@ -624,9 +624,9 @@ describe('SidebarViewProvider', () => {
 
         view.fireVisibility(true);
         await vi.waitFor(() => expect(checkAdmin).toHaveBeenCalledTimes(2));
-        resolveSecondCheck?.({ admin: true });
+        resolveSecondCheck?.({ admin: true, limit: 'none' });
         await flushMessages();
-        resolveFirstCheck?.({ admin: false });
+        resolveFirstCheck?.({ admin: false, limit: 'user' });
         await flushMessages();
 
         expect(view.webview.html).toContain('data-action="openAdmin"');
@@ -1088,6 +1088,7 @@ describe('SidebarViewProvider', () => {
         await provider.createContainerFromPrompt();
 
         expect(publicApi.createContainer).toHaveBeenCalledWith({
+            plugin_id: 'test-tech.tscode-remote-ssh',
             gitee_url: 'https://gitee.com',
             gitee_user: 'alice',
             gitee_repository: 'repo',
@@ -1098,6 +1099,7 @@ describe('SidebarViewProvider', () => {
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
             host: 'alice/repo',
+            name: 'alice/repo',
             hostName: '10.0.0.5',
             port: 2222,
         }, { skipKnownHostsCheck: true, userName: 'root' });
@@ -1133,6 +1135,7 @@ describe('SidebarViewProvider', () => {
 
         expect(showInputBox).toHaveBeenCalledTimes(2);
         expect(publicApi.createContainer).toHaveBeenCalledWith({
+            plugin_id: 'test-tech.tscode-remote-ssh',
             gitee_url: 'https://github.com',
             gitee_user: 'JustWorkingAndWorking',
             gitee_repository: 'testagent-cloud-remote-ssh',
@@ -1157,12 +1160,13 @@ describe('SidebarViewProvider', () => {
 
         expect(showInputBox).toHaveBeenCalledOnce();
         expect(publicApi.createContainer).toHaveBeenCalledWith(
-            {},
+            { plugin_id: 'test-tech.tscode-remote-ssh' },
             { initializationSignal: expect.any(AbortSignal) },
         );
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-without-gitee',
             host: '云端沙箱 服务',
+            name: '云端沙箱 服务',
             hostName: '10.0.0.6',
             port: 2222,
         }, { skipKnownHostsCheck: true, userName: 'root' });
@@ -1700,13 +1704,13 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
     const state = options.state ?? new SidebarSyncState();
     const userApi = options.userApi ?? createUserApi(false);
     const settingsValue = options.getSettings ?? (() => settings('https://api.example.test'));
+    const publicApi = options.publicApi ?? createPublicApi(userApi);
     return new SidebarViewProvider({
         state,
         sync: options.sync ?? { refresh: vi.fn(async () => ({ containers: [], changed: false })) },
         config: options.config ?? createConfig(),
-        publicApi: options.publicApi ?? createPublicApi(),
+        publicApi,
         userIdProvider: options.userIdProvider ?? { getCurrentUserId: vi.fn(async () => 'user-1') },
-        userApiFactory: options.userApiFactory ?? vi.fn(() => userApi),
         getSettings: settingsValue,
         cloudMode: options.cloudMode,
         getCloudMode: options.getCloudMode,
@@ -1736,7 +1740,6 @@ interface ProviderTestOptions {
     publicApi: PublicUserContainerApi;
     userIdProvider: { getCurrentUserId: () => Promise<string> };
     userApi: UserRestApi;
-    userApiFactory: (baseUrl: string) => UserRestApi;
     getSettings: () => ReturnType<typeof settings>;
     cloudMode: boolean;
     getCloudMode: () => boolean;
@@ -1761,7 +1764,7 @@ function createUserApi(admin: boolean): UserRestApi {
             gitee_user: '',
             gitee_repository: '',
         })),
-        checkAdmin: vi.fn(async () => ({ admin })),
+        checkAdmin: vi.fn(async () => ({ admin, limit: admin ? 'none' as const : 'user' as const })),
         startContainer: vi.fn(async () => undefined),
         stopContainer: vi.fn(async () => undefined),
         restartContainer: vi.fn(async () => undefined),
@@ -1769,15 +1772,26 @@ function createUserApi(admin: boolean): UserRestApi {
     };
 }
 
-function createPublicApi(): PublicUserContainerApi {
+function createPublicApi(userApi?: UserRestApi): PublicUserContainerApi {
     return {
         createContainer: vi.fn(async () => ({ container_id: 'container-1', service_id: 'service-1', status: 'pending' })),
-        getContainerIds: vi.fn(async () => ({ container_ids: [] })),
         getContainer: vi.fn(async () => ({
             container_id: 'container-1',
             status: 'running',
             gitee_user: '',
             gitee_repository: '',
+        })),
+        checkAdmin: vi.fn(async () => userApi
+            ? userApi.checkAdmin({ user_id: 'user-1' })
+            : ({ admin: false, limit: 'user' as const })),
+        getActiveContainerIds: vi.fn(async () => ({ container_ids: [] })),
+        syncFiles: vi.fn(async () => ({
+            direction: 'upload' as const,
+            copied: 0,
+            skipped: 0,
+            deleted: 0,
+            bytesTransferred: 0,
+            complete: true,
         })),
         startContainer: vi.fn(async () => undefined),
         stopContainer: vi.fn(async () => undefined),

@@ -33,6 +33,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
 
     const sidebarSyncState = new SidebarSyncState();
     const userIdProvider = new UserIdProvider();
+    const config = new ContainerConfig();
+    const remoteSSHResolver = new RemoteSSHResolver(context, logger);
     const initializationSettings = getRemoteSettings();
     const initializationController = new AbortController();
     activeInitializationController = initializationController;
@@ -44,9 +46,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         userIdProvider,
         initializationPoller,
         initializationSignal: initializationController.signal,
+        containerConfig: config,
+        sftpProvider: async entry => ({
+            sftp: await remoteSSHResolver.getSftp(entry.host),
+        }),
     });
     const operationRegistry = new ContainerOperationRegistry();
-    const config = new ContainerConfig();
     const getCloudMode = async (): Promise<boolean> => {
         const localCloudMode = refreshCloudMode(cloudModeOptions);
         if (localCloudMode) {
@@ -97,7 +102,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         config,
         publicApi,
         userIdProvider,
-        userApiFactory,
         operationRegistry,
         cloudMode,
         getCloudMode,
@@ -131,7 +135,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         containerSync.start();
     }
 
-    const remoteSSHResolver = new RemoteSSHResolver(context, logger);
     context.subscriptions.push(vscode.workspace.registerRemoteAuthorityResolver(REMOTE_SSH_AUTHORITY, remoteSSHResolver));
     context.subscriptions.push(remoteSSHResolver);
     context.subscriptions.push({ dispose: () => initializationController.abort() });

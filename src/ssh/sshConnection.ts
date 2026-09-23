@@ -3,7 +3,7 @@
 import { EventEmitter } from 'events';
 import * as net from 'net';
 import * as fs from 'fs';
-import { Client, ClientChannel, ClientErrorExtensions, ExecOptions, ShellOptions, ConnectConfig } from 'ssh2';
+import { Client, ClientChannel, ClientErrorExtensions, ExecOptions, ShellOptions, ConnectConfig, type SFTPWrapper } from 'ssh2';
 import { Server } from 'net';
 import socks from 'simple-socks';
 // eslint-disable-next-line no-duplicate-imports
@@ -103,6 +103,15 @@ export default class SSHConnection extends EventEmitter {
                 this.sshConnection!.exec(cmd, options, (err, stream) => err ? reject(err) : resolve(stream));
             });
         });
+    }
+
+    /**
+     * Open an SFTP subsystem on the authenticated SSH connection.
+     */
+    sftp(): Promise<SFTPWrapper> {
+        return this.connect().then(() => new Promise<SFTPWrapper>((resolve, reject) => {
+            this.sshConnection!.sftp((error, sftp) => error ? reject(error) : resolve(sftp));
+        }));
     }
 
     /**

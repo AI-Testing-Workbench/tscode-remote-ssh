@@ -7,7 +7,8 @@ import { expandPath } from './common/files';
 export const DEFAULT_CONTAINER_CONFIG_PATH = '~/.local/share/testagent/sandbox.config';
 export const CONTAINER_ID_DIRECTIVE = 'ContainerId';
 export const EXPIRES_AT_DIRECTIVE = 'ExpiresAt';
-export const IGNORE_UNKNOWN_VALUE = 'ContainerId,ExpiresAt';
+export const NAME_DIRECTIVE = 'Name';
+export const IGNORE_UNKNOWN_VALUE = 'ContainerId,ExpiresAt,Name';
 export const SKIP_KNOWN_HOSTS_DIRECTIVE = 'StrictHostKeyChecking';
 export const USER_KNOWN_HOSTS_FILE_DIRECTIVE = 'UserKnownHostsFile';
 export const USER_DIRECTIVE = 'User';
@@ -19,6 +20,7 @@ const LEGACY_CONFIGURATION_SECTIONS = ['tscode.remote', 'testagnet.remote'];
 export interface ContainerConfigEntry {
     containerId: string;
     host: string;
+    name?: string;
     hostName?: string;
     port?: number;
     expiresAt?: string;
@@ -64,11 +66,13 @@ export function getContainerConfigEntries(config: SSHConfig): ContainerConfigEnt
         }
 
         const hostName = getDirectiveValue(line.config, isHostNameDirective);
+        const name = getDirectiveValue(line.config, isNameDirective);
         const port = parsePort(getDirectiveValue(line.config, isPortDirective));
         const expiresAt = getDirectiveValue(line.config, isExpiresAtDirective);
         entries.push({
             containerId,
             host: getHostValue(line),
+            ...(name ? { name } : {}),
             ...(hostName ? { hostName } : {}),
             ...(port !== undefined ? { port } : {}),
             ...(expiresAt ? { expiresAt } : {}),
@@ -227,6 +231,20 @@ export class ContainerConfig {
             changed = true;
         }
 
+        const name = entry.name?.trim()
+            || getDirectiveValue(section.config, isNameDirective)?.trim()
+            || entry.host.trim()
+            || getHostValue(section).trim();
+        if (name) {
+            changed = setDirective(
+                section.config,
+                isNameDirective,
+                NAME_DIRECTIVE,
+                name,
+                true,
+            ) || changed;
+        }
+
         if (entry.hostName?.trim()) {
             changed = setDirective(
                 section.config,
@@ -360,7 +378,7 @@ export class ContainerConfig {
 
         const existingValues = directiveValue(directive).split(/[,\s]+/).filter(Boolean);
         const values = [...existingValues];
-        for (const requiredValue of [CONTAINER_ID_DIRECTIVE, EXPIRES_AT_DIRECTIVE]) {
+        for (const requiredValue of [CONTAINER_ID_DIRECTIVE, EXPIRES_AT_DIRECTIVE, NAME_DIRECTIVE]) {
             if (!values.some(value => value.toLowerCase() === requiredValue.toLowerCase())) {
                 values.push(requiredValue);
             }
@@ -430,6 +448,7 @@ function createContainerSection(
     if (entry.hostName?.trim()) {
         section.config.push(createDirective('HostName', entry.hostName, '\t'));
     }
+    section.config.push(createDirective(NAME_DIRECTIVE, entry.name?.trim() || entry.host, '\t'));
     if (userName?.trim()) {
         section.config.push(createDirective(USER_DIRECTIVE, userName.trim(), '\t'));
     }
@@ -626,7 +645,7 @@ function isDirective(line: Line): line is Directive {
 }
 
 function isCustomDirective(line: Line | Directive): boolean {
-    return isDirective(line) && (isContainerIdDirective(line) || isExpiresAtDirective(line));
+    return isDirective(line) && (isContainerIdDirective(line) || isExpiresAtDirective(line) || isNameDirective(line));
 }
 
 function isContainerIdDirective(line: Directive): boolean {
@@ -653,6 +672,10 @@ function isExpiresAtDirective(line: Directive): boolean {
     return /^expiresat$/i.test(line.param);
 }
 
+function isNameDirective(line: Directive): boolean {
+    return /^name$/i.test(line.param);
+}
+
 function isIgnoreUnknownDirective(line: Directive): boolean {
     return /^ignoreunknown$/i.test(line.param);
 }
@@ -663,6 +686,7 @@ function isSkipKnownHostsDirective(line: Directive): boolean {
 
 const ORDERED_CONTAINER_DIRECTIVES: Array<(line: Directive) => boolean> = [
     isHostNameDirective,
+    isNameDirective,
     isUserDirective,
     isPortDirective,
     isSkipKnownHostsDirective,

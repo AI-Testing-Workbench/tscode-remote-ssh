@@ -154,6 +154,7 @@ describe('ContainerSync', () => {
             remote: true,
         });
         expect((await fs.readFile(store.filePath, 'utf8'))).not.toMatch(/^\s*ExpiresAt\s/m);
+        expect((await fs.readFile(store.filePath, 'utf8'))).toContain('Name 10.0.0.3');
     });
 
     it('cleans only the oldest history entries and keeps all history when the limit is zero', async () => {

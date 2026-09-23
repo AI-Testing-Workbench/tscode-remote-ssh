@@ -48,6 +48,7 @@ describe('ContainerConfig', () => {
         const text = await fs.readFile(store.filePath, 'utf8');
         expect(text).toContain('Host alice/repo');
         expect(text).toContain('HostName 10.0.0.1');
+        expect(text).toContain('Name alice/repo');
         expect(text).toContain('User root');
         expect(text).toContain('Port 22');
         expect(text).toContain(`${CONTAINER_ID_DIRECTIVE} container-1`);
@@ -56,11 +57,12 @@ describe('ContainerConfig', () => {
         expect(text).toContain(`${USER_KNOWN_HOSTS_FILE_DIRECTIVE} ${NULL_KNOWN_HOSTS_FILE}`);
         expect(getServiceFields(text)).toEqual([
             'HostName 10.0.0.1',
+            'Name alice/repo',
             'User root',
             'Port 22',
             'StrictHostKeyChecking no',
             'UserKnownHostsFile /dev/null',
-            'IgnoreUnknown ContainerId,ExpiresAt',
+            'IgnoreUnknown ContainerId,ExpiresAt,Name',
             'ContainerId container-1',
         ]);
         expect(text.indexOf('IgnoreUnknown')).toBeLessThan(text.indexOf('ContainerId'));
@@ -68,6 +70,7 @@ describe('ContainerConfig', () => {
         expect(store.list(SSHConfig.parse(text))).toEqual([{
             containerId: 'container-1',
             host: 'alice/repo',
+            name: 'alice/repo',
             hostName: '10.0.0.1',
             port: 22,
         }]);
@@ -103,7 +106,7 @@ describe('ContainerConfig', () => {
         expect(text).toContain('Include ~/.ssh/extra');
         expect(text).toContain('Host ordinary');
         expect(text).toContain('UnknownOption preserved');
-        expect(text).toContain('IgnoreUnknown ExistingOption,ContainerId,ExpiresAt');
+        expect(text).toContain('IgnoreUnknown ExistingOption,ContainerId,ExpiresAt,Name');
         expect(text).toContain('containerid container-2');
         expect(text).toContain('ExpiresAt 2026-09-01T00:00:00+08:00');
     });
@@ -160,7 +163,7 @@ describe('ContainerConfig', () => {
         expect(store.removeContainer(document.config, 'missing')).toBe(false);
 
         const entries = store.list(document.config);
-        expect(entries).toEqual([{ containerId: 'container-b', host: '10.0.0.5' }]);
+        expect(entries).toEqual([{ containerId: 'container-b', host: '10.0.0.5', name: '10.0.0.5' }]);
         expect(document.config.some(line => line.type === SSHConfig.DIRECTIVE && 'config' in line && line.value === 'ordinary')).toBe(true);
     });
 
@@ -192,11 +195,12 @@ describe('ContainerConfig', () => {
 
         expect(getServiceFields(await fs.readFile(store.filePath, 'utf8'))).toEqual([
             'HostName 127.0.0.1',
+            'Name test/test',
             'User root',
             'Port 59194',
             'StrictHostKeyChecking no',
             'UserKnownHostsFile /dev/null',
-            'IgnoreUnknown ContainerId,ExpiresAt',
+            'IgnoreUnknown ContainerId,ExpiresAt,Name',
             'ContainerId container-order',
             'ExpiresAt 2026-09-02T00:47:16.734Z',
         ]);

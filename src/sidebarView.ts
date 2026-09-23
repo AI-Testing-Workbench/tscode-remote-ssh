@@ -21,8 +21,7 @@ import { parseGiteeRepositoryUrl } from './giteeRepository';
 import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } from './settings';
 import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
-import { type PublicUserContainerApi } from './api/publicApi';
-import { type UserRestApi } from './api/restClient';
+import { PUBLIC_EXTENSION_ID, type PublicUserContainerApi } from './api/publicApi';
 import { formatContainerInitializationError } from './containerInitializationPoller';
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
@@ -76,7 +75,6 @@ export interface SidebarViewOptions {
     config: ContainerConfig;
     publicApi: PublicUserContainerApi;
     userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
-    userApiFactory: (baseUrl: string) => UserRestApi;
     getSettings?: () => RemoteSettings;
     cloudMode?: boolean;
     getCloudMode?: () => boolean | Thenable<boolean>;
@@ -115,7 +113,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly config: ContainerConfig;
     private readonly publicApi: PublicUserContainerApi;
     private readonly userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
-    private readonly userApiFactory: (baseUrl: string) => UserRestApi;
     private readonly getSettings: () => RemoteSettings;
     private readonly getCloudMode: () => boolean | Thenable<boolean>;
     private cloudMode: boolean;
@@ -155,7 +152,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.config = options.config;
         this.publicApi = options.publicApi;
         this.userIdProvider = options.userIdProvider;
-        this.userApiFactory = options.userApiFactory;
         this.getSettings = options.getSettings ?? getRemoteSettings;
         this.cloudMode = options.cloudMode === true;
         this.getCloudMode = options.getCloudMode ?? (() => this.cloudMode);
@@ -398,10 +394,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
         this.pageReady = true;
         this.render();
-        void this.checkAdmin(userId, settings.backendApiUrl, context);
+        void this.checkAdmin(context);
     }
 
-    private async checkAdmin(userId: string, baseUrl: string, context?: SidebarViewContext): Promise<void> {
+    private async checkAdmin(context?: SidebarViewContext): Promise<void> {
         if (!this.isCurrentPage(context) || this.cloudMode) {
             return;
         }
@@ -414,7 +410,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
         const promise = (async () => {
             try {
-                const response = await this.userApiFactory(baseUrl).checkAdmin({ user_id: userId });
+                const response = await this.publicApi.checkAdmin();
                 if (this.isCurrentPage(context)) {
                     this.adminAllowed = response.admin;
                     this.render();
@@ -970,6 +966,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             cancellable: false,
         }, async () => {
             const created = await this.publicApi.createContainer({
+                plugin_id: PUBLIC_EXTENSION_ID,
                 ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
                 ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
                 ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
@@ -1018,6 +1015,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 this.config.upsertContainer(document.config, {
                     containerId: created.container_id,
                     host,
+                    name: getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
                     hostName: endpoint.host,
                     port: endpoint.port,
                 }, {

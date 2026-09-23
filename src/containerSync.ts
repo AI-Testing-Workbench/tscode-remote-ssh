@@ -407,6 +407,7 @@ export class ContainerSync {
                 changed = this.config.upsertContainer(document.config, {
                     containerId,
                     host: assignment?.host ?? localEntry?.host ?? DEFAULT_CONTAINER_HOST_NAME,
+                    ...(assignment?.name ? { name: assignment.name } : {}),
                     ...(assignment?.hostName ? { hostName: assignment.hostName } : {}),
                     ...(assignment?.port !== undefined ? { port: assignment.port } : {}),
                 }, {
@@ -668,9 +669,10 @@ export class ContainerSync {
             const response = remoteStatus?.response;
             const hostName = remoteStatus?.parsedEndpoint?.host ?? localEntry?.hostName ?? localEntry?.host;
             const port = remoteStatus?.parsedEndpoint?.port ?? localEntry?.port;
-            const baseName = response
-                ? getContainerHostName(response.gitee_user, response.gitee_repository)
-                : localEntry?.host ?? DEFAULT_CONTAINER_HOST_NAME;
+            const baseName = localEntry?.name
+                ?? (response
+                    ? getContainerHostName(response.gitee_user, response.gitee_repository)
+                    : localEntry?.host ?? DEFAULT_CONTAINER_HOST_NAME);
             const existingHost = localEntry?.host.trim();
             const host = existingHost && !assignedNames.has(normalizeHostName(existingHost))
                 ? existingHost
@@ -678,6 +680,7 @@ export class ContainerSync {
             assignedNames.add(normalizeHostName(host));
             assignments.set(containerId, {
                 host,
+                name: baseName,
                 ...(hostName ? { hostName } : {}),
                 ...(port !== undefined ? { port } : {}),
             });
@@ -718,6 +721,7 @@ export class ContainerSync {
 
 interface HostAssignment {
     host: string;
+    name: string;
     hostName?: string;
     port?: number;
 }
