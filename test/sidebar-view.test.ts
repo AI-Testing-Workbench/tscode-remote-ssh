@@ -38,6 +38,7 @@ describe('SidebarViewProvider', () => {
         vscode.window.showInformationMessage.mockReset();
         vscode.window.withProgress.mockReset();
         vscode.window.withProgress.mockImplementation((_options, task) => task({ report: vi.fn() }, {} as never) as Promise<unknown>);
+        vscode.env.clipboard.writeText.mockReset().mockResolvedValue(undefined);
         vscode.env.openExternal.mockReset();
         vscode.Uri.parse.mockReset();
     });
@@ -84,6 +85,14 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('<span class="status-dot pending"></span>\n                    <span class="status-label">同步中</span>');
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.failed, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
+        expect((view.webview.html.match(/data-action="copyContainerId"/g) ?? [])).toHaveLength(7);
+        expect(view.webview.html).toContain('title="复制 ID"');
+        for (const containerId of ['running-1', 'stopped-1', 'failed-1', 'pending-1', 'syncing-1', 'error-1', 'missing-1']) {
+            expect(view.webview.html).toContain(`data-action="copyContainerId" data-container-id="${containerId}"`);
+        }
+        expect(view.webview.html).toMatch(
+            /<strong class="service-name">host-running-1<\/strong>\s*<button class="service-copy-button" data-action="copyContainerId" data-container-id="running-1"/,
+        );
         expect(view.webview.html).toContain('post(\'connect\'');
         expect(view.webview.html).toMatch(/<article class="container-card" data-container-id="running-1" data-connectable="true">/);
         expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="true">/);
@@ -133,6 +142,37 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('script-src \'nonce-');
         expect(view.webview.html).not.toContain('data-action="openAdmin"');
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
+    });
+
+    it('copies the container ID for a service card', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('copy-me', 'running', true)], changed: false });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'copyContainerId', containerId: 'copy-me', requestId: 'copy-1' });
+        await flushMessages();
+
+        expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('copy-me');
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('ID 已复制，请按需联系支持人员获取帮助');
+    });
+
+    it('does not copy an ID that does not belong to a visible service card', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('known-id', 'running', true)], changed: false });
+        const view = createWebviewView();
+        const provider = createProvider({ state, view });
+        await provider.resolveWebviewView(view as never);
+
+        view.fireMessage({ command: 'copyContainerId', containerId: 'forged-id' });
+        await flushMessages();
+
+        expect(vscode.env.clipboard.writeText).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '无法复制 ID',
+            { modal: true },
+        );
     });
 
     it('renders an empty state without a creation instruction when no containers exist', async () => {
@@ -1468,6 +1508,50 @@ describe('Webview script', () => {
         expect(messages).toEqual([{ command: 'connect', containerId: 'container-1', requestId: '1' }]);
         expect(connectButton.hasAttribute('disabled')).toBe(true);
         expect(connectButton.classList.contains('is-loading')).toBe(true);
+    });
+
+    it('copies a card ID when the copy button is clicked without connecting the card', () => {
+        const messages: unknown[] = [];
+        const card = createScriptElement({
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const copyButton = createScriptElement({
+            'data-action': 'copyContainerId',
+            'data-container-id': 'container-1',
+        });
+        const connectButton = createScriptElement({
+            'data-action': 'connect',
+            'data-container-id': 'container-1',
+            'data-connectable': 'true',
+        });
+        const document = {
+            querySelectorAll: (selector: string): ScriptElement[] => {
+                if (selector === '[data-action]') {
+                    return [copyButton, connectButton];
+                }
+                if (selector === '.container-card[data-container-id]') {
+                    return [card];
+                }
+                if (selector === '[data-action="connect"]') {
+                    return [connectButton];
+                }
+                return [];
+            },
+        };
+
+        new Script(WEBVIEW_SCRIPT).runInNewContext({
+            acquireVsCodeApi: () => ({ postMessage: (message: unknown) => messages.push(message) }),
+            document,
+            window: { addEventListener: () => undefined },
+        });
+
+        copyButton.fire('click', { target: copyButton });
+        card.fire('dblclick', { target: copyButton });
+
+        expect(messages).toEqual([{ command: 'copyContainerId', containerId: 'container-1', requestId: '1' }]);
+        expect(copyButton.hasAttribute('disabled')).toBe(true);
+        expect(connectButton.hasAttribute('disabled')).toBe(false);
     });
 
     it('sets the request ID before a synchronous completion message is delivered', () => {

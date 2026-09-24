@@ -659,6 +659,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 case 'connect':
                     await this.connectContainer(containerId);
                     return;
+                case 'copyContainerId': {
+                    const container = this.findContainer(containerId);
+                    if (!container) {
+                        throw new Error('无法复制 ID');
+                    }
+                    await vscode.env.clipboard.writeText(container.containerId);
+                    if (this.isActiveView(context)) {
+                        void vscode.window.showInformationMessage('ID 已复制，请按需联系支持人员获取帮助');
+                    }
+                    return;
+                }
                 case 'openNovnc':
                     await this.openNovncUrl(containerId);
                     return;
@@ -1168,7 +1179,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 }
 
-type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'warning';
+type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'warning';
 
 const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     admin: '<path d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 3.5v3M17 5h3"/>',
@@ -1176,6 +1187,7 @@ const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     config: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
     connect: '<path d="M8.5 15.5 15.5 8.5"/><path d="M6.25 12.75 4.5 14.5a3.18 3.18 0 0 0 4.5 4.5l1.75-1.75"/><path d="m13.25 6.75 1.75-1.75a3.18 3.18 0 0 1 4.5 4.5l-1.75 1.75"/>',
     cloud: '<path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
     delete: '<path d="M5 7h14M9 7V5h6v2M7 7l.8 12h8.4L17 7M10 10.5v5M14 10.5v5"/>',
     disconnect: '<path d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H9M13 15l4-4-4-4M17 11H9"/>',
     external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
@@ -1278,6 +1290,7 @@ function renderContainerCard(
     const usage = renderUsage(container);
     const expiration = renderExpirationStatus(container);
     const typeBadge = renderTypeBadge(container.containerType);
+    const copyAction = findActiveAction(activeActions, 'copyContainerId', container.containerId);
     const connectAction = findActiveAction(activeActions, 'connect', container.containerId);
     const restartAction = findActiveAction(activeActions, 'restart', container.containerId);
     const deleteAction = findActiveAction(activeActions, 'delete', container.containerId);
@@ -1305,7 +1318,10 @@ function renderContainerCard(
     return `
         <article class="container-card" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}">
             <div class="service-heading" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}">
-                <strong class="service-name">${host}</strong>
+                <div class="service-name-row">
+                    <strong class="service-name">${host}</strong>
+                    <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyContainerId" data-container-id="${containerId}" title="复制 ID" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
+                </div>
                 <div class="service-status">
                     ${typeBadge}
                     <span class="status-dot ${statusClass}"></span>
@@ -1531,7 +1547,11 @@ function renderDocument(body: string): string {
         .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); }
         .container-card:hover { border-color: var(--vscode-focusBorder); }
         .service-heading { min-width: 0; }
-        .service-name { display: block; min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
+        .service-name-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+        .service-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
+        .service-copy-button { width: 28px; height: 28px; min-height: 28px; display: grid; place-items: center; flex: 0 0 28px; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
+        .service-copy-button:hover { border-color: transparent; color: var(--on-surface); background: var(--surface-container-high); }
+        .service-copy-button .icon { width: 15px; height: 15px; }
         .service-status { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 7px 0 0; color: var(--on-surface-variant); font-size: 12px; }
         .status-label { white-space: nowrap; }
         .status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--vscode-charts-yellow); }
