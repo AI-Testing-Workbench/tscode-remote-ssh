@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type * as vscodeApi from 'vscode';
 import { promptForGitCredentials } from '../src/gitCredentialPrompt';
 
 describe('promptForGitCredentials', () => {
@@ -17,9 +18,16 @@ describe('promptForGitCredentials', () => {
             persist: false,
         });
         expect(identityReader.read).toHaveBeenCalledOnce();
-        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ value: 'configured-user' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            value: 'configured-user',
+            ignoreFocusOut: true,
+        }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ value: 'configured@example.test' }));
         expect(showInputBox).toHaveBeenNthCalledWith(3, expect.objectContaining({ password: true }));
+        expect(showQuickPick).toHaveBeenCalledWith(
+            ['否', '是'],
+            expect.objectContaining({ ignoreFocusOut: true }),
+        );
         expect(showErrorMessage).not.toHaveBeenCalled();
     });
 
@@ -40,23 +48,137 @@ describe('promptForGitCredentials', () => {
         });
     });
 
-    it('notifies the user before retrying rejected credentials', async () => {
+    it('toggles password visibility with an eye button and submits the unchanged value', async () => {
+        let accept: (() => void) | undefined;
+        let triggerButton: ((button: vscodeApi.QuickInputButton) => void) | undefined;
+        const inputBox = {
+            title: undefined as string | undefined,
+            prompt: undefined as string | undefined,
+            placeholder: undefined as string | undefined,
+            value: '',
+            password: false,
+            ignoreFocusOut: false,
+            buttons: [] as vscodeApi.QuickInputButton[],
+            onDidAccept: vi.fn((listener: () => void) => {
+                accept = listener;
+                return { dispose: vi.fn() };
+            }),
+            onDidHide: vi.fn(() => ({ dispose: vi.fn() })),
+            onDidTriggerButton: vi.fn((listener: (button: vscodeApi.QuickInputButton) => void) => {
+                triggerButton = listener;
+                return { dispose: vi.fn() };
+            }),
+            show: vi.fn(),
+            dispose: vi.fn(),
+        } as unknown as vscodeApi.InputBox;
+        const showInputBox = vi.fn()
+            .mockResolvedValueOnce('git-user')
+            .mockResolvedValueOnce('git@example.test');
+        const prompt = promptForGitCredentials({
+            identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
+            showInputBox,
+            showQuickPick: vi.fn(async () => '否'),
+            createInputBox: () => inputBox,
+        });
+
+        await vi.waitFor(() => expect(inputBox.show).toHaveBeenCalledOnce());
+        expect(inputBox.password).toBe(true);
+        expect(inputBox.ignoreFocusOut).toBe(true);
+        expect(inputBox.buttons[0]).toMatchObject({
+            iconPath: { id: 'eye' },
+            tooltip: '显示密码',
+        });
+
+        inputBox.value = 'secret-token';
+        triggerButton?.(inputBox.buttons[0]);
+        expect(inputBox.password).toBe(false);
+        expect(inputBox.value).toBe('secret-token');
+        expect(inputBox.buttons[0]).toMatchObject({
+            iconPath: { id: 'eye-closed' },
+            tooltip: '隐藏密码',
+        });
+
+        triggerButton?.(inputBox.buttons[0]);
+        expect(inputBox.password).toBe(true);
+        expect(inputBox.buttons[0]).toMatchObject({
+            iconPath: { id: 'eye' },
+            tooltip: '显示密码',
+        });
+        accept?.();
+
+        await expect(prompt).resolves.toMatchObject({
+            git_username: 'git-user',
+            git_password: 'secret-token',
+        });
+        expect(inputBox.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('treats a hidden password input box as cancellation', async () => {
+        let hide: (() => void) | undefined;
+        const inputBox = {
+            title: undefined as string | undefined,
+            prompt: undefined as string | undefined,
+            placeholder: undefined as string | undefined,
+            value: '',
+            password: false,
+            ignoreFocusOut: false,
+            buttons: [] as vscodeApi.QuickInputButton[],
+            onDidAccept: vi.fn(() => ({ dispose: vi.fn() })),
+            onDidHide: vi.fn((listener: () => void) => {
+                hide = listener;
+                return { dispose: vi.fn() };
+            }),
+            onDidTriggerButton: vi.fn(() => ({ dispose: vi.fn() })),
+            show: vi.fn(),
+            dispose: vi.fn(),
+        } as unknown as vscodeApi.InputBox;
+        const onCancel = vi.fn();
+        const prompt = promptForGitCredentials({
+            identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
+            showInputBox: vi.fn()
+                .mockResolvedValueOnce('git-user')
+                .mockResolvedValueOnce('git@example.test'),
+            showQuickPick: vi.fn(),
+            createInputBox: () => inputBox,
+            onCancel,
+        });
+
+        await vi.waitFor(() => expect(inputBox.show).toHaveBeenCalledOnce());
+        hide?.();
+
+        await expect(prompt).resolves.toBeUndefined();
+        expect(onCancel).toHaveBeenCalledOnce();
+        expect(inputBox.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('shows a modal error before retrying rejected credentials', async () => {
         const values = ['git-user', 'git@example.test', 'secret-token'];
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async () => '否');
-        const showErrorMessage = vi.fn(async () => undefined);
+        let resolveErrorMessage: (() => void) | undefined;
+        const showErrorMessage = vi.fn(() => new Promise<void>(resolve => {
+            resolveErrorMessage = resolve;
+        }));
 
-        await expect(promptForGitCredentials({
+        const prompt = promptForGitCredentials({
             identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
             showInputBox,
             showQuickPick,
             showErrorMessage,
             gitStatus: 'credential_rejected',
-        })).resolves.toMatchObject({
+        });
+
+        await vi.waitFor(() => expect(showErrorMessage).toHaveBeenCalledWith(
+            '码云凭证输入错误或缓存过期，请重试',
+            { modal: true },
+        ));
+        expect(showInputBox).not.toHaveBeenCalled();
+        resolveErrorMessage?.();
+
+        await expect(prompt).resolves.toMatchObject({
             git_username: 'git-user',
             git_password: 'secret-token',
         });
-        expect(showErrorMessage).toHaveBeenCalledWith('码云凭证输入错误或缓存过期，请重试');
     });
 
     it('keeps the prompt open for empty required fields and treats close as cancellation', async () => {

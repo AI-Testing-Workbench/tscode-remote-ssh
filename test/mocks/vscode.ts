@@ -49,6 +49,11 @@ class ExtensionContext {
     };
 }
 
+class ThemeIcon {
+    constructor(readonly id: string) {
+    }
+}
+
 enum ProgressLocation {
     SourceControl = 1,
     Window = 10,
@@ -168,6 +173,7 @@ export {
     RemoteAuthorityResolverContext,
     RemoteAuthorityResolverError,
     ResolvedAuthority,
+    ThemeIcon,
     resetConfiguration,
     setConfigurationValue,
     ConfigurationTarget,

@@ -921,6 +921,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             title,
             prompt: '码云仓库地址 (HTTP协议)',
             placeHolder: '',
+            ignoreFocusOut: true,
         });
         if (giteeInput === undefined) {
             return;
@@ -949,6 +950,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 title,
                 prompt: '码云分支 (可选)',
                 placeHolder: 'master',
+                ignoreFocusOut: true,
             });
             if (giteeBranch === undefined) {
                 return;

@@ -72,7 +72,8 @@ async function promptForHost(): Promise<string | undefined> {
 
     if (!configuredHosts.length) {
         return vscode.window.showInputBox({
-            title: '请输入 [user@]hostname[:port]'
+            title: '请输入 [user@]hostname[:port]',
+            ignoreFocusOut: true,
         });
     }
 
@@ -82,6 +83,7 @@ async function promptForHost(): Promise<string | undefined> {
         const quickPick = vscode.window.createQuickPick();
         quickPick.title = '连接到 云端沙箱 服务';
         quickPick.placeholder = '选择已配置的连接，或者输入 [user@]hostname[:port]';
+        quickPick.ignoreFocusOut = true;
         quickPick.items = hostItems;
 
         quickPick.onDidChangeValue(value => {

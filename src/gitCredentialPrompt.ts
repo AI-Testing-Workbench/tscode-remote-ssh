@@ -9,7 +9,8 @@ export interface GitCredentialPromptOptions {
         items: readonly string[],
         options: vscode.QuickPickOptions,
     ) => Thenable<string | undefined>;
-    showErrorMessage?: (message: string) => Thenable<unknown>;
+    createInputBox?: () => vscode.InputBox;
+    showErrorMessage?: (message: string, options?: vscode.MessageOptions) => Thenable<unknown>;
     onCancel?: () => Thenable<unknown> | void;
     gitStatus?: Extract<GitStatus, 'credential_required' | 'credential_rejected'>;
 }
@@ -22,9 +23,17 @@ export async function promptForGitCredentials(
 ): Promise<GitCredentialSubmitRequest | undefined> {
     const showInputBox = options.showInputBox ?? (inputOptions => vscode.window.showInputBox(inputOptions));
     const showQuickPick = options.showQuickPick ?? ((items, pickOptions) => vscode.window.showQuickPick(items, pickOptions));
-    const showErrorMessage = options.showErrorMessage ?? (message => vscode.window.showErrorMessage(message));
+    const createInputBox = options.createInputBox;
+    const showPasswordInputBox = createInputBox
+        ? (inputOptions: vscode.InputBoxOptions) => promptWithVisibilityToggle(inputOptions, createInputBox)
+        : options.showInputBox ?? (inputOptions => promptWithVisibilityToggle(inputOptions));
+    const showErrorMessage = options.showErrorMessage ?? ((message, messageOptions) => (
+        messageOptions === undefined
+            ? vscode.window.showErrorMessage(message)
+            : vscode.window.showErrorMessage(message, messageOptions)
+    ));
     if (options.gitStatus === 'credential_rejected') {
-        void showErrorMessage('码云凭证输入错误或缓存过期，请重试');
+        await showErrorMessage('码云凭证输入错误或缓存过期，请重试', { modal: true });
     }
     const cancel = async (): Promise<undefined> => {
         try {
@@ -40,6 +49,7 @@ export async function promptForGitCredentials(
         title: '请输入码云用户名',
         prompt: '',
         value: identity.username,
+        ignoreFocusOut: true,
         emptyMessage: '码云用户名不能为空',
     }, value => value.trim());
     if (username === undefined) {
@@ -56,7 +66,7 @@ export async function promptForGitCredentials(
         return cancel();
     }
 
-    const password = await promptRequired(showInputBox, showErrorMessage, {
+    const password = await promptRequired(showPasswordInputBox, showErrorMessage, {
         title: '请输入码云密码 (将会加密使用)',
         prompt: '',
         password: true,
@@ -94,9 +104,50 @@ async function readIdentity(identityReader: Pick<GitConfigReader, 'read'>): Prom
     }
 }
 
+function promptWithVisibilityToggle(
+    options: vscode.InputBoxOptions,
+    createInputBox: () => vscode.InputBox = () => vscode.window.createInputBox(),
+): Promise<string | undefined> {
+    const inputBox = createInputBox();
+    inputBox.title = options.title;
+    inputBox.prompt = options.prompt;
+    inputBox.placeholder = options.placeHolder;
+    inputBox.value = options.value ?? '';
+    inputBox.password = true;
+    inputBox.ignoreFocusOut = true;
+    inputBox.buttons = [createVisibilityButton(false)];
+
+    return new Promise(resolve => {
+        let resolved = false;
+        const finish = (value: string | undefined): void => {
+            if (resolved) {
+                return;
+            }
+            resolved = true;
+            inputBox.dispose();
+            resolve(value);
+        };
+
+        inputBox.onDidAccept(() => finish(inputBox.value));
+        inputBox.onDidHide(() => finish(undefined));
+        inputBox.onDidTriggerButton(() => {
+            inputBox.password = !inputBox.password;
+            inputBox.buttons = [createVisibilityButton(!inputBox.password)];
+        });
+        inputBox.show();
+    });
+}
+
+function createVisibilityButton(passwordVisible: boolean): vscode.QuickInputButton {
+    return {
+        iconPath: new vscode.ThemeIcon(passwordVisible ? 'eye-closed' : 'eye'),
+        tooltip: passwordVisible ? '隐藏密码' : '显示密码',
+    };
+}
+
 async function promptRequired(
     showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>,
-    showErrorMessage: (message: string) => Thenable<unknown>,
+    showErrorMessage: (message: string, options?: vscode.MessageOptions) => Thenable<unknown>,
     inputOptions: vscode.InputBoxOptions & { emptyMessage: string },
     normalize: (value: string) => string,
     cancelOnEmpty = false,

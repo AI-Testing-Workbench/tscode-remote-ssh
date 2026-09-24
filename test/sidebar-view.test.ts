@@ -1094,8 +1094,14 @@ describe('SidebarViewProvider', () => {
             gitee_repository: 'repo',
             gitee_branch: 'main',
         }, { initializationSignal: expect.any(AbortSignal) });
-        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({ prompt: '码云仓库地址 (HTTP协议)' }));
-        expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: '码云分支 (可选)' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            prompt: '码云仓库地址 (HTTP协议)',
+            ignoreFocusOut: true,
+        }));
+        expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            prompt: '码云分支 (可选)',
+            ignoreFocusOut: true,
+        }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-1',
             host: 'alice/repo',

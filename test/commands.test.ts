@@ -155,6 +155,19 @@ describe('openRemoteSSHWindow', () => {
         expect(refreshSidebar).not.toHaveBeenCalled();
     });
 
+    it('keeps the free-form host input open when focus moves out', async () => {
+        const readSpy = vi.spyOn(ContainerConfig.prototype, 'read').mockRejectedValue(new Error('config unavailable'));
+        const inputSpy = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('dev');
+        try {
+            await promptOpenRemoteSSHWindow(false);
+
+            expect(inputSpy).toHaveBeenCalledWith(expect.objectContaining({ ignoreFocusOut: true }));
+        } finally {
+            readSpy.mockRestore();
+            inputSpy.mockRestore();
+        }
+    });
+
     it('does not open a remote window when the connection choice is dismissed', async () => {
         vscode.workspace.workspaceFolders = [{} as never];
         vscode.window.showInformationMessage.mockResolvedValue(undefined);
@@ -203,6 +216,7 @@ describe('openRemoteSSHWindow', () => {
         const quickPick = {
             title: '',
             placeholder: '',
+            ignoreFocusOut: false,
             items: [],
             value: '',
             selectedItems: [],
@@ -224,6 +238,7 @@ describe('openRemoteSSHWindow', () => {
             await vi.waitFor(() => expect(vscode.window.createQuickPick).toHaveBeenCalledOnce());
 
             expect(quickPick.items).toEqual([{ label: '云端沙箱 Service' }]);
+            expect(quickPick.ignoreFocusOut).toBe(true);
             hideListener?.();
             await pending;
             expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
