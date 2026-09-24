@@ -157,7 +157,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
 
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindow', () => promptOpenRemoteSSHWindow(false)));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindowInCurrentWindow', () => promptOpenRemoteSSHWindow(true)));
-    context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openConfigFile', () => openSSHConfigFile()));
+    context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openConfigFile', async () => {
+        try {
+            await sidebarView.openConfigFile();
+        } catch (error) {
+            logger.error('打开 SSH 配置文件失败', error);
+            void vscode.window.showErrorMessage(
+                error instanceof Error ? error.message : '无法打开 SSH 配置文件',
+                { modal: true },
+            );
+        }
+    }));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.showLog', () => logger.show()));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.refreshContainers', () => containerSync.refresh()));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.createContainer', () => sidebarView.createContainerFromPrompt()));

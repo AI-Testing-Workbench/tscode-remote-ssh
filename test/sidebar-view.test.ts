@@ -102,7 +102,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="connect" data-container-id="syncing-1" data-connectable="false" disabled>/);
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="failed-1" disabled>/);
         expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
-        expect(view.webview.html).toContain('data-action="openConfig"');
+        expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(view.webview.html).toContain('data-action="clearExpired"');
         expect(view.webview.html.indexOf('data-action="clearExpired"')).toBeLessThan(view.webview.html.indexOf('data-action="refresh"'));
@@ -995,8 +995,9 @@ describe('SidebarViewProvider', () => {
         state.update({ containers: [], changed: false });
         const userApi = createUserApi(true);
         const onOpenAdmin = vi.fn();
+        const onOpenConfig = vi.fn();
         const view = createWebviewView();
-        const provider = createProvider({ state, userApi, onOpenAdmin, view });
+        const provider = createProvider({ state, userApi, onOpenAdmin, onOpenConfig, view });
 
         await provider.resolveWebviewView(view as never);
         await flushMessages();
@@ -1007,6 +1008,30 @@ describe('SidebarViewProvider', () => {
         view.fireMessage({ command: 'openAdmin' });
         await flushMessages();
         expect(onOpenAdmin).toHaveBeenCalledOnce();
+        view.fireMessage({ command: 'openConfig' });
+        await flushMessages();
+        expect(onOpenConfig).toHaveBeenCalledOnce();
+    });
+
+    it('hides and rejects config-file access for non-admin users', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [], changed: false });
+        const userApi = createUserApi(false);
+        const onOpenConfig = vi.fn();
+        const view = createWebviewView();
+        const provider = createProvider({ state, userApi, onOpenConfig, view });
+
+        await provider.resolveWebviewView(view as never);
+        await flushMessages();
+
+        expect(view.webview.html).not.toContain('data-action="openConfig"');
+        view.fireMessage({ command: 'openConfig' });
+        await flushMessages();
+
+        expect(onOpenConfig).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('当前用户没有管理员权限', { modal: true });
+        await expect(provider.openConfigFile()).rejects.toThrow('当前用户没有管理员权限');
+        expect(onOpenConfig).not.toHaveBeenCalled();
     });
 
     it('waits for the administrator page to finish opening', async () => {

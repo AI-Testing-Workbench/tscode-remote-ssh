@@ -269,6 +269,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         await this.refreshForVisibleView(context);
     }
 
+    public async openConfigFile(): Promise<void> {
+        if (await this.getCloudMode() || !this.onOpenConfig) {
+            throw new Error('当前模式不支持打开配置文件');
+        }
+        if (!(await this.publicApi.checkAdmin()).admin) {
+            throw new Error('当前用户没有管理员权限');
+        }
+        await this.onOpenConfig();
+    }
+
     public dispose(): void {
         if (this.disposed) {
             return;
@@ -636,10 +646,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     }
                     return;
                 case 'openConfig':
-                    if (this.cloudMode || !this.onOpenConfig) {
-                        throw new Error('当前模式不支持打开配置文件');
+                    if (!this.adminAllowed) {
+                        throw new Error('当前用户没有管理员权限');
                     }
-                    await this.onOpenConfig();
+                    await this.openConfigFile();
                     return;
                 case 'openAdmin':
                     if (!this.adminAllowed || !this.onOpenAdmin) {
@@ -1239,13 +1249,9 @@ function renderSidebarHtml(
     const adminButton = showAdmin
         ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin', false, findActiveAction(activeActions, 'openAdmin'))
         : '';
-    const configButton = renderToolbarButton(
-        'openConfig',
-        '打开配置文件',
-        'config',
-        false,
-        findActiveAction(activeActions, 'openConfig'),
-    );
+    const configButton = showAdmin
+        ? renderToolbarButton('openConfig', '打开配置文件', 'config', false, findActiveAction(activeActions, 'openConfig'))
+        : '';
     const clearExpiredAction = findActiveAction(activeActions, 'clearExpired');
     const clearExpiredButton = renderToolbarButton(
         'clearExpired',
