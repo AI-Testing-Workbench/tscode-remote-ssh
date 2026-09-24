@@ -130,7 +130,7 @@ describe('public user container API', () => {
             user_id: 'user-1',
         });
         expect(callback).toHaveBeenCalledOnce();
-        expect(callback).toHaveBeenCalledWith();
+        expect(callback).toHaveBeenCalledWith('container-1');
         expect(created).not.toHaveProperty('plugin_id');
         expect(created).not.toHaveProperty('user_id');
     });
@@ -147,6 +147,9 @@ describe('public user container API', () => {
     it('waits for initialization and invokes each creation callback in order', async () => {
         const userApi = createUserApi();
         const calls: string[] = [];
+        const postCompleted = vi.fn((containerId: string) => { calls.push(`postCompleted:${containerId}`); });
+        const gitInitialized = vi.fn((containerId: string) => { calls.push(`gitInitialized:${containerId}`); });
+        const containerPrepared = vi.fn((containerId: string) => { calls.push(`containerPrepared:${containerId}`); });
         const initializationPoller = {
             initialize: vi.fn(async () => ({
                 container: containerStatus('container-1', 'running', 'initialized'),
@@ -162,13 +165,20 @@ describe('public user container API', () => {
         await expect(api.createContainer({
             plugin_id: 'example.plugin',
             callbacks: {
-                postCompleted: vi.fn(() => { calls.push('postCompleted'); }),
-                gitInitialized: vi.fn(() => { calls.push('gitInitialized'); }),
-                containerPrepared: vi.fn(() => { calls.push('containerPrepared'); }),
+                postCompleted,
+                gitInitialized,
+                containerPrepared,
             },
         })).resolves.toMatchObject({ status: 'running' });
 
-        expect(calls).toEqual(['postCompleted', 'gitInitialized', 'containerPrepared']);
+        expect(calls).toEqual([
+            'postCompleted:container-1',
+            'gitInitialized:container-1',
+            'containerPrepared:container-1',
+        ]);
+        expect(postCompleted).toHaveBeenCalledWith('container-1');
+        expect(gitInitialized).toHaveBeenCalledWith('container-1');
+        expect(containerPrepared).toHaveBeenCalledWith('container-1');
         expect(initializationPoller.initialize).toHaveBeenCalledOnce();
         expect(userApi.deleteContainer).not.toHaveBeenCalled();
     });

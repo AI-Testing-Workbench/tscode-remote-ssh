@@ -10,6 +10,7 @@ import {
     CreateContainerResponse,
     AdminCheckResponse,
     FileSyncResult,
+    PublicContainerCallback,
     PublicCreateContainerCallbacks,
     PublicFileSyncConflict,
     UserContainerQuery,
@@ -259,14 +260,14 @@ export function createPublicUserContainerApi(
 
     async function runCreateCallback(
         stage: keyof PublicCreateContainerCallbacks,
-        callback: (() => void | Promise<void>) | undefined,
+        callback: PublicContainerCallback | undefined,
         context: { pluginId: string; userApi: UserRestApi; containerId: string },
     ): Promise<void> {
         if (!callback) {
             return;
         }
         try {
-            await callback();
+            await callback(context.containerId);
         } catch (originalError) {
             let cleanupError: unknown;
             try {

@@ -69,7 +69,7 @@ export interface CreateContainerResponse {
     expires_at?: string | null;
 }
 
-export type PublicContainerCallback = () => void | Promise<void>;
+export type PublicContainerCallback = (containerId: string) => void | Promise<void>;
 
 export interface PublicCreateContainerCallbacks {
     postCompleted?: PublicContainerCallback;
