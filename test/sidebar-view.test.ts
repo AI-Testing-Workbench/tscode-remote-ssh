@@ -1347,6 +1347,64 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith('creation cancelled', { modal: true });
     });
 
+    it('keeps public initialization alive while switching sidebars', async () => {
+        const userApi = createUserApi(false);
+        userApi.createContainer = vi.fn(async () => ({
+            container_id: 'created-during-sidebar-switch',
+            service_id: 'service-during-sidebar-switch',
+            status: 'pending',
+            endpoint: '10.0.0.10:2222',
+        }));
+        let resolveInitialization: ((value: unknown) => void) | undefined;
+        let initializationSignal: AbortSignal | undefined;
+        const initialization = new Promise<unknown>(resolve => {
+            resolveInitialization = resolve;
+        });
+        const initializationPoller = {
+            initialize: vi.fn((input: { signal?: AbortSignal }) => {
+                initializationSignal = input.signal;
+                return initialization;
+            }),
+        };
+        const publicApi = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+        const config = createConfig();
+        const provider = createProvider({
+            publicApi,
+            config,
+            showInputBox: vi.fn(async () => ''),
+        });
+        const view = createWebviewView();
+        await provider.resolveWebviewView(view as never);
+
+        const creating = provider.createContainerFromPrompt();
+        await vi.waitFor(() => expect(initializationPoller.initialize).toHaveBeenCalledOnce());
+
+        for (let index = 0; index < 3; index += 1) {
+            view.fireVisibility(false);
+            view.fireVisibility(true);
+        }
+
+        expect(initializationSignal?.aborted).toBe(false);
+        resolveInitialization?.({
+            container: {
+                container_id: 'created-during-sidebar-switch',
+                status: 'running',
+                endpoint: '10.0.0.10:2222',
+                git_fin_status: 'initialized',
+            },
+        });
+        await creating;
+
+        expect(config.write).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith('当前创建流程已取消\n错误码: creation_cancelled', { modal: true });
+        provider.dispose();
+    });
+
     it('does not show the manual create form while remotely connected', async () => {
         const showInputBox = vi.fn(async () => 'unused');
         const publicApi = createPublicApi();

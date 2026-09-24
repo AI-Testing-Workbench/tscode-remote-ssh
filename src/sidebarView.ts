@@ -298,7 +298,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!this.isActiveView(context)) {
             return;
         }
-        this.abortInitializations(context);
         const refreshedContext: SidebarViewContext = {
             webviewView: context.webviewView,
             generation: context.generation,
