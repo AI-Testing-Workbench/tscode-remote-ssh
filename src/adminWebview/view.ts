@@ -85,7 +85,7 @@ function renderTabContent(state: AdminPanelState): string {
         case 'images':
             return renderImagesTab(state.images, state.defaultImages, state.selectedImageFilename, state.search, state.containers);
         case 'containers':
-            return renderContainersTab(state.containers, state.images, state.defaultImages, state.search);
+            return renderContainersTab(state.containers, state.images, state.defaultImages, state.search, state.processingContainerIds);
         case 'volume':
             return renderVolumeTab(state.volume);
         case 'whitelist':
@@ -294,8 +294,10 @@ function renderContainersTab(
     images: ImageListItem[],
     defaultImages: AdminDefaultImage[],
     search = '',
+    processingContainerIds: string[] = [],
 ): string {
-    const rows = containers.map(renderContainerRow).join('');
+    const processing = new Set(processingContainerIds);
+    const rows = containers.map(container => renderContainerRow(container, processing.has(container.container_id))).join('');
     const empty = containers.length ? '' : '<p class="empty-message" data-empty-data>暂无容器数据</p>';
     const emptySearch = containers.length ? '<p class="empty-message" data-empty-search hidden>没有匹配的容器</p>' : '';
     return `<section class="tab-panel" data-tab-panel data-patch-key="tab-containers" aria-labelledby="containers-tab">
@@ -483,12 +485,13 @@ function renderStyledSelect(attributes: string, options: SelectOption[]): string
     </span>`;
 }
 
-function renderContainerRow(container: AdminContainerResponse): string {
+function renderContainerRow(container: AdminContainerResponse, processing: boolean): string {
     const deleted = container.business_deleted;
     const status = deleted ? 'business_deleted' : container.status.toLowerCase();
     const statusStyle = statusClass(status);
     const transitioning = isContainerTransitioning(status);
     const rowClasses = ['resource-row', 'container-row', 'searchable', `status-border-${statusStyle}`, deleted ? 'deleted-row' : ''].filter(Boolean).join(' ');
+    const connectDisabled = deleted || status === 'business_deleted' || status === 'processing' || processing || !container.endpoint?.trim();
     const lifecycle = deleted
         ? { label: '删除时间', value: formatDateTime(container.deleted_at) || '未删除' }
         : { label: '删除时间 (计划)', value: container.expires_at ? formatDateTime(container.expires_at) : '永不过期' };
@@ -511,7 +514,7 @@ function renderContainerRow(container: AdminContainerResponse): string {
     return `<article class="${rowClasses}" data-patch-key="container:${escapeAttribute(container.container_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-filter-type="${escapeAttribute(container.type ?? '')}" data-sort-container_id="${escapeAttribute(container.container_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
         <div class="container-card-heading">
             <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted, container.git_fin_status))}</span>${typeBadge}</div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
-            <button class="small-button log-button" type="button" data-action="getContainerLog" data-container-id="${escapeAttribute(container.container_id)}">日志</button>
+            <div class="container-heading-actions"><button class="small-button log-button" type="button" data-action="getContainerLog" data-container-id="${escapeAttribute(container.container_id)}">日志</button><button class="small-button connect-button" type="button" data-action="connectContainer" data-container-id="${escapeAttribute(container.container_id)}"${connectDisabled ? ' disabled' : ''}>连接</button></div>
         </div>
         <div class="container-details">
             <div class="container-info-row">
@@ -653,7 +656,7 @@ function statusClass(status: string): string {
 }
 
 function isContainerTransitioning(status: string): boolean {
-    return ['pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring'].includes(status.toLowerCase());
+    return ['pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring', 'processing'].includes(status.toLowerCase());
 }
 
 function formatGitee(container: AdminContainerResponse): string {
@@ -919,12 +922,14 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .row-check { font-size: 11px; }
 .container-row { display: grid; gap: 15px; }
 .container-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
+.container-heading-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 7px; }
 .container-identity { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
 .container-identity .resource-main { flex: 1 1 auto; }
 .container-identity .resource-main strong { font-size: 14px; }
 .container-title { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
 .container-title strong { min-width: 0; overflow-wrap: anywhere; }
 .log-button { flex: 0 0 auto; color: var(--primary-hover); }
+.connect-button { flex: 0 0 auto; }
 .container-details { display: grid; gap: 8px; }
 .container-info-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 8px; }

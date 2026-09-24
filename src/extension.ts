@@ -89,6 +89,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     });
     const adminPanel = new AdminPanel({
         userIdProvider,
+        containerConfig: config,
+        onConnect: (host, giteeRepository) => connectToContainer(
+            host,
+            () => activeSidebarView?.refreshCloudMode(),
+            giteeRepository,
+        ),
         operationRegistry,
         initializationPoller,
         initializationSignal: initializationController.signal,

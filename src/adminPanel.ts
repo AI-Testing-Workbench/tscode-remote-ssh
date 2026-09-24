@@ -15,6 +15,8 @@ import {
 } from './api/models';
 import { AdminRestApi, formatRestClientError, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
 import { FileBrowserBridge, getFileBrowserFrameSource, validateFileBrowserUrl, type FileBrowserBridgeSession } from './filebrowserBridge';
+import { ContainerConfig } from './containerConfig';
+import { getContainerHostName, getUniqueHostName } from './containerSync';
 import {
     ContainerOperationAction,
     ContainerOperationEvent,
@@ -36,7 +38,7 @@ import {
     getInitializationResultContainer,
     type ContainerInitializationRunner,
 } from './containerInitializationPoller';
-import { parseContainerEndpoint } from './containerEndpoint';
+import { InvalidContainerEndpointError, parseContainerEndpoint } from './containerEndpoint';
 
 export const ADMIN_PANEL_VIEW_TYPE = 'testagentRemote.adminPanel';
 export const ADMIN_PANEL_TITLE = '管理员页面';
@@ -48,12 +50,16 @@ type ShowOpenDialog = (options?: vscode.OpenDialogOptions) => Thenable<vscode.Ur
 type AdminApiFactory = (baseUrl: string, operatorUserId: string) => AdminRestApi;
 type AdminData = Pick<AdminPanelState, 'images' | 'defaultImages' | 'containers' | 'orphanContainerIds' | 'stats' | 'limit' | 'whitelistUsers' | 'adminUsers'>;
 type FileBrowserBridgeFactory = Pick<FileBrowserBridge, 'createSession' | 'dispose'>;
+type AdminContainerConfig = Pick<ContainerConfig, 'read' | 'list' | 'upsertContainer' | 'write'>;
+type ContainerConnectHandler = (host: string, giteeRepository?: string) => void | boolean | Promise<void | boolean>;
 
 export interface AdminPanelOptions {
     userIdProvider?: UserIdSource;
     getSettings?: () => RemoteSettings;
     userApiFactory?: (baseUrl: string) => UserRestApi;
     adminApiFactory?: AdminApiFactory;
+    containerConfig?: AdminContainerConfig;
+    onConnect?: ContainerConnectHandler;
     operationRegistry?: ContainerOperationRegistry;
     initializationPoller?: ContainerInitializationRunner;
     initializationSignal?: AbortSignal;
@@ -68,6 +74,8 @@ export class AdminPanel implements vscode.Disposable {
     private readonly getSettings: () => RemoteSettings;
     private readonly userApiFactory: (baseUrl: string) => UserRestApi;
     private readonly adminApiFactory: AdminApiFactory;
+    private readonly containerConfig: AdminContainerConfig;
+    private readonly onConnect: ContainerConnectHandler | undefined;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly initializationPoller: ContainerInitializationRunner | undefined;
     private readonly initializationSignal: AbortSignal | undefined;
@@ -104,6 +112,8 @@ export class AdminPanel implements vscode.Disposable {
         this.getSettings = options.getSettings ?? getRemoteSettings;
         this.userApiFactory = options.userApiFactory ?? ((baseUrl: string) => new RestClient(baseUrl).user);
         this.adminApiFactory = options.adminApiFactory ?? ((baseUrl: string, operatorUserId: string) => new RestClient(baseUrl, { operatorUserId }).admin);
+        this.containerConfig = options.containerConfig ?? new ContainerConfig();
+        this.onConnect = options.onConnect;
         this.operationRegistry = options.operationRegistry;
         this.initializationPoller = options.initializationPoller;
         this.initializationSignal = options.initializationSignal;
@@ -537,6 +547,9 @@ export class AdminPanel implements vscode.Disposable {
                 return this.deleteOrphanContainers(adminApi, message, panel, generation);
             case 'containerAction':
                 return this.containerAction(adminApi, message, panel, generation);
+            case 'connectContainer':
+                await this.connectContainer(requireText(message.containerId, '容器 ID 不能为空'), panel, generation);
+                return false;
             case 'addWhitelistUser':
                 await adminApi.addWhitelistUser({ user_id: requireText(message.user_id, '用户 ID 不能为空') });
                 return true;
@@ -760,6 +773,66 @@ export class AdminPanel implements vscode.Disposable {
         }
     }
 
+    private async connectContainer(containerId: string, panel: vscode.WebviewPanel, generation: number): Promise<void> {
+        const container = this.state.containers.find(item => item.container_id === containerId);
+        if (!container) {
+            throw new Error(`容器 "${containerId}" 不在当前管理员清单中`);
+        }
+        if (container.business_deleted || container.status.toLowerCase() === 'business_deleted') {
+            throw new Error(`容器 "${containerId}" 已业务删除，无法连接`);
+        }
+        if (isContainerConnectionProcessing(container.status) || this.operationRegistry?.has(containerId)) {
+            throw new Error(`容器 "${containerId}" 正在处理中，暂时无法连接`);
+        }
+        if (!container.endpoint?.trim()) {
+            throw new Error(`容器 "${containerId}" 尚无可用 endpoint，无法连接`);
+        }
+        const endpoint = parseContainerEndpoint(container.endpoint, { allowDebugProxy: this.getSettings().debug });
+        if (!endpoint) {
+            throw new InvalidContainerEndpointError(containerId, container.endpoint);
+        }
+        if (!this.onConnect) {
+            throw new Error('当前环境没有可用的连接处理器');
+        }
+
+        const document = await this.containerConfig.read();
+        if (!this.isActive(panel, generation)) {
+            return;
+        }
+        if (this.operationRegistry?.has(containerId)) {
+            throw new Error(`容器 "${containerId}" 正在处理中，暂时无法连接`);
+        }
+
+        const entries = this.containerConfig.list(document.config);
+        const existing = entries.find(entry => entry.containerId === containerId);
+        const usedHosts = new Set(entries
+            .filter(entry => entry.containerId !== containerId)
+            .map(entry => entry.host.trim())
+            .filter(Boolean));
+        const existingHost = existing?.host.trim();
+        const host = existingHost && !Array.from(usedHosts).some(value => value.toLocaleLowerCase() === existingHost.toLocaleLowerCase())
+            ? existingHost
+            : getUniqueHostName(getContainerHostName(container.gitee_user, container.gitee_repository), usedHosts);
+        const name = existing?.name?.trim() || host;
+        const settings = this.getSettings();
+        this.containerConfig.upsertContainer(document.config, {
+            containerId,
+            host,
+            name,
+            hostName: endpoint.host,
+            port: endpoint.port,
+        }, {
+            skipKnownHostsCheck: settings.skipKnownHostsCheck,
+            userName: settings.userName,
+        });
+        await this.containerConfig.write(document);
+        if (!this.isActive(panel, generation) || this.operationRegistry?.has(containerId)) {
+            return;
+        }
+
+        await this.onConnect(host, container.gitee_repository.trim() || undefined);
+    }
+
     private async executeLifecycleAction(
         adminApi: AdminRestApi,
         containerId: string,
@@ -965,8 +1038,10 @@ export class AdminPanel implements vscode.Disposable {
         if (!this.operationRegistry) {
             return this.state;
         }
+        const processingContainerIds = this.operationRegistry.list().map(operation => operation.containerId);
         return {
             ...this.state,
+            processingContainerIds,
             containers: this.state.containers.map(container => {
                 const operation = this.operationRegistry?.get(container.container_id);
                 if (!operation || container.business_deleted && operation.action !== 'restore') {
@@ -1185,6 +1260,7 @@ const ADMIN_ACTIONS = new Set([
     'deleteOrphanContainers',
     'getContainerLog',
     'containerAction',
+    'connectContainer',
     'addWhitelistUser',
     'deleteWhitelistUser',
     'addAdminUser',
@@ -1568,6 +1644,10 @@ function getRequestId(value: unknown): string | undefined {
 
 function getErrorMessage(error: unknown): string {
     return formatContainerInitializationError(error);
+}
+
+function isContainerConnectionProcessing(status: string): boolean {
+    return status.toLowerCase() === 'processing';
 }
 
 function getUploadErrorPhase(error: unknown): string {

@@ -34,6 +34,7 @@ export interface AdminPanelState {
     images: ImageListItem[];
     defaultImages: AdminDefaultImage[];
     containers: AdminContainerResponse[];
+    processingContainerIds?: string[];
     orphanContainerIds: string[];
     stats?: AdminStateResponse;
     limit?: ContainerLimitResponse;

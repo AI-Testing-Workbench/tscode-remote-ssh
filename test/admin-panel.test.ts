@@ -671,12 +671,37 @@ describe('AdminPanel', () => {
             expect(getContainerActionButton(statusHtml, 'delete')).not.toMatch(/disabled>/);
             expect(getContainerActionButton(statusHtml, 'permanent-delete')).not.toMatch(/disabled>/);
         }
+        for (const status of ['running', 'pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring', 'stopped', 'failed', 'unknown']) {
+            const statusHtml = renderAdminPage({
+                ...state,
+                containers: [{ ...sampleContainer(), status }],
+            }, 'nonce', 'vscode-resource://test');
+            expect(getConnectButton(statusHtml)).not.toMatch(/disabled>/);
+        }
+        for (const status of ['processing']) {
+            const statusHtml = renderAdminPage({
+                ...state,
+                containers: [{ ...sampleContainer(), status }],
+            }, 'nonce', 'vscode-resource://test');
+            expect(getConnectButton(statusHtml)).toMatch(/disabled>/);
+        }
+        const operationInProgressHtml = renderAdminPage({
+            ...state,
+            processingContainerIds: ['container-1'],
+            containers: [sampleContainer()],
+        }, 'nonce', 'vscode-resource://test');
+        expect(getConnectButton(operationInProgressHtml)).toMatch(/disabled>/);
 
         const containerHtml = renderAdminPage({
             ...state,
             containers: [sampleContainer()],
         }, 'nonce', 'vscode-resource://test');
+        const logButtonPosition = containerHtml.indexOf('data-action="getContainerLog"');
+        const connectButtonPosition = containerHtml.indexOf('data-action="connectContainer"');
         expect(containerHtml).toContain('status-border-success');
+        expect(logButtonPosition).toBeGreaterThanOrEqual(0);
+        expect(connectButtonPosition).toBeGreaterThan(logButtonPosition);
+        expect(getConnectButton(containerHtml)).not.toMatch(/disabled>/);
         expect(containerHtml).toContain('data-select-menu');
         expect(containerHtml).toContain('码云信息');
         expect(containerHtml).toContain('alice/repo (main)');
@@ -698,7 +723,7 @@ describe('AdminPanel', () => {
         const expirationRow = containerHtml.indexOf('<div class="container-expiration-row"', containerRowStart);
         expect(operationRow).toBeGreaterThan(containerRowStart);
         expect(expirationRow).toBeGreaterThan(operationRow);
-        expect(containerHtml).toContain('</div>\n            <button class="small-button log-button"');
+        expect(containerHtml).toContain('<div class="container-heading-actions">');
         expect(containerHtml).toContain('.branch-row { width: 100%; grid-template-columns: minmax(0, 1fr) auto; }');
         expect(containerHtml).toContain('.branch-row .form-check { width: fit-content; max-width: 100%; justify-self: start; white-space: normal; }');
 
@@ -717,6 +742,13 @@ describe('AdminPanel', () => {
         expect(deletedHtml).not.toContain('预计删除时间');
         expect(getContainerActionButton(deletedHtml, 'delete')).toBe('');
         expect(getContainerActionButton(deletedHtml, 'permanent-delete')).not.toMatch(/disabled>/);
+        expect(getConnectButton(deletedHtml)).toMatch(/disabled>/);
+
+        const missingEndpointHtml = renderAdminPage({
+            ...state,
+            containers: [{ ...sampleContainer(), endpoint: null }],
+        }, 'nonce', 'vscode-resource://test');
+        expect(getConnectButton(missingEndpointHtml)).toMatch(/disabled>/);
 
         const userHtml = renderAdminPage({ ...state, activeTab: 'whitelist', whitelistUsers: ['user-1'] }, 'nonce', 'vscode-resource://test');
         expect(userHtml).toContain('<details class="inline-form user-form collapsible-card" data-form="whitelistUser" open>');
@@ -1138,6 +1170,73 @@ describe('AdminPanel', () => {
         expect(userApi.checkAdmin).toHaveBeenCalledTimes(38);
     });
 
+    it('connects an admin container through the shared SSH config and sidebar connection handler', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.listContainers = vi.fn(async () => ({
+            containers: [{ ...sampleContainer(), status: 'pending' }],
+        }));
+        const configDocument = { config: {} as never, originalText: '' };
+        const containerConfig = {
+            read: vi.fn(async () => configDocument),
+            list: vi.fn(() => []),
+            upsertContainer: vi.fn(),
+            write: vi.fn(async () => true),
+        };
+        const onConnect = vi.fn(async () => true);
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), containerConfig, onConnect });
+
+        await adminPanel.open();
+        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+
+        expect(containerConfig.upsertContainer).toHaveBeenCalledWith(configDocument.config, {
+            containerId: 'container-1',
+            host: 'alice/repo',
+            name: 'alice/repo',
+            hostName: '10.0.0.1',
+            port: 22,
+        }, {
+            skipKnownHostsCheck: true,
+            userName: 'root',
+        });
+        expect(containerConfig.write).toHaveBeenCalledWith(configDocument);
+        expect(onConnect).toHaveBeenCalledWith('alice/repo', 'repo');
+    });
+
+    it('rejects a forged admin connection request for business-deleted or processing containers', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        let container = { ...sampleContainer(), status: 'stopped', business_deleted: true };
+        adminApi.listContainers = vi.fn(async () => ({
+            containers: [container],
+        }));
+        const onConnect = vi.fn(async () => true);
+        const operationRegistry = new ContainerOperationRegistry();
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), onConnect, operationRegistry });
+
+        await adminPanel.open();
+        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+
+        expect(onConnect).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('容器 "container-1" 已业务删除，无法连接');
+
+        container = { ...sampleContainer(), status: 'processing' };
+        await send(panel, { command: 'refresh' });
+        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('容器 "container-1" 正在处理中，暂时无法连接');
+
+        container = { ...sampleContainer(), status: 'running' };
+        await send(panel, { command: 'refresh' });
+        operationRegistry.begin('container-1', 'stop', 'admin');
+        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+
+        expect(onConnect).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('容器 "container-1" 正在处理中，暂时无法连接');
+        operationRegistry.dispose();
+    });
+
     it('does not execute or refresh destructive actions when confirmation is dismissed', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -1167,16 +1266,19 @@ describe('AdminPanel', () => {
             .mockResolvedValueOnce({ admin: true, limit: 'none' })
             .mockResolvedValueOnce({ admin: false, limit: 'user' });
         const adminApi = createAdminApi();
+        const onConnect = vi.fn(async () => true);
         const adminPanel = createPanel({
             userApiFactory: vi.fn(() => userApi),
             adminApiFactory: vi.fn(() => adminApi),
+            onConnect,
         });
 
         await adminPanel.open();
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'start' });
+        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
 
         expect(userApi.checkAdmin).toHaveBeenCalledTimes(2);
         expect(adminApi.startContainer).not.toHaveBeenCalled();
+        expect(onConnect).not.toHaveBeenCalled();
         expect(panel.webview.html).toContain('无权访问管理员页面');
     });
 
@@ -1692,6 +1794,10 @@ function sampleContainer() {
 
 function getContainerActionButton(html: string, action: string): string {
     return html.match(new RegExp(`<button[^>]*data-container-action="${action}"[^>]*>[^<]*</button>`))?.[0] ?? '';
+}
+
+function getConnectButton(html: string): string {
+    return html.match(/<button[^>]*data-action="connectContainer"[^>]*>[^<]*<\/button>/)?.[0] ?? '';
 }
 
 function createWebviewPanel() {
