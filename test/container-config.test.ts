@@ -202,7 +202,7 @@ describe('ContainerConfig', () => {
         ]);
     });
 
-    it('quotes service hosts containing spaces when normalizing an existing block', async () => {
+    it('leaves service hosts unquoted when normalizing an existing block', async () => {
         const store = await createStore();
         const initial = [
             'Host 云端沙箱 Service',
@@ -216,9 +216,11 @@ describe('ContainerConfig', () => {
             containerId: 'container-spaced-host',
             host: '云端沙箱 Service',
         }]);
-        expect(await store.write(document)).toBe(true);
+        await store.write(document);
 
-        expect(await fs.readFile(store.filePath, 'utf8')).toContain('Host "云端沙箱 Service"');
+        const text = await fs.readFile(store.filePath, 'utf8');
+        expect(text).not.toContain('"');
+        expect(text).toContain('Host 云端沙箱 Service');
     });
 
     it('does not add or remove known-host settings when disabled', async () => {

@@ -223,7 +223,7 @@ export class ContainerConfig {
         }
         if (entry.host.trim() && getHostValue(section) !== entry.host) {
             section.value = entry.host;
-            section.quoted = /\s/.test(entry.host);
+            section.quoted = false;
             changed = true;
         }
 
@@ -421,7 +421,6 @@ function createContainerSection(
         param: 'Host',
         separator: ' ',
         value: entry.host,
-        quoted: /\s/.test(entry.host),
         before: config.length ? '\n' : '',
         after: '\n',
         config: new SSHConfig(),
@@ -467,17 +466,17 @@ function normalizeContainerHost(section: Section): boolean {
         return false;
     }
 
+    if (/\s/.test(host)) {
+        return false;
+    }
+
     let changed = false;
-    const shouldQuote = /\s/.test(host);
-    if (Array.isArray(section.value) && shouldQuote) {
+    if (Array.isArray(section.value)) {
         section.value = host;
         changed = true;
     }
 
-    if (shouldQuote && section.quoted !== true) {
-        section.quoted = true;
-        changed = true;
-    } else if (!shouldQuote && section.quoted === true) {
+    if (section.quoted === true) {
         section.quoted = false;
         changed = true;
     }
