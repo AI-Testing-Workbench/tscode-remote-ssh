@@ -9,7 +9,7 @@ export interface ContainerInitializationInput {
     operatorUserId: string;
     statusReader?: Pick<UserRestApi, 'getContainer'>;
     signal?: AbortSignal;
-    /** Kept for the creation boundary; endpoint validation belongs after initialization. */
+    /** The create response may omit endpoint; use the live status after Git reaches waiting. */
     endpoint?: string | null;
 }
 
@@ -32,6 +32,7 @@ export interface ContainerInitializationResult {
 export interface ContainerInitializationPollerOptions {
     userApi?: Pick<UserRestApi, 'getContainer'>;
     gitApi: Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+    runGitClone?: (container: ContainerStatusResponse, signal?: AbortSignal) => Promise<void>;
     statusSyncInterval?: number;
     maxAttempts?: number;
     sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -100,6 +101,7 @@ export class ContainerInitializationError extends Error {
 const DEFAULT_STATUS_SYNC_INTERVAL_SECONDS = 5;
 const DEFAULT_MAX_ATTEMPTS = 60;
 const KNOWN_GIT_STATUSES = new Set<GitStatus>([
+    'waiting',
     'starting',
     'credential_required',
     'credential_rejected',
@@ -118,6 +120,7 @@ const KNOWN_GIT_STATUSES = new Set<GitStatus>([
 export class ContainerInitializationPoller {
     private readonly userApi: Pick<UserRestApi, 'getContainer'> | undefined;
     private readonly gitApi: Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+    private readonly runGitClone: ContainerInitializationPollerOptions['runGitClone'];
     private readonly intervalMilliseconds: number;
     private readonly maxAttempts: number;
     private readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -127,6 +130,7 @@ export class ContainerInitializationPoller {
     public constructor(options: ContainerInitializationPollerOptions) {
         this.userApi = options.userApi;
         this.gitApi = options.gitApi;
+        this.runGitClone = options.runGitClone;
         this.intervalMilliseconds = normalizeInterval(options.statusSyncInterval);
         this.maxAttempts = normalizeMaxAttempts(options.maxAttempts);
         this.sleep = options.sleep ?? sleep;
@@ -160,54 +164,31 @@ export class ContainerInitializationPoller {
 
     private async poll(input: ContainerInitializationInput): Promise<ContainerInitializationResult> {
         let lastContainer: ContainerStatusResponse | undefined;
+        let gitClonePromise: Promise<{ error?: unknown }> | undefined;
+        let gitCloneFailed = false;
+        let gitCloneError: unknown;
+        const gitCloneController = new AbortController();
+        const gitCloneSignal = gitCloneController.signal;
         const statusReader = input.statusReader ?? this.userApi;
         if (!statusReader) {
             throw new ContainerInitializationError('status_reader_missing', '创建码云初始化会话时缺少容器状态接口');
         }
-        for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
-            this.throwIfCancelled(input);
-            let container: ContainerStatusResponse;
-            try {
-                container = await statusReader.getContainer(input.containerId);
-                lastContainer = container;
-            } catch (error) {
-                if (attempt >= this.maxAttempts) {
-                    throw this.maxAttemptsError(input, error);
+        const abortGitClone = () => gitCloneController.abort();
+        if (input.signal?.aborted) {
+            abortGitClone();
+        } else {
+            input.signal?.addEventListener('abort', abortGitClone, { once: true });
+        }
+        try {
+            for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+                this.throwIfCancelled(input);
+                if (gitCloneFailed) {
+                    throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的 Git 初始化脚本执行失败`, gitCloneError);
                 }
-                await this.waitForNextAttempt(input);
-                continue;
-            }
-            this.throwIfCancelled(input);
-
-            const normalStatus = normalizeText(container.status);
-            const finalGitStatus = normalizeOptionalText(container.git_fin_status);
-            if (normalStatus === 'failed') {
-                throw this.failure(
-                    finalGitStatus?.startsWith('failed_') ? finalGitStatus : 'failed_container',
-                    `服务 "${input.containerId}" 初始化失败\n请联系支持团队解决`,
-                );
-            }
-            if (finalGitStatus?.startsWith('failed_')) {
-                throw this.failure(finalGitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
-            }
-            if (finalGitStatus && finalGitStatus !== 'pending' && finalGitStatus !== 'initialized') {
-                throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
-            }
-            if (normalStatus === 'running' && finalGitStatus === 'initialized') {
-                return {
-                    containerId: input.containerId,
-                    serviceId: input.serviceId,
-                    operatorUserId: input.operatorUserId,
-                    container,
-                    gitStatus: 'initialized',
-                    attempts: attempt,
-                };
-            }
-
-            if (normalStatus === 'pending' || !finalGitStatus || finalGitStatus === 'pending') {
-                let gitStatus: string;
+                let container: ContainerStatusResponse;
                 try {
-                    gitStatus = normalizeGitStatus((await this.gitApi.getGitState(input.serviceId, input.operatorUserId)).git_status);
+                    container = await statusReader.getContainer(input.containerId);
+                    lastContainer = container;
                 } catch (error) {
                     if (attempt >= this.maxAttempts) {
                         throw this.maxAttemptsError(input, error);
@@ -217,29 +198,39 @@ export class ContainerInitializationPoller {
                 }
                 this.throwIfCancelled(input);
 
-                if (!isKnownGitStatus(gitStatus)) {
+                const normalStatus = normalizeText(container.status);
+                const finalGitStatus = normalizeOptionalText(container.git_fin_status);
+                if (normalStatus === 'failed') {
+                    throw this.failure(
+                        finalGitStatus?.startsWith('failed_') ? finalGitStatus : 'failed_container',
+                        `服务 "${input.containerId}" 初始化失败\n请联系支持团队解决`,
+                    );
+                }
+                if (finalGitStatus?.startsWith('failed_')) {
+                    throw this.failure(finalGitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
+                }
+                if (finalGitStatus && finalGitStatus !== 'pending' && finalGitStatus !== 'initialized') {
                     throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
                 }
-                if (gitStatus.startsWith('failed_')) {
-                    throw this.failure(gitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
-                }
-                if (gitStatus === 'credential_required' || gitStatus === 'credential_rejected') {
-                    const credential = await this.credentialPrompt({
+                if (normalStatus === 'running' && finalGitStatus === 'initialized') {
+                    const cloneResult = await this.waitForGitClone(gitClonePromise, input);
+                    if (gitCloneFailed || cloneResult.error !== undefined) {
+                        throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的 Git 初始化脚本执行失败`, cloneResult.error);
+                    }
+                    return {
                         containerId: input.containerId,
                         serviceId: input.serviceId,
                         operatorUserId: input.operatorUserId,
-                        gitStatus,
-                    });
-                    this.throwIfCancelled(input);
-                    if (credential === undefined) {
-                        await this.reportUserCancelled(input);
-                        throw this.failure('failed_user_cancelled', `服务 "${input.containerId}" 码云凭证输入已取消`);
-                    }
-                    if (!isValidCredential(credential)) {
-                        throw this.failure('credential_invalid', `服务 "${input.containerId}" 码云凭证不完整`);
-                    }
+                        container,
+                        gitStatus: 'initialized',
+                        attempts: attempt,
+                    };
+                }
+
+                if (normalStatus === 'pending' || !finalGitStatus || finalGitStatus === 'pending') {
+                    let gitStatus: string;
                     try {
-                        await this.gitApi.submitGitCredential(input.serviceId, input.operatorUserId, credential);
+                        gitStatus = normalizeGitStatus((await this.gitApi.getGitState(input.serviceId, input.operatorUserId)).git_status);
                     } catch (error) {
                         if (attempt >= this.maxAttempts) {
                             throw this.maxAttemptsError(input, error);
@@ -248,15 +239,84 @@ export class ContainerInitializationPoller {
                         continue;
                     }
                     this.throwIfCancelled(input);
+
+                    if (!isKnownGitStatus(gitStatus)) {
+                        throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
+                    }
+                    if (gitStatus.startsWith('failed_')) {
+                        throw this.failure(gitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
+                    }
+                    if (gitStatus === 'waiting' && !gitClonePromise) {
+                        if (!this.runGitClone) {
+                            throw this.failure('git_clone_runner_missing', `服务 "${input.containerId}" 缺少 Git 初始化脚本执行器`);
+                        }
+                        if (!normalizeOptionalText(container.endpoint)) {
+                            throw this.failure('container_endpoint_missing', `服务 "${input.containerId}" 已就绪但未返回 SSH endpoint`);
+                        }
+                        gitClonePromise = Promise.resolve()
+                            .then(() => this.runGitClone!(container, gitCloneSignal))
+                            .then(() => ({}), error => {
+                                gitCloneFailed = true;
+                                gitCloneError = error;
+                                return { error };
+                            });
+                    }
+
+                    if (!gitClonePromise && !gitStatus.startsWith('failed_') && gitStatus !== 'waiting') {
+                        throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 在 Git 启动前返回了状态 "${gitStatus}"，预期为 waiting`);
+                    }
+                    if (gitStatus === 'credential_required' || gitStatus === 'credential_rejected') {
+                        const credential = await this.credentialPrompt({
+                            containerId: input.containerId,
+                            serviceId: input.serviceId,
+                            operatorUserId: input.operatorUserId,
+                            gitStatus,
+                        });
+                        this.throwIfCancelled(input);
+                        if (credential === undefined) {
+                            await this.reportUserCancelled(input);
+                            throw this.failure('failed_user_cancelled', `服务 "${input.containerId}" 码云凭证输入已取消`);
+                        }
+                        if (!isValidCredential(credential)) {
+                            throw this.failure('credential_invalid', `服务 "${input.containerId}" 码云凭证不完整`);
+                        }
+                        try {
+                            await this.gitApi.submitGitCredential(input.serviceId, input.operatorUserId, credential);
+                        } catch (error) {
+                            if (attempt >= this.maxAttempts) {
+                                throw this.maxAttemptsError(input, error);
+                            }
+                            await this.waitForNextAttempt(input);
+                            continue;
+                        }
+                        this.throwIfCancelled(input);
+                    }
+                }
+
+                if (attempt < this.maxAttempts) {
+                    await this.waitForNextAttempt(input);
                 }
             }
-
-            if (attempt < this.maxAttempts) {
-                await this.waitForNextAttempt(input);
-            }
+            throw this.maxAttemptsError(input, lastContainer);
+        } catch (error) {
+            gitCloneController.abort();
+            throw error;
+        } finally {
+            input.signal?.removeEventListener('abort', abortGitClone);
         }
+    }
 
-        throw this.maxAttemptsError(input, lastContainer);
+    private async waitForGitClone(
+        promise: Promise<{ error?: unknown }> | undefined,
+        input: ContainerInitializationInput,
+    ): Promise<{ error?: unknown }> {
+        this.throwIfCancelled(input);
+        if (!promise) {
+            throw this.failure('git_clone_not_started', `服务 "${input.containerId}" 尚未启动 Git 初始化脚本`);
+        }
+        const result = await promise;
+        this.throwIfCancelled(input);
+        return result;
     }
 
     private async reportUserCancelled(input: ContainerInitializationInput): Promise<void> {

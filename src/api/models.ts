@@ -1,6 +1,7 @@
 export type ContainerTypeValue = 'testagent_cloud' | 'autotest_cloud';
 
 export type GitStatus =
+    | 'waiting'
     | 'starting'
     | 'credential_required'
     | 'credential_rejected'

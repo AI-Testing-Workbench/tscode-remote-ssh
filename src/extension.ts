@@ -7,7 +7,7 @@ import {handleOpenRecentUri} from './openRecentUri';
 import {type CloudModeOptions, initializeCloudMode, refreshCloudMode} from './cloudMode';
 import {RestClient} from './api/restClient';
 import {ContainerConfig} from './containerConfig';
-import {ContainerSync} from './containerSync';
+import {ContainerSync, getContainerHostName, getUniqueHostName} from './containerSync';
 import {SidebarSyncState, SidebarViewProvider} from './sidebarView';
 import {UserIdProvider} from './user';
 import {createPublicUserContainerApi, type TestAgentRemoteApi} from './api/publicApi';
@@ -16,6 +16,7 @@ import {AdminPanel} from './adminPanel';
 import {ContainerOperationRegistry} from './containerOperations';
 import {ContainerInitializationPoller} from './containerInitializationPoller';
 import {getRemoteSettings} from './settings';
+import type {ContainerStatusResponse} from './api/models';
 
 let activeContainerSync: ContainerSync | undefined;
 let activeSidebarView: SidebarViewProvider | undefined;
@@ -41,6 +42,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     const initializationPoller = new ContainerInitializationPoller({
         gitApi: new RestClient(initializationSettings.backendApiUrl).git,
         statusSyncInterval: initializationSettings.statusSyncInterval,
+        runGitClone: async (container, signal) => {
+            const hostAlias = await getInitializationHostAlias(config, container);
+            await remoteSSHResolver.executeGitCloneScript(
+                container.container_id,
+                hostAlias,
+                container.endpoint,
+                signal,
+            );
+        },
     });
     const publicApi = createPublicUserContainerApi({
         userIdProvider,
@@ -196,4 +206,15 @@ export function deactivate() {
     activeContainerSync = undefined;
     activeAdminPanel?.dispose();
     activeAdminPanel = undefined;
+}
+
+async function getInitializationHostAlias(config: ContainerConfig, container: ContainerStatusResponse): Promise<string> {
+    const document = await config.read();
+    const entries = config.list(document.config);
+    const existing = entries.find(entry => entry.containerId === container.container_id);
+    if (existing?.host) {
+        return existing.host;
+    }
+    const usedNames = new Set(entries.map(entry => entry.host).filter(Boolean));
+    return getUniqueHostName(getContainerHostName(container.gitee_user, container.gitee_repository), usedNames);
 }

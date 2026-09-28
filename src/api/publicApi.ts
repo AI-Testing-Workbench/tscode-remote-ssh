@@ -179,6 +179,7 @@ export function createPublicUserContainerApi(
             let result: CreateContainerResponse = created;
             let finalContainer: ContainerStatusResponse | undefined;
             if (initializationPoller) {
+                // The postCompleted callback is the handoff into the internal waiting/SSH/Git initialization flow.
                 const initialization = await initializationPoller.initialize({
                     containerId: created.container_id,
                     serviceId: created.service_id,

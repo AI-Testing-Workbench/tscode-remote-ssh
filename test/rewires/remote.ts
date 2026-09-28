@@ -32,6 +32,7 @@ vi.doMock('glob', async () => {
 
 const { getRemoteAuthority, RemoteSSHResolver } = await import('../../src/authResolver.js');
 const { default: SSHConfiguration } = await import('../../src/ssh/sshConfig.js');
+const { default: SSHConnection } = await import('../../src/ssh/sshConnection.js');
 
 vi.unmock('node:fs');
 vi.unmock('fs');
@@ -41,4 +42,5 @@ export {
 	getRemoteAuthority,
 	RemoteSSHResolver,
 	SSHConfiguration,
+	SSHConnection,
 };

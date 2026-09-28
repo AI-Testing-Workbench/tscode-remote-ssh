@@ -14,12 +14,13 @@ describe('ContainerInitializationPoller', () => {
             containerStatus('running', 'initialized'),
         ];
         const gitStates: GitStateResponse[] = [
+            { git_status: 'waiting' },
             { git_status: 'starting' },
             { git_status: 'credential_required' },
             { git_status: 'processing' },
-            { git_status: 'initialized' },
         ];
         const calls: string[] = [];
+        const runGitClone = vi.fn(async () => { calls.push('clone'); });
         const userApi = {
             getContainer: vi.fn(async () => {
                 calls.push('container');
@@ -40,6 +41,7 @@ describe('ContainerInitializationPoller', () => {
         const poller = new ContainerInitializationPoller({
             userApi,
             gitApi,
+            runGitClone,
             statusSyncInterval: 0,
             sleep: vi.fn(async () => undefined),
             credentialPrompt: vi.fn(async () => credential),
@@ -51,20 +53,30 @@ describe('ContainerInitializationPoller', () => {
             operatorUserId: 'user-1',
             endpoint: null,
         })).resolves.toMatchObject({ gitStatus: 'initialized', attempts: 5 });
-        expect(calls).toEqual(['container', 'git', 'container', 'git', 'credential', 'container', 'git', 'container', 'git', 'container']);
+        expect(calls).toEqual([
+            'container', 'git', 'clone',
+            'container', 'git',
+            'container', 'git', 'credential',
+            'container', 'git',
+            'container',
+        ]);
+        expect(runGitClone).toHaveBeenCalledOnce();
+        expect(runGitClone).toHaveBeenCalledWith(expect.objectContaining({ container_id: 'container-1', endpoint: '127.0.0.1:2222' }), expect.any(AbortSignal));
         expect(gitApi.getGitState).toHaveBeenCalledWith('service-1', 'user-1');
         expect(gitApi.submitGitCredential).toHaveBeenCalledWith('service-1', 'user-1', credential);
     });
 
-    it('reopens credentials after credential_rejected and never validates endpoint', async () => {
+    it('reopens credentials after credential_rejected and uses the live SSH endpoint', async () => {
         const userApi = {
             getContainer: vi.fn()
+                .mockResolvedValueOnce(containerStatus('running', 'pending'))
                 .mockResolvedValueOnce(containerStatus('running', 'pending'))
                 .mockResolvedValueOnce(containerStatus('running', 'pending'))
                 .mockResolvedValueOnce(containerStatus('running', 'initialized')),
         } as Pick<UserRestApi, 'getContainer'>;
         const gitApi = {
             getGitState: vi.fn()
+                .mockResolvedValueOnce({ git_status: 'waiting' })
                 .mockResolvedValueOnce({ git_status: 'credential_required' })
                 .mockResolvedValueOnce({ git_status: 'credential_rejected' })
                 .mockResolvedValueOnce({ git_status: 'initialized' }),
@@ -77,6 +89,7 @@ describe('ContainerInitializationPoller', () => {
         const poller = new ContainerInitializationPoller({
             userApi,
             gitApi,
+            runGitClone: vi.fn(async () => undefined),
             sleep: vi.fn(async () => undefined),
             credentialPrompt: prompt,
         });
@@ -92,18 +105,125 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.submitGitCredential).toHaveBeenCalledWith('service-1', 'user-1', credentialRequest('second'));
     });
 
+    it('starts Git polling before the clone command and waits for both to finish', async () => {
+        const calls: string[] = [];
+        let finishClone: (() => void) | undefined;
+        const userApi = {
+            getContainer: vi.fn()
+                .mockImplementationOnce(async () => containerStatus('pending', 'pending'))
+                .mockImplementationOnce(async () => containerStatus('running', 'initialized')),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn(async () => {
+                calls.push('git-poll');
+                return { git_status: 'waiting' };
+            }),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+        const runGitClone = vi.fn(() => {
+            calls.push('clone-start');
+            return new Promise<void>(resolve => { finishClone = resolve; });
+        });
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            runGitClone,
+            statusSyncInterval: 0,
+            sleep: vi.fn(async () => undefined),
+        });
+
+        let completed = false;
+        const initialization = poller.initialize({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+        }).then(result => {
+            completed = true;
+            return result;
+        });
+
+        await vi.waitFor(() => expect(userApi.getContainer).toHaveBeenCalledTimes(2));
+        expect(calls).toEqual(['git-poll', 'clone-start']);
+        expect(completed).toBe(false);
+        finishClone?.();
+        await expect(initialization).resolves.toMatchObject({ gitStatus: 'initialized' });
+    });
+
+    it('fails creation if the clone script exits unsuccessfully', async () => {
+        const userApi = {
+            getContainer: vi.fn()
+                .mockResolvedValueOnce(containerStatus('pending', 'pending'))
+                .mockResolvedValueOnce(containerStatus('running', 'initialized')),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn(async () => ({ git_status: 'waiting' })),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            runGitClone: vi.fn(async () => { throw new Error('remote exit code 1'); }),
+            statusSyncInterval: 0,
+            sleep: vi.fn(async () => undefined),
+        });
+
+        await expect(poller.initialize({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+        })).rejects.toMatchObject({ code: 'git_clone_execution_failed' });
+    });
+
+    it('aborts the remote clone execution when creation is cancelled', async () => {
+        const controller = new AbortController();
+        let cloneSignal: AbortSignal | undefined;
+        const userApi = {
+            getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn(async () => ({ git_status: 'waiting' })),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            runGitClone: vi.fn((_container, signal) => {
+                cloneSignal = signal;
+                return new Promise<void>((_resolve, reject) => {
+                    signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+                });
+            }),
+            statusSyncInterval: 0,
+            sleep: vi.fn(async () => controller.abort()),
+        });
+
+        await expect(poller.initialize({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+            signal: controller.signal,
+        })).rejects.toMatchObject({ code: 'creation_cancelled' });
+        expect(cloneSignal?.aborted).toBe(true);
+    });
+
     it('reports user cancellation once and stops without submitting credentials', async () => {
         const userApi = {
             getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
         } as Pick<UserRestApi, 'getContainer'>;
         const gitApi = {
-            getGitState: vi.fn(async () => ({ git_status: 'credential_required' })),
+            getGitState: vi.fn()
+                .mockResolvedValueOnce({ git_status: 'waiting' })
+                .mockResolvedValue({ git_status: 'credential_required' }),
             submitGitCredential: vi.fn(),
             reportUserCancelled: vi.fn(async () => undefined),
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
         const poller = new ContainerInitializationPoller({
             userApi,
             gitApi,
+            runGitClone: vi.fn(async () => undefined),
             maxAttempts: 3,
             sleep: vi.fn(async () => undefined),
             credentialPrompt: vi.fn(async () => undefined),
@@ -122,7 +242,9 @@ describe('ContainerInitializationPoller', () => {
             getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
         } as Pick<UserRestApi, 'getContainer'>;
         const gitApi = {
-            getGitState: vi.fn(async () => ({ git_status: 'credential_required' })),
+            getGitState: vi.fn()
+                .mockResolvedValueOnce({ git_status: 'waiting' })
+                .mockResolvedValue({ git_status: 'credential_required' }),
             submitGitCredential: vi.fn(),
             reportUserCancelled: vi.fn(async () => undefined),
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
@@ -136,6 +258,7 @@ describe('ContainerInitializationPoller', () => {
         const poller = new ContainerInitializationPoller({
             userApi,
             gitApi,
+            runGitClone: vi.fn(async () => undefined),
             sleep: vi.fn(async () => undefined),
             credentialPrompt: () => promptForGitCredentials({
                 identityReader: { read: vi.fn(async () => ({ username: '', email: '' })) },
@@ -163,21 +286,26 @@ describe('ContainerInitializationPoller', () => {
             getContainer: vi.fn()
                 .mockRejectedValueOnce(new Error('temporary status failure'))
                 .mockResolvedValueOnce(containerStatus('running', 'pending'))
+                .mockResolvedValueOnce(containerStatus('running', 'pending'))
+                .mockResolvedValueOnce(containerStatus('running', 'pending'))
                 .mockResolvedValueOnce(containerStatus('running', 'initialized')),
         } as Pick<UserRestApi, 'getContainer'>;
         const gitApi = {
             getGitState: vi.fn()
                 .mockRejectedValueOnce(new Error('temporary 码云 failure'))
+                .mockResolvedValueOnce({ git_status: 'waiting' })
                 .mockResolvedValueOnce({ git_status: 'initialized' }),
             submitGitCredential: vi.fn(),
             reportUserCancelled: vi.fn(),
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
         const sleep = vi.fn(async () => undefined);
-        const poller = new ContainerInitializationPoller({ userApi, gitApi, sleep });
+        const runGitClone = vi.fn(async () => undefined);
+        const poller = new ContainerInitializationPoller({ userApi, gitApi, runGitClone, sleep });
 
         await expect(poller.initialize({ containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' }))
             .resolves.toMatchObject({ gitStatus: 'initialized' });
-        expect(sleep).toHaveBeenCalledTimes(2);
+        expect(sleep).toHaveBeenCalledTimes(4);
+        expect(runGitClone).toHaveBeenCalledOnce();
         expect(gitApi.reportUserCancelled).not.toHaveBeenCalled();
     });
 
@@ -195,16 +323,18 @@ describe('ContainerInitializationPoller', () => {
             const userApi = {
                 getContainer: vi.fn()
                     .mockRejectedValueOnce(new RestClientError('http', code, `status ${statusCode}`, statusCode))
+                    .mockResolvedValueOnce(containerStatus('running', 'pending'))
                     .mockResolvedValueOnce(containerStatus('running', 'initialized')),
             } as Pick<UserRestApi, 'getContainer'>;
             const gitApi = {
-                getGitState: vi.fn(),
+                getGitState: vi.fn(async () => ({ git_status: 'waiting' })),
                 submitGitCredential: vi.fn(),
                 reportUserCancelled: vi.fn(),
             } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
             const poller = new ContainerInitializationPoller({
                 userApi,
                 gitApi,
+                runGitClone: vi.fn(async () => undefined),
                 sleep: vi.fn(async () => undefined),
             });
 
@@ -213,7 +343,7 @@ describe('ContainerInitializationPoller', () => {
                 serviceId: `service-${statusCode}`,
                 operatorUserId: 'user-1',
             })).resolves.toMatchObject({ gitStatus: 'initialized' });
-            expect(userApi.getContainer).toHaveBeenCalledTimes(2);
+            expect(userApi.getContainer).toHaveBeenCalledTimes(3);
         }
     });
 
@@ -281,16 +411,24 @@ describe('ContainerInitializationPoller', () => {
     it('shares one in-flight promise for the same creation context', async () => {
         let release: (() => void) | undefined;
         const userApi = {
-            getContainer: vi.fn(() => new Promise<ContainerStatusResponse>(resolve => {
-                release = () => resolve(containerStatus('running', 'initialized'));
-            })),
+            getContainer: vi.fn()
+                .mockImplementationOnce(() => new Promise<ContainerStatusResponse>(resolve => {
+                    release = () => resolve(containerStatus('running', 'pending'));
+                }))
+                .mockResolvedValueOnce(containerStatus('running', 'initialized')),
         } as Pick<UserRestApi, 'getContainer'>;
         const gitApi = {
-            getGitState: vi.fn(),
+            getGitState: vi.fn(async () => ({ git_status: 'waiting' })),
             submitGitCredential: vi.fn(),
             reportUserCancelled: vi.fn(),
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
-        const poller = new ContainerInitializationPoller({ userApi, gitApi });
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            runGitClone: vi.fn(async () => undefined),
+            statusSyncInterval: 0,
+            sleep: vi.fn(async () => undefined),
+        });
         const input = { containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' };
 
         const first = poller.initialize(input);
@@ -360,7 +498,7 @@ function containerStatus(status: string, git_fin_status: string | undefined): Co
         gitee_user: '',
         gitee_repository: '',
         ...(git_fin_status === undefined ? {} : { git_fin_status }),
-        endpoint: null,
+        endpoint: '127.0.0.1:2222',
     };
 }
 

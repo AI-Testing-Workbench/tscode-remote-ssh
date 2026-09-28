@@ -151,9 +151,10 @@ describe('public user container API', () => {
         const gitInitialized = vi.fn((containerId: string) => { calls.push(`gitInitialized:${containerId}`); });
         const containerPrepared = vi.fn((containerId: string) => { calls.push(`containerPrepared:${containerId}`); });
         const initializationPoller = {
-            initialize: vi.fn(async () => ({
-                container: containerStatus('container-1', 'running', 'initialized'),
-            })),
+            initialize: vi.fn(async () => {
+                calls.push('git-poll-start');
+                return { container: containerStatus('container-1', 'running', 'initialized') };
+            }),
         };
         const api = createPublicUserContainerApi({
             userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
@@ -173,6 +174,7 @@ describe('public user container API', () => {
 
         expect(calls).toEqual([
             'postCompleted:container-1',
+            'git-poll-start',
             'gitInitialized:container-1',
             'containerPrepared:container-1',
         ]);

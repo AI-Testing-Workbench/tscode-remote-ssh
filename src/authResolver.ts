@@ -23,11 +23,44 @@ import {
     InvalidContainerEndpointError,
     parseContainerEndpoint,
 } from './containerEndpoint';
-import { getRemoteSettings } from './settings';
+import { getEffectiveRemoteUserName, getRemoteSettings } from './settings';
+import { GIT_CLONE_COMMAND } from './ssh/gitCloneCommand';
 import * as os from 'os';
 
 const PASSWORD_RETRY_COUNT = 3;
 const PASSPHRASE_RETRY_COUNT = 3;
+const GIT_CLONE_SSH_CONNECT_ATTEMPTS = 5;
+const GIT_CLONE_SSH_RETRY_DELAY_MS = 1000;
+
+function isSSHReadinessError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+        return false;
+    }
+    const sshError = error as { code?: unknown; level?: unknown };
+    return sshError.level === 'client-timeout'
+        || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'].includes(String(sshError.code));
+}
+
+function waitWithAbort(milliseconds: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+        return Promise.reject(new Error('Git clone execution was cancelled'));
+    }
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+        };
+        const onAbort = () => {
+            cleanup();
+            reject(new Error('Git clone execution was cancelled'));
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            resolve();
+        }, milliseconds);
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
+}
 
 export const REMOTE_SSH_AUTHORITY = 'ssh-remote';
 
@@ -171,91 +204,16 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
 
                 this.sshAgentSock = sshHostConfig['IdentityAgent'] || process.env['SSH_AUTH_SOCK'] || (isWindows ? '\\\\.\\pipe\\openssh-ssh-agent' : undefined);
                 this.sshAgentSock = this.sshAgentSock ? untildify(this.sshAgentSock) : undefined;
-                const agentForward = enableAgentForwarding && (sshHostConfig['ForwardAgent'] || 'no').toLowerCase() === 'yes';
-                const agent = agentForward && this.sshAgentSock ? new ssh2.OpenSSHAgent(this.sshAgentSock) : undefined;
-
-                const preferredAuthentications = sshHostConfig['PreferredAuthentications'] ? sshHostConfig['PreferredAuthentications'].split(',').map(s => s.trim()) : ['publickey', 'password', 'keyboard-interactive'];
-
-                const identityFiles: string[] = (sshHostConfig['IdentityFile'] as unknown as string[]) || [];
-                const identitiesOnly = (sshHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes';
-                const identityKeys = await gatherIdentityFiles(identityFiles, this.sshAgentSock, identitiesOnly, this.logger);
-
-                // Create proxy jump connections if any
-                let proxyStream: ssh2.ClientChannel | stream.Duplex | undefined;
-                if (sshHostConfig['ProxyJump']) {
-                    const proxyJumps = sshHostConfig['ProxyJump'].split(',').filter(i => !!i.trim())
-                        .map(i => {
-                            const proxy = SSHDestination.parse(i);
-                            const proxyHostConfig = sshconfig.getHostConfiguration(proxy.hostname);
-                            return [proxy, proxyHostConfig] as [SSHDestination, Record<string, string>];
-                        });
-                    for (let i = 0; i < proxyJumps.length; i++) {
-                        const [proxy, proxyHostConfig] = proxyJumps[i];
-                        const proxyHostName = proxyHostConfig['HostName'] || proxy.hostname;
-                        const proxyUser = proxyHostConfig['User'] || proxy.user || sshUser;
-                        const proxyPort = proxyHostConfig['Port'] ? parseInt(proxyHostConfig['Port'], 10) : (proxy.port || sshPort);
-
-                        const proxyAgentForward = enableAgentForwarding && (proxyHostConfig['ForwardAgent'] || 'no').toLowerCase() === 'yes';
-                        const proxyAgent = proxyAgentForward && this.sshAgentSock ? new ssh2.OpenSSHAgent(this.sshAgentSock) : undefined;
-
-                        const proxyIdentityFiles: string[] = (proxyHostConfig['IdentityFile'] as unknown as string[]) || [];
-                        const proxyIdentitiesOnly = (proxyHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes';
-                        const proxyIdentityKeys = await gatherIdentityFiles(proxyIdentityFiles, this.sshAgentSock, proxyIdentitiesOnly, this.logger);
-
-                        const proxyAuthHandler = this.getSSHAuthHandler(proxyUser, proxyHostName, proxyIdentityKeys, preferredAuthentications);
-                        const proxyConnection = new SSHConnection({
-                            host: !proxyStream ? proxyHostName : undefined,
-                            port: !proxyStream ? proxyPort : undefined,
-                            sock: proxyStream,
-                            username: proxyUser,
-                            readyTimeout: connectTimeout * 1000,
-                            strictVendor: false,
-                            agentForward: proxyAgentForward,
-                            agent: proxyAgent,
-                            authHandler: (arg0, arg1, arg2) => (proxyAuthHandler(arg0, arg1, arg2), undefined)
-                        });
-                        this.proxyConnections.push(proxyConnection);
-
-                        const nextProxyJump = i < proxyJumps.length - 1 ? proxyJumps[i + 1] : undefined;
-                        const destIP = nextProxyJump ? (nextProxyJump[1]['HostName'] || nextProxyJump[0].hostname) : sshHostName;
-                        const destPort = nextProxyJump ? ((nextProxyJump[1]['Port'] && parseInt(nextProxyJump[1]['Port'], 10)) || nextProxyJump[0].port || 22) : sshPort;
-                        proxyStream = await proxyConnection.forwardOut('127.0.0.1', 0, destIP, destPort);
-                    }
-                } else if (sshHostConfig['ProxyCommand']) {
-                    let proxyArgs = splitProxyCommand(sshHostConfig['ProxyCommand'] as unknown as string | string[])
-                        .map((arg) => arg.replace('%h', sshHostName).replace('%n', sshDest.hostname).replace('%p', sshPort.toString()).replace('%r', sshUser));
-                    let proxyCommand = proxyArgs.shift()!;
-
-                    let options = {};
-                    if (isWindows && /\.(bat|cmd)$/.test(proxyCommand)) {
-                        proxyCommand = `"${proxyCommand}"`;
-                        proxyArgs = proxyArgs.map((arg) => arg.includes(' ') ? `"${arg}"` : arg);
-                        options = { shell: true, windowsHide: true, windowsVerbatimArguments: true };
-                    }
-
-                    this.logger.trace(`Spawning ProxyCommand: ${proxyCommand} ${proxyArgs.join(' ')}`);
-
-                    const child = cp.spawn(proxyCommand, proxyArgs, options);
-                    proxyStream = stream.Duplex.from({ readable: child.stdout, writable: child.stdin });
-                    this.proxyCommandProcess = child;
-                }
-
-                // Create final shh connection
-                const sshAuthHandler = this.getSSHAuthHandler(sshUser, sshHostName, identityKeys, preferredAuthentications);
-
-                this.sshConnection = new SSHConnection({
-                    host: !proxyStream ? sshHostName : undefined,
-                    port: !proxyStream ? sshPort : undefined,
-                    sock: proxyStream,
-                    username: sshUser,
-                    readyTimeout: connectTimeout * 1000,
-                    strictVendor: false,
-                    agentForward,
-                    agent,
-                    authHandler: (arg0, arg1, arg2) => (sshAuthHandler(arg0, arg1, arg2), undefined),
-                });
-                await this.sshConnection.connect();
-                this.activeHost = sshDest.hostname;
+                const agentForward = await this.connectSSH(
+                    sshconfig,
+                    sshDest,
+                    sshHostConfig,
+                    sshHostName,
+                    sshUser,
+                    sshPort,
+                    connectTimeout,
+                    enableAgentForwarding,
+                );
 
                 const envVariables: Record<string, string | null> = {};
                 if (agentForward) {
@@ -277,7 +235,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 }
 
                 const installResult = await installCodeServer(
-                    this.sshConnection,
+                    this.sshConnection!,
                     defaultExtensions,
                     [],
                     remotePlatformMap[sshDest.hostname],
@@ -378,6 +336,237 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
             throw new Error(`容器 "${host}" 尚未建立连接`);
         }
         return this.sshConnection.sftp();
+    }
+
+    public async executeGitCloneScript(
+        containerId: string,
+        hostAlias: string,
+        endpoint: string | null | undefined,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        const settings = getRemoteSettings();
+        const parsedEndpoint = parseContainerEndpoint(endpoint, { allowDebugProxy: settings.debug });
+        if (!parsedEndpoint) {
+            throw new InvalidContainerEndpointError(containerId, endpoint);
+        }
+        if (settings.debug) {
+            await this.confirmDebugEnvironmentOnce(containerId);
+        }
+        if (signal?.aborted) {
+            throw new Error('Git clone execution was cancelled');
+        }
+
+        const commandResolver = new RemoteSSHResolver(this.context, this.logger);
+        let closeConnectionPromise: Promise<void> | undefined;
+        const closeConnection = () => closeConnectionPromise ??= commandResolver.closeCommandConnection();
+        const onAbort = () => { void closeConnection(); };
+        signal?.addEventListener('abort', onAbort, { once: true });
+        try {
+            const sshconfig = await SSHConfiguration.loadFromFS();
+            const sshHostConfig = sshconfig.getHostConfiguration(hostAlias);
+            const sshHostName = parsedEndpoint.host;
+            const sshUser = getEffectiveRemoteUserName(settings.userName);
+            const remoteSSHconfig = vscode.workspace.getConfiguration('tscode.remote');
+            const enableAgentForwarding = remoteSSHconfig.get<boolean>('enableAgentForwarding', true)!;
+            const connectTimeout = remoteSSHconfig.get<number>('connectTimeout', 60)!;
+            commandResolver.sshAgentSock = sshHostConfig['IdentityAgent'] || process.env['SSH_AUTH_SOCK'] || (isWindows ? '\\\\.\\pipe\\openssh-ssh-agent' : undefined);
+            commandResolver.sshAgentSock = commandResolver.sshAgentSock ? untildify(commandResolver.sshAgentSock) : undefined;
+            const readinessConnectTimeout = Math.max(1, Math.min(connectTimeout, 10));
+            let connected = false;
+            for (let attempt = 1; attempt <= GIT_CLONE_SSH_CONNECT_ATTEMPTS; attempt += 1) {
+                try {
+                    await commandResolver.connectSSH(
+                        sshconfig,
+                        new SSHDestination(hostAlias, sshUser, parsedEndpoint.port),
+                        sshHostConfig,
+                        sshHostName,
+                        sshUser,
+                        parsedEndpoint.port,
+                        readinessConnectTimeout,
+                        enableAgentForwarding,
+                        signal,
+                    );
+                    connected = true;
+                    break;
+                } catch (error) {
+                    await closeConnection();
+                    closeConnectionPromise = undefined;
+                    if (signal?.aborted || attempt === GIT_CLONE_SSH_CONNECT_ATTEMPTS || !isSSHReadinessError(error)) {
+                        throw error;
+                    }
+                    this.logger.trace(`Container SSH is not ready yet; retry ${attempt}/${GIT_CLONE_SSH_CONNECT_ATTEMPTS - 1}`);
+                    await waitWithAbort(GIT_CLONE_SSH_RETRY_DELAY_MS, signal);
+                }
+            }
+            if (!connected) {
+                throw new Error('Container SSH did not become ready');
+            }
+            if (signal?.aborted) {
+                throw new Error('Git clone execution was cancelled');
+            }
+            await commandResolver.executeRemoteCommand(GIT_CLONE_COMMAND, signal);
+        } finally {
+            signal?.removeEventListener('abort', onAbort);
+            await closeConnection();
+        }
+    }
+
+    private async connectSSH(
+        sshconfig: SSHConfiguration,
+        sshDest: SSHDestination,
+        sshHostConfig: Record<string, string>,
+        sshHostName: string,
+        sshUser: string,
+        sshPort: number,
+        connectTimeout: number,
+        enableAgentForwarding: boolean,
+        signal?: AbortSignal,
+    ): Promise<boolean> {
+        const agentForward = enableAgentForwarding && (sshHostConfig['ForwardAgent'] || 'no').toLowerCase() === 'yes';
+        const agent = agentForward && this.sshAgentSock ? new ssh2.OpenSSHAgent(this.sshAgentSock) : undefined;
+        const preferredAuthentications = sshHostConfig['PreferredAuthentications']
+            ? sshHostConfig['PreferredAuthentications'].split(',').map(value => value.trim())
+            : ['publickey', 'password', 'keyboard-interactive'];
+        const identityFiles: string[] = (sshHostConfig['IdentityFile'] as unknown as string[]) || [];
+        const identitiesOnly = (sshHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes';
+        const identityKeys = await gatherIdentityFiles(identityFiles, this.sshAgentSock, identitiesOnly, this.logger);
+        if (signal?.aborted) {
+            throw new Error('Git clone execution was cancelled');
+        }
+
+        let proxyStream: ssh2.ClientChannel | stream.Duplex | undefined;
+        if (sshHostConfig['ProxyJump']) {
+            const proxyJumps = sshHostConfig['ProxyJump'].split(',').filter(value => !!value.trim())
+                .map(value => {
+                    const proxy = SSHDestination.parse(value);
+                    const proxyHostConfig = sshconfig.getHostConfiguration(proxy.hostname);
+                    return [proxy, proxyHostConfig] as [SSHDestination, Record<string, string>];
+                });
+            for (let i = 0; i < proxyJumps.length; i += 1) {
+                if (signal?.aborted) {
+                    throw new Error('Git clone execution was cancelled');
+                }
+                const [proxy, proxyHostConfig] = proxyJumps[i];
+                const proxyHostName = proxyHostConfig['HostName'] || proxy.hostname;
+                const proxyUser = proxyHostConfig['User'] || proxy.user || sshUser;
+                const proxyPort = proxyHostConfig['Port'] ? parseInt(proxyHostConfig['Port'], 10) : (proxy.port || sshPort);
+                const proxyAgentForward = enableAgentForwarding && (proxyHostConfig['ForwardAgent'] || 'no').toLowerCase() === 'yes';
+                const proxyAgent = proxyAgentForward && this.sshAgentSock ? new ssh2.OpenSSHAgent(this.sshAgentSock) : undefined;
+                const proxyIdentityFiles: string[] = (proxyHostConfig['IdentityFile'] as unknown as string[]) || [];
+                const proxyIdentitiesOnly = (proxyHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes';
+                const proxyIdentityKeys = await gatherIdentityFiles(proxyIdentityFiles, this.sshAgentSock, proxyIdentitiesOnly, this.logger);
+                const proxyAuthHandler = this.getSSHAuthHandler(proxyUser, proxyHostName, proxyIdentityKeys, preferredAuthentications);
+                const proxyConnection = new SSHConnection({
+                    host: !proxyStream ? proxyHostName : undefined,
+                    port: !proxyStream ? proxyPort : undefined,
+                    sock: proxyStream,
+                    username: proxyUser,
+                    readyTimeout: connectTimeout * 1000,
+                    strictVendor: false,
+                    agentForward: proxyAgentForward,
+                    agent: proxyAgent,
+                    authHandler: (arg0, arg1, arg2) => (proxyAuthHandler(arg0, arg1, arg2), undefined),
+                });
+                this.proxyConnections.push(proxyConnection);
+                const nextProxyJump = i < proxyJumps.length - 1 ? proxyJumps[i + 1] : undefined;
+                const destIP = nextProxyJump ? (nextProxyJump[1]['HostName'] || nextProxyJump[0].hostname) : sshHostName;
+                const destPort = nextProxyJump
+                    ? ((nextProxyJump[1]['Port'] && parseInt(nextProxyJump[1]['Port'], 10)) || nextProxyJump[0].port || 22)
+                    : sshPort;
+                proxyStream = await proxyConnection.forwardOut('127.0.0.1', 0, destIP, destPort);
+            }
+        } else if (sshHostConfig['ProxyCommand']) {
+            let proxyArgs = splitProxyCommand(sshHostConfig['ProxyCommand'] as unknown as string | string[])
+                .map(arg => arg.replace('%h', sshHostName).replace('%n', sshDest.hostname).replace('%p', sshPort.toString()).replace('%r', sshUser));
+            let proxyCommand = proxyArgs.shift()!;
+            let options = {};
+            if (isWindows && /\.(bat|cmd)$/.test(proxyCommand)) {
+                proxyCommand = `"${proxyCommand}"`;
+                proxyArgs = proxyArgs.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
+                options = { shell: true, windowsHide: true, windowsVerbatimArguments: true };
+            }
+            this.logger.trace(`Spawning ProxyCommand: ${proxyCommand} ${proxyArgs.join(' ')}`);
+            const child = cp.spawn(proxyCommand, proxyArgs, options);
+            proxyStream = stream.Duplex.from({ readable: child.stdout, writable: child.stdin });
+            this.proxyCommandProcess = child;
+        }
+
+        const sshAuthHandler = this.getSSHAuthHandler(sshUser, sshHostName, identityKeys, preferredAuthentications);
+        this.sshConnection = new SSHConnection({
+            host: !proxyStream ? sshHostName : undefined,
+            port: !proxyStream ? sshPort : undefined,
+            sock: proxyStream,
+            username: sshUser,
+            readyTimeout: connectTimeout * 1000,
+            strictVendor: false,
+            agentForward,
+            agent,
+            authHandler: (arg0, arg1, arg2) => (sshAuthHandler(arg0, arg1, arg2), undefined),
+        });
+        if (signal?.aborted) {
+            throw new Error('Git clone execution was cancelled');
+        }
+        await this.sshConnection.connect();
+        this.activeHost = sshDest.hostname;
+        return agentForward;
+    }
+
+    private async executeRemoteCommand(command: string, signal?: AbortSignal): Promise<void> {
+        if (!this.sshConnection) {
+            throw new Error('SSH connection is not available');
+        }
+        const channel = await this.sshConnection.execChannel(command);
+        await new Promise<void>((resolve, reject) => {
+            let exitCode: number | undefined;
+            let settled = false;
+            const cleanup = () => signal?.removeEventListener('abort', onAbort);
+            const finish = (error?: Error) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                cleanup();
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve();
+                }
+            };
+            const onAbort = () => {
+                finish(new Error('Git clone execution was cancelled'));
+                channel.close();
+            };
+            channel.on('data', () => undefined);
+            channel.stderr.on('data', () => undefined);
+            channel.on('exit', code => { exitCode = typeof code === 'number' ? code : undefined; });
+            channel.once('error', error => finish(error));
+            channel.once('close', () => {
+                finish(exitCode === 0 ? undefined : new Error(`Git clone script exited with status ${exitCode ?? 'unknown'}`));
+            });
+            if (signal?.aborted) {
+                onAbort();
+            } else {
+                signal?.addEventListener('abort', onAbort, { once: true });
+            }
+        });
+    }
+
+    private async closeCommandConnection(): Promise<void> {
+        const closeTargets: Promise<unknown>[] = [];
+        if (this.sshConnection) {
+            closeTargets.push(this.sshConnection.close());
+        }
+        if (this.proxyConnections.length) {
+            closeTargets.push(this.proxyConnections[0].close());
+        }
+        await Promise.allSettled(closeTargets);
+        if (this.proxyCommandProcess && !this.proxyCommandProcess.killed) {
+            this.proxyCommandProcess.kill();
+        }
+        this.sshConnection = undefined;
+        this.proxyConnections = [];
+        this.proxyCommandProcess = undefined;
+        this.activeHost = undefined;
     }
 
     private openAgentForwardSession(): Promise<string | undefined> {
