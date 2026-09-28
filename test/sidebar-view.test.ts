@@ -1,7 +1,7 @@
 import { Script } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContainerConfig, ContainerConfigEntry } from '../src/containerConfig';
-import { ContainerSyncResult, SyncedContainer } from '../src/containerSync';
+import { ContainerSyncResult, DEFAULT_CONTAINER_HOST_NAME, SyncedContainer } from '../src/containerSync';
 import { ContainerOperationRegistry } from '../src/containerOperations';
 import { createPublicUserContainerApi, PublicUserContainerApi } from '../src/api/publicApi';
 import { UserRestApi } from '../src/api/restClient';
@@ -1236,8 +1236,8 @@ describe('SidebarViewProvider', () => {
         );
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-without-gitee',
-            host: 'sandbox',
-            name: 'sandbox',
+            host: DEFAULT_CONTAINER_HOST_NAME,
+            name: DEFAULT_CONTAINER_HOST_NAME,
             hostName: '10.0.0.6',
             port: 2222,
         }, { skipKnownHostsCheck: true, userName: 'root' });

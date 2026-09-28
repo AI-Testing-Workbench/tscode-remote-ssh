@@ -101,4 +101,10 @@ describe('server setup client validation flag', () => {
                 : '$SERVER_VALIDATION_FLAG=""');
         });
     }
+
+    it('normalizes line endings in the generated Bash setup script', async () => {
+        const script = await generateScript('linux', false);
+
+        expect(script).not.toContain('\r');
+    });
 });

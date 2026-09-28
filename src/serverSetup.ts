@@ -237,7 +237,7 @@ function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPa
         SCRIPT_ID: id,
         ENV_VAR_LINES: envVarLines,
         SERVER_CONNECTION_TOKEN: crypto.randomUUID(),
-    }, extensionPath);
+    }, extensionPath).replace(/\r\n/g, '\n');
 }
 
 function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, disableClientValidation }: ServerInstallOptions, extensionPath: string): string {
