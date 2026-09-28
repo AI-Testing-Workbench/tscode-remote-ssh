@@ -8,13 +8,13 @@ import * as vscode from './mocks/vscode';
 import type { Log as SourceLog } from '../src/common/logger';
 import { GIT_CLONE_COMMAND } from '../src/ssh/gitCloneCommand';
 
-describe('Remote Git clone execution', () => {
+describe('码云初始化脚本执行', () => {
     afterEach(() => {
         vi.restoreAllMocks();
         vscode.resetConfiguration();
     });
 
-    it('uses the live endpoint and redirects the clone command to container logs', async () => {
+    it('使用实时服务地址并将脚本输出写入容器日志', async () => {
         const connectionConfigs: SSHConnectionType['config'][] = [];
         const channel = createSSHChannel();
         const connect = vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
@@ -40,7 +40,7 @@ describe('Remote Git clone execution', () => {
         expect(close).toHaveBeenCalledOnce();
     });
 
-    it('accepts a zero exit status provided with the SSH channel close event', async () => {
+    it('从连接通道关闭事件读取成功退出状态', async () => {
         const channel = createSSHChannel();
         vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
             return Promise.resolve(this);
@@ -56,13 +56,13 @@ describe('Remote Git clone execution', () => {
             .resolves.toBeUndefined();
     });
 
-    it('retries a transient SSH-not-ready error but does not retry authentication errors', async () => {
+    it('遇到暂时性连接错误时重试，但身份验证失败时不重试', async () => {
         const channel = createSSHChannel();
         let attempts = 0;
         const connect = vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
             attempts += 1;
             if (attempts === 1) {
-                return Promise.reject(Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' }));
+                return Promise.reject(Object.assign(new Error('连接被拒绝'), { code: 'ECONNREFUSED' }));
             }
             return Promise.resolve(this);
         });
@@ -81,9 +81,9 @@ describe('Remote Git clone execution', () => {
         expect(connect).toHaveBeenCalledTimes(2);
     });
 
-    it('fails on an SSH authentication error without retrying', async () => {
+    it('身份验证失败时不重试', async () => {
         const connect = vi.spyOn(SSHConnection.prototype, 'connect').mockRejectedValue(
-            Object.assign(new Error('authentication failed'), { level: 'client-authentication' }),
+            Object.assign(new Error('身份验证失败'), { level: 'client-authentication' }),
         );
         const execChannel = vi.spyOn(SSHConnection.prototype, 'execChannel');
         vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
@@ -93,13 +93,13 @@ describe('Remote Git clone execution', () => {
             'container-1',
             'repo-host',
             '10.20.30.40:2222',
-        )).rejects.toThrow('authentication failed');
+        )).rejects.toThrow('连接服务失败，请检查网络、连接配置和身份验证信息');
 
         expect(connect).toHaveBeenCalledOnce();
         expect(execChannel).not.toHaveBeenCalled();
     });
 
-    it('rejects a non-zero clone script exit', async () => {
+    it('码云初始化脚本返回非零退出状态时失败', async () => {
         const channel = createSSHChannel();
         vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
             return Promise.resolve(this);
@@ -112,10 +112,10 @@ describe('Remote Git clone execution', () => {
         mockSSHConfig();
 
         await expect(createResolver().executeGitCloneScript('container-1', 'repo-host', '10.20.30.40:2222'))
-            .rejects.toThrow('exited with status 17');
+            .rejects.toThrow('码云初始化脚本执行失败，退出状态：17');
     });
 
-    it('closes the SSH command channel when initialization is cancelled', async () => {
+    it('取消初始化时关闭命令通道', async () => {
         const channel = createSSHChannel();
         const controller = new AbortController();
         const execChannel = vi.spyOn(SSHConnection.prototype, 'execChannel').mockImplementation(async () => channel as unknown as ClientChannel);
@@ -128,7 +128,7 @@ describe('Remote Git clone execution', () => {
 
         await vi.waitFor(() => expect(execChannel).toHaveBeenCalledOnce());
         controller.abort();
-        await expect(execution).rejects.toThrow('cancelled');
+        await expect(execution).rejects.toThrow('码云初始化脚本执行已取消');
         expect(channel.close).toHaveBeenCalledOnce();
         expect(close).toHaveBeenCalledOnce();
     });
@@ -137,7 +137,7 @@ describe('Remote Git clone execution', () => {
 function createResolver(): InstanceType<typeof RemoteSSHResolver> {
     return new RemoteSSHResolver(
         new vscode.ExtensionContext() as unknown as import('vscode').ExtensionContext,
-        new Log('Remote - SSH') as unknown as SourceLog,
+        new Log('码云初始化') as unknown as SourceLog,
     );
 }
 

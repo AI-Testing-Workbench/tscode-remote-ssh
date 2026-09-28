@@ -5,7 +5,7 @@ import { RestClientError, type GitRestApi, type UserRestApi } from '../src/api/r
 import { promptForGitCredentials } from '../src/gitCredentialPrompt';
 
 describe('ContainerInitializationPoller', () => {
-    it('runs the complete pending-to-running 码云 initialization sequence in order', async () => {
+    it('完整验证服务从创建中到运行中的码云初始化流程', async () => {
         const statuses = [
             containerStatus('pending', undefined),
             containerStatus('starting', 'pending'),
@@ -66,7 +66,7 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.submitGitCredential).toHaveBeenCalledWith('service-1', 'user-1', credential);
     });
 
-    it('reopens credentials after credential_rejected and uses the live SSH endpoint', async () => {
+    it('凭证被拒绝后重新打开输入并使用实时服务地址', async () => {
         const userApi = {
             getContainer: vi.fn()
                 .mockResolvedValueOnce(containerStatus('running', 'pending'))
@@ -105,7 +105,7 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.submitGitCredential).toHaveBeenCalledWith('service-1', 'user-1', credentialRequest('second'));
     });
 
-    it('starts Git polling before the clone command and waits for both to finish', async () => {
+    it('先启动码云状态轮询，再执行初始化命令并等待两者完成', async () => {
         const calls: string[] = [];
         let finishClone: (() => void) | undefined;
         const userApi = {
@@ -150,7 +150,7 @@ describe('ContainerInitializationPoller', () => {
         await expect(initialization).resolves.toMatchObject({ gitStatus: 'initialized' });
     });
 
-    it('fails creation if the clone script exits unsuccessfully', async () => {
+    it('码云初始化脚本执行失败时终止创建', async () => {
         const userApi = {
             getContainer: vi.fn()
                 .mockResolvedValueOnce(containerStatus('pending', 'pending'))
@@ -164,7 +164,7 @@ describe('ContainerInitializationPoller', () => {
         const poller = new ContainerInitializationPoller({
             userApi,
             gitApi,
-            runGitClone: vi.fn(async () => { throw new Error('remote exit code 1'); }),
+            runGitClone: vi.fn(async () => { throw new Error('远程命令退出状态：1'); }),
             statusSyncInterval: 0,
             sleep: vi.fn(async () => undefined),
         });
@@ -173,10 +173,13 @@ describe('ContainerInitializationPoller', () => {
             containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
-        })).rejects.toMatchObject({ code: 'git_clone_execution_failed' });
+        })).rejects.toMatchObject({
+            code: 'git_clone_execution_failed',
+            message: '服务 "container-1" 的码云初始化脚本执行失败',
+        });
     });
 
-    it('prefers the failure status already reported by the clone script', async () => {
+    it('优先采用初始化脚本已上报的失败状态', async () => {
         const userApi = {
             getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
         } as Pick<UserRestApi, 'getContainer'>;
@@ -191,7 +194,7 @@ describe('ContainerInitializationPoller', () => {
         const poller = new ContainerInitializationPoller({
             userApi,
             gitApi,
-            runGitClone: vi.fn(async () => { throw new Error('remote exit code 1'); }),
+            runGitClone: vi.fn(async () => { throw new Error('远程命令退出状态：1'); }),
             statusSyncInterval: 0,
             sleep: vi.fn(async () => undefined),
         });
@@ -204,7 +207,7 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.reportGitFailure).not.toHaveBeenCalled();
     });
 
-    it('reports a local clone execution failure using a whitelisted Git status', async () => {
+    it('使用允许的码云状态上报本地初始化脚本失败', async () => {
         const userApi = {
             getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
         } as Pick<UserRestApi, 'getContainer'>;
@@ -217,7 +220,7 @@ describe('ContainerInitializationPoller', () => {
         const poller = new ContainerInitializationPoller({
             userApi,
             gitApi,
-            runGitClone: vi.fn(async () => { throw new Error('remote exit code 1'); }),
+            runGitClone: vi.fn(async () => { throw new Error('远程命令退出状态：1'); }),
             statusSyncInterval: 0,
             sleep: vi.fn(async () => undefined),
         });
@@ -230,7 +233,7 @@ describe('ContainerInitializationPoller', () => {
         expect(gitApi.reportGitFailure).toHaveBeenCalledWith('service-1', 'user-1', 'failed_initialize');
     });
 
-    it('aborts the remote clone execution when creation is cancelled', async () => {
+    it('取消创建时中止码云初始化脚本执行', async () => {
         const controller = new AbortController();
         let cloneSignal: AbortSignal | undefined;
         const userApi = {
@@ -247,7 +250,7 @@ describe('ContainerInitializationPoller', () => {
             runGitClone: vi.fn((_container, signal) => {
                 cloneSignal = signal;
                 return new Promise<void>((_resolve, reject) => {
-                    signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+                    signal?.addEventListener('abort', () => reject(new Error('初始化已取消')), { once: true });
                 });
             }),
             statusSyncInterval: 0,

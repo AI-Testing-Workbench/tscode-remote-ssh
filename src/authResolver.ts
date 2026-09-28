@@ -44,7 +44,7 @@ function isSSHReadinessError(error: unknown): boolean {
 
 function waitWithAbort(milliseconds: number, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
-        return Promise.reject(new Error('Git clone execution was cancelled'));
+        return Promise.reject(new Error('码云初始化脚本执行已取消'));
     }
     return new Promise((resolve, reject) => {
         const cleanup = () => {
@@ -53,7 +53,7 @@ function waitWithAbort(milliseconds: number, signal?: AbortSignal): Promise<void
         };
         const onAbort = () => {
             cleanup();
-            reject(new Error('Git clone execution was cancelled'));
+            reject(new Error('码云初始化脚本执行已取消'));
         };
         const timer = setTimeout(() => {
             cleanup();
@@ -61,6 +61,10 @@ function waitWithAbort(milliseconds: number, signal?: AbortSignal): Promise<void
         }, milliseconds);
         signal?.addEventListener('abort', onAbort, { once: true });
     });
+}
+
+function errorWithCause(message: string, cause: unknown): Error {
+    return Object.assign(new Error(message), { cause });
 }
 
 export const REMOTE_SSH_AUTHORITY = 'ssh-remote';
@@ -366,11 +370,12 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
             await this.confirmDebugEnvironmentOnce(containerId);
         }
         if (signal?.aborted) {
-            throw new Error('Git clone execution was cancelled');
+            throw new Error('码云初始化脚本执行已取消');
         }
 
         const commandResolver = new RemoteSSHResolver(this.context, this.logger);
         let closeConnectionPromise: Promise<void> | undefined;
+        let commandStarted = false;
         const closeConnection = () => closeConnectionPromise ??= commandResolver.closeCommandConnection();
         const onAbort = () => { void closeConnection(); };
         signal?.addEventListener('abort', onAbort, { once: true });
@@ -407,17 +412,33 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     if (signal?.aborted || attempt === GIT_CLONE_SSH_CONNECT_ATTEMPTS || !isSSHReadinessError(error)) {
                         throw error;
                     }
-                    this.logger.trace(`Container SSH is not ready yet; retry ${attempt}/${GIT_CLONE_SSH_CONNECT_ATTEMPTS - 1}`);
+                    this.logger.trace(`服务连接尚未就绪，正在进行第 ${attempt}/${GIT_CLONE_SSH_CONNECT_ATTEMPTS - 1} 次重试`);
                     await waitWithAbort(GIT_CLONE_SSH_RETRY_DELAY_MS, signal);
                 }
             }
             if (!connected) {
-                throw new Error('Container SSH did not become ready');
+                throw new Error('服务连接未能就绪');
             }
             if (signal?.aborted) {
-                throw new Error('Git clone execution was cancelled');
+                throw new Error('码云初始化脚本执行已取消');
             }
+            commandStarted = true;
             await commandResolver.executeRemoteCommand(GIT_CLONE_COMMAND, signal);
+        } catch (error) {
+            if (signal?.aborted) {
+                throw errorWithCause('码云初始化脚本执行已取消', error);
+            }
+            if (error instanceof Error && (
+                error.message.startsWith('码云')
+                || error.message.startsWith('执行码云')
+                || error.message.startsWith('容器连接')
+            )) {
+                throw error;
+            }
+            const message = commandStarted
+                ? '码云初始化脚本执行失败'
+                : '连接服务失败，请检查网络、连接配置和身份验证信息';
+            throw errorWithCause(message, error);
         } finally {
             signal?.removeEventListener('abort', onAbort);
             await closeConnection();
@@ -444,7 +465,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const identitiesOnly = (sshHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes';
         const identityKeys = await gatherIdentityFiles(identityFiles, this.sshAgentSock, identitiesOnly, this.logger);
         if (signal?.aborted) {
-            throw new Error('Git clone execution was cancelled');
+            throw new Error('码云初始化脚本执行已取消');
         }
 
         let proxyStream: ssh2.ClientChannel | stream.Duplex | undefined;
@@ -457,7 +478,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 });
             for (let i = 0; i < proxyJumps.length; i += 1) {
                 if (signal?.aborted) {
-                    throw new Error('Git clone execution was cancelled');
+                    throw new Error('码云初始化脚本执行已取消');
                 }
                 const [proxy, proxyHostConfig] = proxyJumps[i];
                 const proxyHostName = proxyHostConfig['HostName'] || proxy.hostname;
@@ -517,7 +538,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
             authHandler: (arg0, arg1, arg2) => (sshAuthHandler(arg0, arg1, arg2), undefined),
         });
         if (signal?.aborted) {
-            throw new Error('Git clone execution was cancelled');
+            throw new Error('码云初始化脚本执行已取消');
         }
         await this.sshConnection.connect();
         this.activeHost = sshDest.hostname;
@@ -526,7 +547,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
 
     private async executeRemoteCommand(command: string, signal?: AbortSignal): Promise<void> {
         if (!this.sshConnection) {
-            throw new Error('SSH connection is not available');
+            throw new Error('执行码云初始化脚本时连接不可用');
         }
         const channel = await this.sshConnection.execChannel(command);
         await new Promise<void>((resolve, reject) => {
@@ -546,7 +567,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 }
             };
             const onAbort = () => {
-                finish(new Error('Git clone execution was cancelled'));
+                finish(new Error('码云初始化脚本执行已取消'));
                 channel.close();
             };
             channel.on('data', () => undefined);
@@ -557,7 +578,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 if (typeof closeCode === 'number') {
                     exitCode = closeCode;
                 }
-                finish(exitCode === 0 ? undefined : new Error(`Git clone script exited with status ${exitCode ?? 'unknown'}`));
+                finish(exitCode === 0 ? undefined : new Error(`码云初始化脚本执行失败，退出状态：${exitCode ?? '未知'}`));
             });
             if (signal?.aborted) {
                 onAbort();

@@ -9,7 +9,7 @@ export interface ContainerInitializationInput {
     operatorUserId: string;
     statusReader?: Pick<UserRestApi, 'getContainer'>;
     signal?: AbortSignal;
-    /** The create response may omit endpoint; use the live status after Git reaches waiting. */
+    /** 创建响应可能不包含服务地址；码云状态进入 waiting 后读取实时状态。 */
     endpoint?: string | null;
 }
 
@@ -220,7 +220,7 @@ export class ContainerInitializationPoller {
                     serverInitializationSucceeded = true;
                     const cloneResult = await this.waitForGitClone(gitClonePromise, input);
                     if (gitCloneFailed || cloneResult.error !== undefined) {
-                        throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的 Git 初始化脚本执行失败`, cloneResult.error);
+                        throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的码云初始化脚本执行失败`, cloneResult.error);
                     }
                     return {
                         containerId: input.containerId,
@@ -253,14 +253,14 @@ export class ContainerInitializationPoller {
                         throw this.failure(gitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
                     }
                     if (gitCloneFailed) {
-                        throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的 Git 初始化脚本执行失败`, gitCloneError);
+                        throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的码云初始化脚本执行失败`, gitCloneError);
                     }
                     if (gitStatus === 'waiting' && !gitClonePromise) {
                         if (!this.runGitClone) {
-                            throw this.failure('git_clone_runner_missing', `服务 "${input.containerId}" 缺少 Git 初始化脚本执行器`);
+                            throw this.failure('git_clone_runner_missing', `服务 "${input.containerId}" 缺少码云初始化脚本执行器`);
                         }
                         if (!normalizeOptionalText(container.endpoint)) {
-                            throw this.failure('container_endpoint_missing', `服务 "${input.containerId}" 已就绪但未返回 SSH endpoint`);
+                            throw this.failure('container_endpoint_missing', `服务 "${input.containerId}" 已就绪但未返回连接地址`);
                         }
                         gitClonePromise = Promise.resolve()
                             .then(() => this.runGitClone!(container, gitCloneSignal))
@@ -272,7 +272,7 @@ export class ContainerInitializationPoller {
                     }
 
                     if (!gitClonePromise && !gitStatus.startsWith('failed_') && gitStatus !== 'waiting') {
-                        throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 在 Git 启动前返回了状态 "${gitStatus}"，预期为 waiting`);
+                        throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 在码云初始化脚本启动前返回了异常状态`);
                     }
                     if (gitStatus === 'credential_required' || gitStatus === 'credential_rejected') {
                         const credential = await this.credentialPrompt({
@@ -333,7 +333,7 @@ export class ContainerInitializationPoller {
     ): Promise<{ error?: unknown }> {
         this.throwIfCancelled(input);
         if (!promise) {
-            throw this.failure('git_clone_not_started', `服务 "${input.containerId}" 尚未启动 Git 初始化脚本`);
+            throw this.failure('git_clone_not_started', `服务 "${input.containerId}" 尚未启动码云初始化脚本`);
         }
         const result = await promise;
         this.throwIfCancelled(input);
@@ -378,13 +378,13 @@ function normalizeInput(input: ContainerInitializationInput): ContainerInitializ
     const serviceId = typeof input.serviceId === 'string' ? input.serviceId.trim() : '';
     const operatorUserId = typeof input.operatorUserId === 'string' ? input.operatorUserId.trim() : '';
     if (!containerId) {
-        throw new ContainerInitializationError('container_id_missing', '创建响应中缺少有效的 container_id');
+        throw new ContainerInitializationError('container_id_missing', '创建响应中缺少有效的容器编号');
     }
     if (!serviceId) {
-        throw new ContainerInitializationError('service_id_missing', '创建响应中缺少有效的 service_id');
+        throw new ContainerInitializationError('service_id_missing', '创建响应中缺少有效的服务编号');
     }
     if (!operatorUserId) {
-        throw new ContainerInitializationError('user_id_missing', '创建码云初始化会话时缺少用户 ID');
+        throw new ContainerInitializationError('user_id_missing', '创建码云初始化会话时缺少用户编号');
     }
     return { ...input, containerId, serviceId, operatorUserId };
 }
