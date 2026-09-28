@@ -55,7 +55,7 @@ describe('ContainerSync', () => {
             },
             {
                 containerId: 'container-2',
-                host: '云端沙箱 服务',
+                host: 'sandbox',
                 status: 'stopped',
                 endpoint: null,
                 startedAt: undefined,
@@ -345,13 +345,13 @@ describe('ContainerSync', () => {
 
         expect(result.containers.map(container => container.host)).toEqual([
             'alice/repo',
-            'alice/repo (1)',
-            '云端沙箱 服务',
+            'alice/repo(1)',
+            'sandbox',
         ]);
         const text = await fs.readFile(store.filePath, 'utf8');
         expect(text).toContain('Host alice/repo\n');
-        expect(text).toContain('Host "alice/repo (1)"\n');
-        expect(text).toContain('Host "云端沙箱 服务"\n');
+        expect(text).toContain('Host alice/repo(1)\n');
+        expect(text).toContain('Host sandbox\n');
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(3);
     });
 
@@ -376,8 +376,8 @@ describe('ContainerSync', () => {
 
         expect(new Map(result.containers.map(container => [container.containerId, container.host]))).toEqual(new Map([
             ['one', 'alice/repo'],
-            ['two', 'alice/repo (1)'],
-            ['three', 'alice/repo (2)'],
+            ['two', 'alice/repo(1)'],
+            ['three', 'alice/repo(2)'],
         ]));
     });
 
@@ -401,15 +401,15 @@ describe('ContainerSync', () => {
 
         expect(result.containers.map(container => container.host)).toEqual([
             'alice/repo',
-            'alice/repo (1)',
+            'alice/repo(1)',
         ]);
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(2);
     });
 
     it('adds a suffix when an existing Host differs only by case or whitespace', () => {
-        expect(getUniqueHostName('alice/repo', new Set([' Alice/Repo ']))).toBe('alice/repo (1)');
-        expect(getUniqueHostName('alice/repo', new Set(['alice/repo', 'alice/repo (2)']))).toBe('alice/repo (3)');
-        expect(getUniqueHostName('alice/repo', new Set(['alice/repo (1)', 'alice/repo (2)']))).toBe('alice/repo (3)');
+        expect(getUniqueHostName('alice/repo', new Set([' Alice/Repo ']))).toBe('alice/repo(1)');
+        expect(getUniqueHostName('alice/repo', new Set(['alice/repo', 'alice/repo(2)']))).toBe('alice/repo(3)');
+        expect(getUniqueHostName('alice/repo', new Set(['alice/repo(1)', 'alice/repo(2)']))).toBe('alice/repo(3)');
     });
 
     it('notifies once and skips new config entries for invalid endpoints', async () => {

@@ -1236,8 +1236,8 @@ describe('SidebarViewProvider', () => {
         );
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             containerId: 'created-without-gitee',
-            host: '云端沙箱 服务',
-            name: '云端沙箱 服务',
+            host: 'sandbox',
+            name: 'sandbox',
             hostName: '10.0.0.6',
             port: 2222,
         }, { skipKnownHostsCheck: true, userName: 'root' });

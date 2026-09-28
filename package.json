@@ -112,6 +112,30 @@
 					"scope": "application",
 					"minimum": 1
 				},
+				"tscode.remote.copyTestagentConfig": {
+					"type": "boolean",
+					"markdownDescription": "连接至 云端沙箱 服务时，自动将本机 TestAgent 配置（testagent.jsonc、auth.json、env-vars.json）拷贝到沙箱，避免每次进入后重新配置。\n\n **Beta 功能：复制配置可能引起云端 TestAgent 进程无法启动，请谨慎开启。**",
+					"default": false,
+					"scope": "application"
+				},
+				"tscode.remote.copyTestagentConfigFiles": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"enum": [
+							"testagent.jsonc",
+							"auth.json",
+							"env-vars.json"
+						]
+					},
+					"description": "自动拷贝的文件白名单，用于按文件定位问题（例如只保留 auth.json）。external-user.json 为沙箱平台身份文件，始终不拷贝。",
+					"default": [
+						"testagent.jsonc",
+						"auth.json",
+						"env-vars.json"
+					],
+					"scope": "application"
+				},
 				"tscode.remote.debug": {
 					"type": "boolean",
 					"description": "启用调试模式",

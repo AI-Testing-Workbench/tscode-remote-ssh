@@ -150,7 +150,10 @@ if [[ -z $SERVER_RUNNING_PROCESS ]]; then
   SERVER_CONNECTION_TOKEN="%%SERVER_CONNECTION_TOKEN%%"
   echo $SERVER_CONNECTION_TOKEN > $SERVER_TOKENFILE
 
-  $SERVER_SCRIPT --start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_VALIDATION_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms &> $SERVER_LOGFILE &
+  # Do not pass --enable-remote-auto-shutdown: keep the server alive after the
+  # last client disconnects so the TestAgent/opencode backend it owns stays
+  # reachable for scheduled automations on the agent host.
+  $SERVER_SCRIPT --start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_VALIDATION_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --accept-server-license-terms &> $SERVER_LOGFILE &
   echo $! > $SERVER_PIDFILE
 else
   echo "Server script is already running $SERVER_SCRIPT"

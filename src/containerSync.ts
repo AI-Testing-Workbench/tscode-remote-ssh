@@ -78,7 +78,7 @@ export function getHostFromEndpoint(endpoint: string | null | undefined): string
     return parseContainerEndpoint(endpoint)?.host;
 }
 
-export const DEFAULT_CONTAINER_HOST_NAME = '云端沙箱 服务';
+export const DEFAULT_CONTAINER_HOST_NAME = 'sandbox';
 
 export function getContainerHostName(
     giteeUser: string | null | undefined,
@@ -92,7 +92,7 @@ export function getContainerHostName(
 export function getUniqueHostName(baseName: string, usedNames: Set<string>): string {
     const normalizedBaseName = baseName.trim() || DEFAULT_CONTAINER_HOST_NAME;
     const normalizedUsedNames = new Set(Array.from(usedNames, normalizeHostName));
-    const normalizedSuffixPrefix = `${normalizeHostName(normalizedBaseName)} (`;
+    const normalizedSuffixPrefix = `${normalizeHostName(normalizedBaseName)}(`;
     let highestSuffix = 0;
     for (const usedName of normalizedUsedNames) {
         if (!usedName.startsWith(normalizedSuffixPrefix) || !usedName.endsWith(')')) {
@@ -115,10 +115,10 @@ export function getUniqueHostName(baseName: string, usedNames: Set<string>): str
     }
 
     let suffix = highestSuffix + 1;
-    candidate = `${normalizedBaseName} (${suffix})`;
+    candidate = `${normalizedBaseName}(${suffix})`;
     while (normalizedUsedNames.has(normalizeHostName(candidate))) {
         suffix += 1;
-        candidate = `${normalizedBaseName} (${suffix})`;
+        candidate = `${normalizedBaseName}(${suffix})`;
     }
     usedNames.add(candidate);
     return candidate;

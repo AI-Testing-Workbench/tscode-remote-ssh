@@ -25,6 +25,7 @@ import {
 } from './containerEndpoint';
 import { getEffectiveRemoteUserName, getRemoteSettings } from './settings';
 import { GIT_CLONE_COMMAND } from './ssh/gitCloneCommand';
+import { copyTestagentConfigToRemote, TESTAGENT_CONFIG_FILE_NAMES } from './testagentConfigSync';
 import * as os from 'os';
 
 const PASSWORD_RETRY_COUNT = 3;
@@ -179,6 +180,11 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const remotePlatformMap = remoteSSHconfig.get<Record<string, string>>('remotePlatform', {});
         const remoteServerListenOnSocket = remoteSSHconfig.get<boolean>('remoteServerListenOnSocket', false)!;
         const connectTimeout = remoteSSHconfig.get<number>('connectTimeout', 60)!;
+        const copyTestagentConfig = remoteSSHconfig.get<boolean>('copyTestagentConfig', false)!;
+        const copyTestagentConfigFilesSetting = remoteSSHconfig.get<string[]>('copyTestagentConfigFiles', [...TESTAGENT_CONFIG_FILE_NAMES]);
+        const copyTestagentConfigFiles = Array.isArray(copyTestagentConfigFilesSetting)
+            ? copyTestagentConfigFilesSetting.filter((name): name is string => typeof name === 'string')
+            : [...TESTAGENT_CONFIG_FILE_NAMES];
 
         return vscode.window.withProgress({
             title: `正在连接至 云端沙箱 服务...`,
@@ -214,6 +220,13 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     connectTimeout,
                     enableAgentForwarding,
                 );
+
+                // Copy the local TestAgent config into the sandbox right after the SSH
+                // handshake and before installCodeServer starts any remote process, so a
+                // freshly provisioned sandbox does not have to be reconfigured by hand.
+                if (copyTestagentConfig) {
+                    await copyTestagentConfigToRemote(this.sshConnection!, this.logger, { fileNames: copyTestagentConfigFiles });
+                }
 
                 const envVariables: Record<string, string | null> = {};
                 if (agentForward) {
