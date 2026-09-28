@@ -176,6 +176,60 @@ describe('ContainerInitializationPoller', () => {
         })).rejects.toMatchObject({ code: 'git_clone_execution_failed' });
     });
 
+    it('prefers the failure status already reported by the clone script', async () => {
+        const userApi = {
+            getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn()
+                .mockResolvedValueOnce({ git_status: 'waiting' })
+                .mockResolvedValueOnce({ git_status: 'failed_git' }),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(),
+            reportGitFailure: vi.fn(),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled' | 'reportGitFailure'>;
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            runGitClone: vi.fn(async () => { throw new Error('remote exit code 1'); }),
+            statusSyncInterval: 0,
+            sleep: vi.fn(async () => undefined),
+        });
+
+        await expect(poller.initialize({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+        })).rejects.toMatchObject({ code: 'failed_git' });
+        expect(gitApi.reportGitFailure).not.toHaveBeenCalled();
+    });
+
+    it('reports a local clone execution failure using a whitelisted Git status', async () => {
+        const userApi = {
+            getContainer: vi.fn(async () => containerStatus('pending', 'pending')),
+        } as Pick<UserRestApi, 'getContainer'>;
+        const gitApi = {
+            getGitState: vi.fn(async () => ({ git_status: 'waiting' })),
+            submitGitCredential: vi.fn(),
+            reportUserCancelled: vi.fn(),
+            reportGitFailure: vi.fn(async (_serviceId: string, _userId: string, status: string) => ({ git_status: status })),
+        } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled' | 'reportGitFailure'>;
+        const poller = new ContainerInitializationPoller({
+            userApi,
+            gitApi,
+            runGitClone: vi.fn(async () => { throw new Error('remote exit code 1'); }),
+            statusSyncInterval: 0,
+            sleep: vi.fn(async () => undefined),
+        });
+
+        await expect(poller.initialize({
+            containerId: 'container-1',
+            serviceId: 'service-1',
+            operatorUserId: 'user-1',
+        })).rejects.toMatchObject({ code: 'git_clone_execution_failed' });
+        expect(gitApi.reportGitFailure).toHaveBeenCalledWith('service-1', 'user-1', 'failed_initialize');
+    });
+
     it('aborts the remote clone execution when creation is cancelled', async () => {
         const controller = new AbortController();
         let cloneSignal: AbortSignal | undefined;

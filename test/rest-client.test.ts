@@ -590,10 +590,13 @@ describe('RestClient', () => {
         });
         await expect(client.git.reportUserCancelled('service/id', 'user-1'))
             .resolves.toEqual({ git_status: 'credential_required' });
+        await expect(client.git.reportGitFailure('service/id', 'user-1', 'failed_initialize'))
+            .resolves.toEqual({ git_status: 'credential_required' });
 
         expect(requests.map(request => `${request.method} ${request.url.pathname}`)).toEqual([
             'GET /git/service%2Fid/state',
             'POST /git/service%2Fid/credential',
+            'POST /git/service%2Fid/report',
             'POST /git/service%2Fid/report',
         ]);
         expect(requests.every(request => request.headers[ADMIN_OPERATOR_USER_ID_HEADER] === 'user-1')).toBe(true);
@@ -605,6 +608,7 @@ describe('RestClient', () => {
             persist: false,
         });
         expect(readJsonBody(requests[2])).toEqual({ git_status: 'failed_user_cancelled' });
+        expect(readJsonBody(requests[3])).toEqual({ git_status: 'failed_initialize' });
         expect(requests.some(request => request.url.pathname.includes('/credential') && request.method === 'GET')).toBe(false);
     });
 

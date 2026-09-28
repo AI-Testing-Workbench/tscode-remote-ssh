@@ -1,12 +1,6 @@
 export type ContainerTypeValue = 'testagent_cloud' | 'autotest_cloud';
 
-export type GitStatus =
-    | 'waiting'
-    | 'starting'
-    | 'credential_required'
-    | 'credential_rejected'
-    | 'processing'
-    | 'initialized'
+export type GitFailureStatus =
     | 'failed_timeout'
     | 'failed_max_attempts'
     | 'failed_unexpected_state'
@@ -15,6 +9,15 @@ export type GitStatus =
     | 'failed_container'
     | 'failed_initialize'
     | 'failed_user_cancelled';
+
+export type GitStatus =
+    | 'waiting'
+    | 'starting'
+    | 'credential_required'
+    | 'credential_rejected'
+    | 'processing'
+    | 'initialized'
+    | GitFailureStatus;
 
 export interface UserCreateContainerRequest {
     user_id: string;

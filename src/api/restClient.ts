@@ -25,6 +25,7 @@ import {
     ExpirationRequest,
     ExpirationResponse,
     GitCredentialSubmitRequest,
+    GitFailureStatus,
     GitReportResponse,
     GitStateResponse,
     ImageDeleteRequest,
@@ -161,6 +162,7 @@ export interface UserRestApi {
 export interface GitRestApi {
     getGitState(serviceId: string, operatorUserId: string): Promise<GitStateResponse>;
     submitGitCredential(serviceId: string, operatorUserId: string, request: GitCredentialSubmitRequest): Promise<void>;
+    reportGitFailure(serviceId: string, operatorUserId: string, status: GitFailureStatus): Promise<GitReportResponse>;
     reportUserCancelled(serviceId: string, operatorUserId: string): Promise<GitReportResponse>;
 }
 
@@ -372,6 +374,15 @@ export class RestClient {
             deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
         };
 
+        const reportGitFailure = (serviceId: string, operatorUserId: string, status: GitFailureStatus) => this.requestJson<GitReportResponse>(
+            'POST',
+            this.gitPath(serviceId, 'report'),
+            {
+                headers: this.gitOperatorHeaders(operatorUserId),
+                jsonBody: { git_status: status },
+            },
+        );
+
         this.git = {
             getGitState: async (serviceId, operatorUserId) => this.requestJson<GitStateResponse>(
                 'GET',
@@ -383,14 +394,8 @@ export class RestClient {
                 this.gitPath(serviceId, 'credential'),
                 { headers: this.gitOperatorHeaders(operatorUserId), jsonBody: request },
             ),
-            reportUserCancelled: async (serviceId, operatorUserId) => this.requestJson<GitReportResponse>(
-                'POST',
-                this.gitPath(serviceId, 'report'),
-                {
-                    headers: this.gitOperatorHeaders(operatorUserId),
-                    jsonBody: { git_status: 'failed_user_cancelled' },
-                },
-            ),
+            reportGitFailure,
+            reportUserCancelled: (serviceId, operatorUserId) => reportGitFailure(serviceId, operatorUserId, 'failed_user_cancelled'),
         };
 
         this.admin = {

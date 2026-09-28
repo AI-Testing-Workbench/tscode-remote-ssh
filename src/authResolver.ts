@@ -553,7 +553,10 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
             channel.stderr.on('data', () => undefined);
             channel.on('exit', code => { exitCode = typeof code === 'number' ? code : undefined; });
             channel.once('error', error => finish(error));
-            channel.once('close', () => {
+            channel.once('close', (closeCode?: number | null) => {
+                if (typeof closeCode === 'number') {
+                    exitCode = closeCode;
+                }
                 finish(exitCode === 0 ? undefined : new Error(`Git clone script exited with status ${exitCode ?? 'unknown'}`));
             });
             if (signal?.aborted) {

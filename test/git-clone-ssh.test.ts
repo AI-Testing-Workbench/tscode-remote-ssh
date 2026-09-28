@@ -40,6 +40,22 @@ describe('Remote Git clone execution', () => {
         expect(close).toHaveBeenCalledOnce();
     });
 
+    it('accepts a zero exit status provided with the SSH channel close event', async () => {
+        const channel = createSSHChannel();
+        vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
+            return Promise.resolve(this);
+        });
+        vi.spyOn(SSHConnection.prototype, 'execChannel').mockImplementation(async () => {
+            setTimeout(() => channel.emit('close', 0), 0);
+            return channel as unknown as ClientChannel;
+        });
+        vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
+        mockSSHConfig();
+
+        await expect(createResolver().executeGitCloneScript('container-1', 'repo-host', '10.20.30.40:2222'))
+            .resolves.toBeUndefined();
+    });
+
     it('retries a transient SSH-not-ready error but does not retry authentication errors', async () => {
         const channel = createSSHChannel();
         let attempts = 0;
@@ -89,10 +105,7 @@ describe('Remote Git clone execution', () => {
             return Promise.resolve(this);
         });
         vi.spyOn(SSHConnection.prototype, 'execChannel').mockImplementation(async () => {
-            setTimeout(() => {
-                channel.emit('exit', 17);
-                channel.emit('close');
-            }, 0);
+            setTimeout(() => channel.emit('close', 17), 0);
             return channel as unknown as ClientChannel;
         });
         vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
