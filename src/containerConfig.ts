@@ -197,7 +197,7 @@ export class ContainerConfig {
 
         const section = findContainerSection(config, entry.containerId);
         if (!section) {
-            if (!entry.host.trim()) {
+            if (!normalizeContainerHostValue(entry.host)) {
                 throw new Error('Host cannot be empty for a new container');
             }
             const newSection = createContainerSection(
@@ -225,16 +225,17 @@ export class ContainerConfig {
                 true,
             ) || changed;
         }
-        if (entry.host.trim() && getHostValue(section) !== entry.host) {
-            section.value = entry.host;
-            section.quoted = false;
+        const host = normalizeContainerHostValue(entry.host);
+        if (host && getHostValue(section) !== host) {
+            section.value = host;
+            section.quoted = true;
             changed = true;
         }
 
-        const name = entry.name?.trim()
+        const name = normalizeContainerNameValue(entry.name?.trim()
             || getDirectiveValue(section.config, isNameDirective)?.trim()
             || entry.host.trim()
-            || getHostValue(section).trim();
+            || getHostValue(section).trim());
         if (name) {
             changed = setDirective(
                 section.config,
@@ -368,9 +369,7 @@ export class ContainerConfig {
     private ensureIgnoreUnknown(section: Section): boolean {
         const directive = findDirective(section.config, isIgnoreUnknownDirective);
         if (!directive) {
-            const firstCustomDirective = getFirstCustomDirective(section.config);
-            const insertionIndex = firstCustomDirective ? section.config.indexOf(firstCustomDirective) : -1;
-            return insertDirective(section.config, insertionIndex, {
+            return insertDirective(section.config, 0, {
                 param: 'IgnoreUnknown',
                 value: IGNORE_UNKNOWN_VALUE,
             });
@@ -383,12 +382,19 @@ export class ContainerConfig {
                 values.push(requiredValue);
             }
         }
+        let changed = false;
         const nextValue = values.join(',');
-        if (directiveValue(directive) === nextValue) {
-            return false;
+        if (directiveValue(directive) !== nextValue) {
+            directive.value = nextValue;
+            changed = true;
         }
-        directive.value = nextValue;
-        return true;
+        const index = section.config.indexOf(directive);
+        if (index > 0) {
+            section.config.splice(index, 1);
+            section.config.unshift(directive);
+            changed = true;
+        }
+        return changed;
     }
 
     private ensureSkipKnownHostsCheck(section: Section): boolean {
@@ -438,7 +444,8 @@ function createContainerSection(
         type: SSHConfig.DIRECTIVE,
         param: 'Host',
         separator: ' ',
-        value: entry.host,
+        value: normalizeContainerHostValue(entry.host),
+        quoted: true,
         before: config.length ? '\n' : '',
         after: '\n',
         config: new SSHConfig(),
@@ -447,7 +454,12 @@ function createContainerSection(
     if (entry.hostName?.trim()) {
         section.config.push(createDirective('HostName', entry.hostName, '\t'));
     }
-    section.config.push(createDirective(NAME_DIRECTIVE, entry.name?.trim() || entry.host, '\t'));
+    section.config.push(createDirective(
+        NAME_DIRECTIVE,
+        normalizeContainerNameValue(entry.name?.trim() || entry.host),
+        '\t',
+        true,
+    ));
     if (userName?.trim()) {
         section.config.push(createDirective(USER_DIRECTIVE, userName.trim(), '\t'));
     }
@@ -480,30 +492,28 @@ function normalizeContainerSections(config: SSHConfig): boolean {
 }
 
 function normalizeContainerHost(section: Section): boolean {
-    const host = getHostValue(section).trim();
+    const host = normalizeContainerHostValue(getHostValue(section));
     if (!host) {
         return false;
     }
 
-    if (/\s/.test(host)) {
-        return false;
-    }
-
     let changed = false;
-    if (Array.isArray(section.value)) {
+    if (Array.isArray(section.value) || section.value !== host) {
         section.value = host;
         changed = true;
     }
 
-    if (section.quoted === true) {
-        section.quoted = false;
-        changed = true;
+    if (section.quoted !== true) {
+        const wasExplicitlyUnquoted = section.quoted === false;
+        section.quoted = true;
+        changed = wasExplicitlyUnquoted || changed;
     }
     return changed;
 }
 
 function normalizeContainerSection(section: Section): boolean {
     let changed = normalizeContainerHost(section);
+    changed = normalizeContainerName(section) || changed;
     const knownIndexes: number[] = [];
     const knownDirectives: Directive[] = [];
     for (let index = 0; index < section.config.length; index += 1) {
@@ -534,15 +544,43 @@ function normalizeContainerSection(section: Section): boolean {
     return changed;
 }
 
-function createDirective(param: string, value: string, before: string): Directive {
+function createDirective(param: string, value: string, before: string, quoted = false): Directive {
     return {
         type: SSHConfig.DIRECTIVE,
         param,
         separator: ' ',
         value,
+        ...(quoted ? { quoted: true } : {}),
         before,
         after: '\n',
     };
+}
+
+function normalizeContainerHostValue(value: string): string {
+    return value.trim().replace(/"/g, '');
+}
+
+function normalizeContainerNameValue(value: string): string {
+    return value.trim().replace(/"/g, '');
+}
+
+function normalizeContainerName(section: Section): boolean {
+    const directive = findDirective(section.config, isNameDirective);
+    if (!directive) {
+        return false;
+    }
+
+    let changed = false;
+    const name = normalizeContainerNameValue(directiveValue(directive));
+    if (directiveValue(directive) !== name) {
+        directive.value = name;
+        changed = true;
+    }
+    if (directive.quoted !== true) {
+        directive.quoted = true;
+        changed = true;
+    }
+    return changed;
 }
 
 function insertDirective(config: SSHConfig, index: number, directive: { param: string; value: string }): boolean {
@@ -595,10 +633,6 @@ function removeDirectives(config: SSHConfig, predicate: (line: Directive) => boo
 function findExpiresInsertionIndex(config: SSHConfig): number {
     const containerIdIndex = config.findIndex(line => isDirective(line) && isContainerIdDirective(line as Directive));
     return containerIdIndex >= 0 ? containerIdIndex + 1 : config.length;
-}
-
-function getFirstCustomDirective(config: SSHConfig): Line | undefined {
-    return config.find(line => isDirective(line) && isCustomDirective(line));
 }
 
 function findContainerSection(config: SSHConfig, containerId: string): Section | undefined {
@@ -684,13 +718,13 @@ function isSkipKnownHostsDirective(line: Directive): boolean {
 }
 
 const ORDERED_CONTAINER_DIRECTIVES: Array<(line: Directive) => boolean> = [
+    isIgnoreUnknownDirective,
     isHostNameDirective,
     isNameDirective,
     isUserDirective,
     isPortDirective,
     isSkipKnownHostsDirective,
     isUserKnownHostsFileDirective,
-    isIgnoreUnknownDirective,
     isContainerIdDirective,
     isExpiresAtDirective,
 ];

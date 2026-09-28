@@ -71,7 +71,7 @@ describe('ContainerSync', () => {
         ]);
 
         const text = await fs.readFile(store.filePath, 'utf8');
-        expect(text).toContain('Host alice/repo');
+        expect(text).toContain('Host "alice/repo"');
         expect(text).toContain('HostName 10.0.0.1');
         expect(text).toContain('User root');
         expect(text).not.toContain('container-2');
@@ -154,7 +154,7 @@ describe('ContainerSync', () => {
             remote: true,
         });
         expect((await fs.readFile(store.filePath, 'utf8'))).not.toMatch(/^\s*ExpiresAt\s/m);
-        expect((await fs.readFile(store.filePath, 'utf8'))).toContain('Name 10.0.0.3');
+        expect((await fs.readFile(store.filePath, 'utf8'))).toContain('Name "10.0.0.3"');
     });
 
     it('cleans only the oldest history entries and keeps all history when the limit is zero', async () => {
@@ -349,9 +349,9 @@ describe('ContainerSync', () => {
             '云端沙箱 服务',
         ]);
         const text = await fs.readFile(store.filePath, 'utf8');
-        expect(text).toContain('Host alice/repo\n');
-        expect(text).toContain('Host alice/repo (1)\n');
-        expect(text).toContain('Host 云端沙箱 服务\n');
+        expect(text).toContain('Host "alice/repo"\n');
+        expect(text).toContain('Host "alice/repo (1)"\n');
+        expect(text).toContain('Host "云端沙箱 服务"\n');
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(3);
     });
 

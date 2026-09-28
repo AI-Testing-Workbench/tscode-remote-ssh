@@ -46,9 +46,9 @@ describe('ContainerConfig', () => {
         expect(await store.write(document)).toBe(true);
 
         const text = await fs.readFile(store.filePath, 'utf8');
-        expect(text).toContain('Host alice/repo');
+        expect(text).toContain('Host "alice/repo"');
         expect(text).toContain('HostName 10.0.0.1');
-        expect(text).toContain('Name alice/repo');
+        expect(text).toContain('Name "alice/repo"');
         expect(text).toContain('User root');
         expect(text).toContain('Port 22');
         expect(text).toContain(`${CONTAINER_ID_DIRECTIVE} container-1`);
@@ -56,17 +56,18 @@ describe('ContainerConfig', () => {
         expect(text).toContain('StrictHostKeyChecking no');
         expect(text).toContain(`${USER_KNOWN_HOSTS_FILE_DIRECTIVE} ${NULL_KNOWN_HOSTS_FILE}`);
         expect(getServiceFields(text)).toEqual([
+            'IgnoreUnknown ContainerId,ExpiresAt,Name',
             'HostName 10.0.0.1',
-            'Name alice/repo',
+            'Name "alice/repo"',
             'User root',
             'Port 22',
             'StrictHostKeyChecking no',
             'UserKnownHostsFile /dev/null',
-            'IgnoreUnknown ContainerId,ExpiresAt,Name',
             'ContainerId container-1',
         ]);
-        expect(text.indexOf('IgnoreUnknown')).toBeLessThan(text.indexOf('ContainerId'));
-        expect(text.indexOf('StrictHostKeyChecking')).toBeLessThan(text.indexOf('ContainerId'));
+        const containerIdDirectiveIndex = text.indexOf('\tContainerId');
+        expect(text.indexOf('\tIgnoreUnknown')).toBeLessThan(containerIdDirectiveIndex);
+        expect(text.indexOf('\tStrictHostKeyChecking')).toBeLessThan(containerIdDirectiveIndex);
         expect(store.list(SSHConfig.parse(text))).toEqual([{
             containerId: 'container-1',
             host: 'alice/repo',
@@ -194,23 +195,25 @@ describe('ContainerConfig', () => {
         expect(await store.write(document)).toBe(true);
 
         expect(getServiceFields(await fs.readFile(store.filePath, 'utf8'))).toEqual([
+            'IgnoreUnknown ContainerId,ExpiresAt,Name',
             'HostName 127.0.0.1',
-            'Name test/test',
+            'Name "test/test"',
             'User root',
             'Port 59194',
             'StrictHostKeyChecking no',
             'UserKnownHostsFile /dev/null',
-            'IgnoreUnknown ContainerId,ExpiresAt,Name',
             'ContainerId container-order',
             'ExpiresAt 2026-09-02T00:47:16.734Z',
         ]);
     });
 
-    it('leaves service hosts unquoted when normalizing an existing block', async () => {
+    it('quotes Host and Name values, removes embedded quotes, and matches the alias after reload', async () => {
         const store = await createStore();
         const initial = [
             'Host 云端沙箱 Service',
+            '\tHostName 10.0.0.9',
             '\tContainerId container-spaced-host',
+            '\tName 云端沙箱 Service',
             '',
         ].join('\n');
         await fs.writeFile(store.filePath, initial, 'utf8');
@@ -219,12 +222,24 @@ describe('ContainerConfig', () => {
         expect(store.list(document.config)).toEqual([{
             containerId: 'container-spaced-host',
             host: '云端沙箱 Service',
+            name: '云端沙箱 Service',
+            hostName: '10.0.0.9',
         }]);
+        store.upsertContainer(document.config, {
+            containerId: 'container-spaced-host',
+            host: '"云端沙箱 Service"',
+            name: '"云端沙箱 Service"',
+            hostName: '10.0.0.9',
+        });
         await store.write(document);
 
         const text = await fs.readFile(store.filePath, 'utf8');
-        expect(text).not.toContain('"');
-        expect(text).toContain('Host 云端沙箱 Service');
+        expect(text).toContain('Host "云端沙箱 Service"');
+        expect(text).toContain('Name "云端沙箱 Service"');
+        expect(text).not.toContain('""');
+
+        const reloaded = await store.read();
+        expect(reloaded.config.compute('云端沙箱 Service')['HostName']).toBe('10.0.0.9');
     });
 
     it('does not add or remove known-host settings when disabled', async () => {
