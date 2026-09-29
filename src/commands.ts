@@ -118,7 +118,10 @@ export function openRemoteSSHWindow(host: string, reuseWindow: boolean, giteeRep
 }
 
 export function openRemoteSSHLocationWindow(host: string, path: string, reuseWindow: boolean): Thenable<unknown> {
-    return vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.from({ scheme: 'vscode-remote', authority: getRemoteAuthority(host), path }), { forceNewWindow: !reuseWindow });
+    return vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.from({ scheme: 'vscode-remote', authority: getRemoteAuthority(host), path }), {
+        forceNewWindow: !reuseWindow,
+        noRecentEntry: true,
+    });
 }
 
 function appendRepositoryPath(defaultPath: string, giteeRepository?: string): string {
