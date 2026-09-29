@@ -677,7 +677,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     }
                     await vscode.env.clipboard.writeText(container.serviceId);
                     if (this.isActiveView(context)) {
-                        void vscode.window.showInformationMessage('服务 ID 已复制，请按需联系支持人员获取帮助');
+                        void vscode.window.showInformationMessage('云端沙箱标识码已复制，请按需联系支持人员获取帮助');
                     }
                     return;
                 }
@@ -1323,7 +1323,7 @@ function renderContainerCard(
             <div class="service-heading" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
                 <div class="service-name-row">
                     <strong class="service-name">${host}</strong>
-                    <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyServiceId" data-service-id="${serviceId}" title="复制服务 ID" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
+                    <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyServiceId" data-service-id="${serviceId}" title="复制云端沙箱标识码" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
                 </div>
                 <div class="service-status">
                     ${typeBadge}

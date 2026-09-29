@@ -86,7 +86,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.failed, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
         expect((view.webview.html.match(/data-action="copyServiceId"/g) ?? [])).toHaveLength(7);
-        expect(view.webview.html).toContain('title="复制服务 ID"');
+        expect(view.webview.html).toContain('title="复制云端沙箱标识码"');
         for (const serviceId of ['running-1', 'stopped-1', 'failed-1', 'pending-1', 'syncing-1', 'error-1', 'missing-1']) {
             expect(view.webview.html).toContain(`data-action="copyServiceId" data-service-id="${serviceId}"`);
         }
@@ -155,7 +155,7 @@ describe('SidebarViewProvider', () => {
         await flushMessages();
 
         expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('service-copy-me');
-        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('服务 ID 已复制，请按需联系支持人员获取帮助');
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('云端沙箱标识码已复制，请按需联系支持人员获取帮助');
     });
 
     it('does not copy an ID that does not belong to a visible service card', async () => {
