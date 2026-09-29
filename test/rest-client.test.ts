@@ -43,19 +43,19 @@ describe('RestClient', () => {
         const client = new RestClient('https://api.example.test/v1///', { transport, operatorUserId: 'admin-1' });
 
         await client.user.createContainer({ user_id: 'user-1' });
-        await client.user.getContainerIds({
+        await client.user.getServiceIds({
             user_id: 'user-1',
             container_type: 'autotest_cloud',
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
         });
-        await client.user.getContainer('container/1');
+        await client.user.getContainer('service/1');
         await client.user.checkAdmin({ user_id: 'user-1' });
-        await client.user.startContainer('container/1');
-        await client.user.stopContainer('container/1');
-        await client.user.restartContainer('container/1');
-        await client.user.deleteContainer('container/1');
+        await client.user.startContainer('service/1');
+        await client.user.stopContainer('service/1');
+        await client.user.restartContainer('service/1');
+        await client.user.deleteContainer('service/1');
 
         await client.admin.uploadImage({ file: Buffer.from('tar'), filename: 'image.tar', auto_push: true });
         await client.admin.pushImage({ full_name: 'registry/ns/app:v1' });
@@ -68,15 +68,15 @@ describe('RestClient', () => {
         await client.admin.listContainers();
         await client.admin.listOrphanContainers();
         await client.admin.deleteOrphanContainers({ container_ids: ['orphan-1'] });
-        await client.admin.getContainer('container/1');
-        await client.admin.getContainerLog('container/1');
-        await client.admin.startContainer('container/1');
-        await client.admin.stopContainer('container/1');
-        await client.admin.restartContainer('container/1');
-        await client.admin.deleteContainer('container/1');
-        await client.admin.permanentDeleteContainer('container/1');
-        await client.admin.setExpiration('container/1', { expiration_hours: 1 });
-        await client.admin.restoreContainer('container/1', { expiration_hours: 1 });
+        await client.admin.getContainer('service/1');
+        await client.admin.getContainerLog('service/1');
+        await client.admin.startContainer('service/1');
+        await client.admin.stopContainer('service/1');
+        await client.admin.restartContainer('service/1');
+        await client.admin.deleteContainer('service/1');
+        await client.admin.permanentDeleteContainer('service/1');
+        await client.admin.setExpiration('service/1', { expiration_hours: 1 });
+        await client.admin.restoreContainer('service/1', { expiration_hours: 1 });
         await client.admin.getState();
         await client.admin.getContainerLimit();
         await client.admin.setContainerLimit({ container_limit: 3, cpu: 1, memory: 1 });
@@ -91,12 +91,12 @@ describe('RestClient', () => {
         expect(requests.map(request => `${request.method} ${request.url.pathname}`)).toEqual([
             'POST /v1/user/containers',
             'GET /v1/user/containers',
-            'GET /v1/user/containers/container%2F1',
+            'GET /v1/user/containers/service%2F1',
             'POST /v1/user/check',
-            'POST /v1/user/containers/container%2F1/start',
-            'POST /v1/user/containers/container%2F1/stop',
-            'POST /v1/user/containers/container%2F1/restart',
-            'POST /v1/user/containers/container%2F1/delete',
+            'POST /v1/user/containers/service%2F1/start',
+            'POST /v1/user/containers/service%2F1/stop',
+            'POST /v1/user/containers/service%2F1/restart',
+            'POST /v1/user/containers/service%2F1/delete',
             'POST /v1/admin/images/upload',
             'POST /v1/admin/images/push',
             'GET /v1/admin/images',
@@ -108,15 +108,15 @@ describe('RestClient', () => {
             'GET /v1/admin/containers',
             'GET /v1/admin/containers/orphans',
             'POST /v1/admin/containers/orphans/delete',
-            'GET /v1/admin/containers/container%2F1',
-            'GET /v1/admin/containers/container%2F1/log',
-            'POST /v1/admin/containers/container%2F1/start',
-            'POST /v1/admin/containers/container%2F1/stop',
-            'POST /v1/admin/containers/container%2F1/restart',
-            'POST /v1/admin/containers/container%2F1/delete',
-            'POST /v1/admin/containers/container%2F1/permanent-delete',
-            'POST /v1/admin/containers/container%2F1/expiration',
-            'POST /v1/admin/containers/container%2F1/restore',
+            'GET /v1/admin/containers/service%2F1',
+            'GET /v1/admin/containers/service%2F1/log',
+            'POST /v1/admin/containers/service%2F1/start',
+            'POST /v1/admin/containers/service%2F1/stop',
+            'POST /v1/admin/containers/service%2F1/restart',
+            'POST /v1/admin/containers/service%2F1/delete',
+            'POST /v1/admin/containers/service%2F1/permanent-delete',
+            'POST /v1/admin/containers/service%2F1/expiration',
+            'POST /v1/admin/containers/service%2F1/restore',
             'GET /v1/admin/state',
             'GET /v1/admin/containers/limit',
             'POST /v1/admin/containers/limit',
@@ -150,6 +150,15 @@ describe('RestClient', () => {
         expect(multipartBody).toContain('name="auto_push"');
         expect(multipartBody).toContain('name="file"; filename="image.tar"');
         expect(multipartBody).toContain('tar');
+    });
+
+    it('returns user service IDs from the current container-list contract', async () => {
+        const { transport } = createTransport(jsonResponse(200, { service_ids: ['service-1', 'service-2'] }));
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.user.getServiceIds({ user_id: 'user-1' })).resolves.toEqual({
+            service_ids: ['service-1', 'service-2'],
+        });
     });
 
     it('requests the volume status contract with the bound administrator header', async () => {
@@ -205,29 +214,32 @@ describe('RestClient', () => {
 
     it('preserves service_id from user and administrator creation responses', async () => {
         const responses = [
-            jsonResponse(200, { container_id: 'container-1', service_id: 'service-1', status: 'pending' }),
-            jsonResponse(200, { container_id: 'container-2', service_id: 'service-2', status: 'pending' }),
+            jsonResponse(200, { service_id: 'service-user-1', status: 'pending' }),
+            jsonResponse(200, { container_id: 'physical-container-2', service_id: 'service-admin-2', status: 'pending' }),
         ];
         const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
         const client = new RestClient('https://api.example.test', { transport });
 
-        await expect(client.user.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({ service_id: 'service-1' });
-        await expect(client.admin.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({ service_id: 'service-2' });
+        await expect(client.user.createContainer({ user_id: 'user-1' })).resolves.toEqual({ service_id: 'service-user-1', status: 'pending' });
+        await expect(client.admin.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({
+            service_id: 'service-admin-2',
+            container_id: 'physical-container-2',
+        });
     });
 
     it('defaults missing user 码云 final status to pending', async () => {
         const responses = [
-            jsonResponse(200, { containers: [{ container_id: 'container-1', status: 'pending' }] }),
-            jsonResponse(200, { container_id: 'container-1', status: 'pending' }),
+            jsonResponse(200, { containers: [{ service_id: 'service-1', status: 'pending' }] }),
+            jsonResponse(200, { service_id: 'service-1', status: 'pending' }),
         ];
         const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
         const client = new RestClient('https://api.example.test', { transport });
 
         await expect(client.user.getContainerStatuses({ user_id: 'user-1' })).resolves.toEqual({
-            containers: [{ container_id: 'container-1', status: 'pending', git_fin_status: 'pending' }],
+            containers: [{ service_id: 'service-1', status: 'pending', git_fin_status: 'pending' }],
         });
         await expect(client.user.getContainer('container-1')).resolves.toEqual({
-            container_id: 'container-1',
+            service_id: 'service-1',
             status: 'pending',
             git_fin_status: 'pending',
         });
@@ -282,7 +294,7 @@ describe('RestClient', () => {
             request.on('end', () => {
                 response.writeHead(200, { 'Content-Type': 'application/json' });
                 response.end(JSON.stringify({
-                    container_id: 'container-1',
+                    service_id: 'service-1',
                     status: 'running',
                     endpoint: '10.0.0.1:22',
                     gitee_user: '',
@@ -295,12 +307,12 @@ describe('RestClient', () => {
         try {
             const client = new RestClient(`http://127.0.0.1:${port}`);
 
-            await expect(client.user.getContainer('container-1')).resolves.toMatchObject({
-                container_id: 'container-1',
+            await expect(client.user.getContainer('service-1')).resolves.toMatchObject({
+                service_id: 'service-1',
                 status: 'running',
             });
             expect(requestMethod).toBe('GET');
-            expect(requestPath).toBe('/user/containers/container-1');
+            expect(requestPath).toBe('/user/containers/service-1');
         } finally {
             await close(server);
         }
@@ -474,7 +486,7 @@ describe('RestClient', () => {
 
     it('preserves the latest nullable and resource response fields', async () => {
         const userStatus = {
-            container_id: 'container-1',
+            service_id: 'service-1',
             status: 'running',
             git_fin_status: 'pending',
             endpoint: null,
@@ -499,7 +511,8 @@ describe('RestClient', () => {
             }],
         };
         const adminContainer = {
-            container_id: 'container-1',
+            container_id: 'physical-container-1',
+            service_id: 'service-1',
             status: 'deleted',
             endpoint: null,
             started_at: null,
@@ -522,16 +535,16 @@ describe('RestClient', () => {
             jsonResponse(200, userStatus),
             jsonResponse(200, imageList),
             jsonResponse(200, { containers: [adminContainer] }),
-            jsonResponse(200, { container_id: 'container-1', expires_at: null }),
+            jsonResponse(200, { service_id: 'service-1', expires_at: null }),
         ];
         const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
         const client = new RestClient('https://api.example.test', { transport, operatorUserId: 'admin-1' });
 
-        await expect(client.user.getContainer('container-1')).resolves.toEqual(userStatus);
+        await expect(client.user.getContainer('service-1')).resolves.toEqual(userStatus);
         await expect(client.admin.listImages()).resolves.toEqual(imageList);
         await expect(client.admin.listContainers()).resolves.toEqual({ containers: [adminContainer] });
-        await expect(client.admin.setExpiration('container-1', { expiration_hours: 0 }))
-            .resolves.toEqual({ container_id: 'container-1', expires_at: null });
+        await expect(client.admin.setExpiration('service-1', { expiration_hours: 0 }))
+            .resolves.toEqual({ service_id: 'service-1', expires_at: null });
     });
 
     it('maps empty URLs, HTTP errors, invalid JSON, and network failures to stable errors', async () => {

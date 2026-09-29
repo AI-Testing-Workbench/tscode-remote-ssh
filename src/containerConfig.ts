@@ -5,10 +5,11 @@ import SSHConfig, { Directive, Line, Section } from 'ssh-config';
 import { expandPath } from './common/files';
 
 export const DEFAULT_CONTAINER_CONFIG_PATH = '~/.local/share/testagent/sandbox.config';
-export const CONTAINER_ID_DIRECTIVE = 'ContainerId';
+export const LEGACY_CONTAINER_ID_DIRECTIVE = 'ContainerId';
+export const SERVICE_ID_DIRECTIVE = 'ServiceId';
 export const EXPIRES_AT_DIRECTIVE = 'ExpiresAt';
 export const NAME_DIRECTIVE = 'Name';
-export const IGNORE_UNKNOWN_VALUE = 'ContainerId,ExpiresAt,Name';
+export const IGNORE_UNKNOWN_VALUE = 'ServiceId,ExpiresAt,Name';
 export const SKIP_KNOWN_HOSTS_DIRECTIVE = 'StrictHostKeyChecking';
 export const USER_KNOWN_HOSTS_FILE_DIRECTIVE = 'UserKnownHostsFile';
 export const USER_DIRECTIVE = 'User';
@@ -18,7 +19,7 @@ const LEGACY_CONFIG_SETTING = 'configFile';
 const LEGACY_CONFIGURATION_SECTIONS = ['tscode.remote', 'testagnet.remote'];
 
 export interface ContainerConfigEntry {
-    containerId: string;
+    serviceId: string;
     host: string;
     name?: string;
     hostName?: string;
@@ -60,8 +61,8 @@ export function getContainerConfigEntries(config: SSHConfig): ContainerConfigEnt
             continue;
         }
 
-        const containerId = getDirectiveValue(line.config, isContainerIdDirective);
-        if (!containerId) {
+        const serviceId = getDirectiveValue(line.config, isServiceIdDirective);
+        if (!serviceId) {
             continue;
         }
 
@@ -70,7 +71,7 @@ export function getContainerConfigEntries(config: SSHConfig): ContainerConfigEnt
         const port = parsePort(getDirectiveValue(line.config, isPortDirective));
         const expiresAt = getDirectiveValue(line.config, isExpiresAtDirective);
         entries.push({
-            containerId,
+            serviceId,
             host: getHostValue(line),
             ...(name ? { name } : {}),
             ...(hostName ? { hostName } : {}),
@@ -128,13 +129,26 @@ export class ContainerConfig {
 
     private async migrateLegacyConfig(): Promise<void> {
         const legacyFilePath = this.legacyFilePath;
-        if (!legacyFilePath || path.resolve(legacyFilePath) === path.resolve(this.filePath)) {
+        if (!legacyFilePath) {
+            await this.removeLegacyConfigSettings();
+            return;
+        }
+        if (isOrdinarySshConfig(legacyFilePath)) {
+            return;
+        }
+        if (path.resolve(legacyFilePath) === path.resolve(this.filePath)) {
+            const currentText = await readIfPresent(this.fileSystem, this.filePath);
+            await this.fileSystem.mkdir(path.dirname(this.filePath), { recursive: true });
+            await this.atomicWrite(currentText ?? '');
             await this.removeLegacyConfigSettings();
             return;
         }
 
         const legacyText = await readIfPresent(this.fileSystem, legacyFilePath);
         if (legacyText === undefined) {
+            const currentText = await readIfPresent(this.fileSystem, this.filePath);
+            await this.fileSystem.mkdir(path.dirname(this.filePath), { recursive: true });
+            await this.atomicWrite(currentText ?? '');
             await this.removeLegacyConfigSettings();
             return;
         }
@@ -142,13 +156,9 @@ export class ContainerConfig {
         const currentText = await readIfPresent(this.fileSystem, this.filePath);
         if (currentText === undefined) {
             await this.fileSystem.mkdir(path.dirname(this.filePath), { recursive: true });
-            try {
-                await this.fileSystem.writeFile(this.filePath, legacyText, { flag: 'wx', mode: 0o600 });
-            } catch (error) {
-                if (getErrorCode(error) !== 'EEXIST') {
-                    throw error;
-                }
-            }
+            await this.atomicWrite(legacyText);
+        } else {
+            await this.atomicWrite(mergeLegacyConfig(currentText, legacyText));
         }
 
         await unlinkIfPresent(this.fileSystem, legacyFilePath);
@@ -186,16 +196,28 @@ export class ContainerConfig {
         return getContainerConfigEntries(config);
     }
 
+    public removeLegacyContainerEntries(config: SSHConfig): boolean {
+        let changed = false;
+        for (let index = config.length - 1; index >= 0; index -= 1) {
+            const line = config[index];
+            if (isHostSection(line) && findDirective(line.config, isContainerIdDirective)) {
+                config.splice(index, 1);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     public upsertContainer(
         config: SSHConfig,
         entry: ContainerConfigEntry,
         options: UpsertContainerOptions = {},
     ): boolean {
-        if (!entry.containerId.trim()) {
-            throw new Error('ContainerId cannot be empty');
+        if (!entry.serviceId.trim()) {
+            throw new Error('ServiceId cannot be empty');
         }
 
-        const section = findContainerSection(config, entry.containerId);
+        const section = findServiceSection(config, entry.serviceId);
         if (!section) {
             if (!normalizeContainerHostValue(entry.host)) {
                 throw new Error('Host cannot be empty for a new container');
@@ -259,7 +281,7 @@ export class ContainerConfig {
             changed = setDirective(section.config, isPortDirective, 'Port', String(entry.port), true) || changed;
         }
 
-        changed = setDirective(section.config, isContainerIdDirective, CONTAINER_ID_DIRECTIVE, entry.containerId) || changed;
+        changed = setDirective(section.config, isServiceIdDirective, SERVICE_ID_DIRECTIVE, entry.serviceId) || changed;
         if (entry.expiresAt === undefined) {
             changed = removeDirectives(section.config, isExpiresAtDirective) || changed;
         } else {
@@ -277,7 +299,7 @@ export class ContainerConfig {
 
         let changed = false;
         for (const line of config) {
-            if (isHostSection(line) && getDirectiveValue(line.config, isContainerIdDirective)) {
+            if (isHostSection(line) && getDirectiveValue(line.config, isServiceIdDirective)) {
                 changed = setDirective(
                     line.config,
                     isUserDirective,
@@ -299,7 +321,7 @@ export class ContainerConfig {
 
         let changed = false;
         for (const line of config) {
-            if (!isHostSection(line) || !getDirectiveValue(line.config, isContainerIdDirective)) {
+            if (!isHostSection(line) || !getDirectiveValue(line.config, isServiceIdDirective)) {
                 continue;
             }
             const userDirective = findDirective(line.config, isUserDirective);
@@ -317,8 +339,8 @@ export class ContainerConfig {
         return changed;
     }
 
-    public setExpiresAt(config: SSHConfig, containerId: string, expiresAt: string): boolean {
-        const section = findContainerSection(config, containerId);
+    public setExpiresAt(config: SSHConfig, serviceId: string, expiresAt: string): boolean {
+        const section = findServiceSection(config, serviceId);
         if (!section) {
             return false;
         }
@@ -328,8 +350,8 @@ export class ContainerConfig {
         return changed;
     }
 
-    public removeExpiresAt(config: SSHConfig, containerId: string): boolean {
-        const section = findContainerSection(config, containerId);
+    public removeExpiresAt(config: SSHConfig, serviceId: string): boolean {
+        const section = findServiceSection(config, serviceId);
         if (!section) {
             return false;
         }
@@ -339,11 +361,11 @@ export class ContainerConfig {
         return changed;
     }
 
-    public removeContainer(config: SSHConfig, containerId: string): boolean {
+    public removeContainer(config: SSHConfig, serviceId: string): boolean {
         let changed = false;
         for (let index = config.length - 1; index >= 0; index -= 1) {
             const line = config[index];
-            if (isHostSection(line) && sectionHasContainerId(line, containerId)) {
+            if (isHostSection(line) && sectionHasServiceId(line, serviceId)) {
                 config.splice(index, 1);
                 changed = true;
             }
@@ -358,7 +380,7 @@ export class ContainerConfig {
 
         let changed = false;
         for (const line of config) {
-            if (isHostSection(line) && getDirectiveValue(line.config, isContainerIdDirective)) {
+            if (isHostSection(line) && getDirectiveValue(line.config, isServiceIdDirective)) {
                 changed = this.ensureSkipKnownHostsCheck(line) || changed;
             }
         }
@@ -377,7 +399,7 @@ export class ContainerConfig {
 
         const existingValues = directiveValue(directive).split(/[,\s]+/).filter(Boolean);
         const values = [...existingValues];
-        for (const requiredValue of [CONTAINER_ID_DIRECTIVE, EXPIRES_AT_DIRECTIVE, NAME_DIRECTIVE]) {
+        for (const requiredValue of [SERVICE_ID_DIRECTIVE, EXPIRES_AT_DIRECTIVE, NAME_DIRECTIVE]) {
             if (!values.some(value => value.toLowerCase() === requiredValue.toLowerCase())) {
                 values.push(requiredValue);
             }
@@ -425,8 +447,25 @@ export class ContainerConfig {
                 if (!['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(getErrorCode(error) ?? '')) {
                     throw error;
                 }
-                await unlinkIfPresent(this.fileSystem, this.filePath);
-                await this.fileSystem.rename(temporaryPath, this.filePath);
+                const backupPath = `${this.filePath}.backup-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                try {
+                    await this.fileSystem.rename(this.filePath, backupPath);
+                } catch (backupError) {
+                    if (getErrorCode(backupError) !== 'ENOENT') {
+                        throw backupError;
+                    }
+                }
+                try {
+                    await this.fileSystem.rename(temporaryPath, this.filePath);
+                } catch (replaceError) {
+                    try {
+                        await this.fileSystem.rename(backupPath, this.filePath);
+                    } catch {
+                        // Keep the backup when restoration cannot complete.
+                    }
+                    throw replaceError;
+                }
+                await unlinkIfPresent(this.fileSystem, backupPath);
             }
         } finally {
             await unlinkIfPresent(this.fileSystem, temporaryPath);
@@ -466,7 +505,7 @@ function createContainerSection(
     if (entry.port !== undefined) {
         section.config.push(createDirective('Port', String(entry.port), '\t'));
     }
-    section.config.push(createDirective('ContainerId', entry.containerId, '\t'));
+    section.config.push(createDirective(SERVICE_ID_DIRECTIVE, entry.serviceId, '\t'));
     if (entry.expiresAt !== undefined) {
         section.config.push(createDirective('ExpiresAt', entry.expiresAt, '\t'));
     }
@@ -484,7 +523,7 @@ function createContainerSection(
 function normalizeContainerSections(config: SSHConfig): boolean {
     let changed = false;
     for (const line of config) {
-        if (isHostSection(line) && getDirectiveValue(line.config, isContainerIdDirective)) {
+        if (isHostSection(line) && getDirectiveValue(line.config, isServiceIdDirective)) {
             changed = normalizeContainerSection(line) || changed;
         }
     }
@@ -509,6 +548,56 @@ function normalizeContainerHost(section: Section): boolean {
         changed = wasExplicitlyUnquoted || changed;
     }
     return changed;
+}
+
+function mergeLegacyConfig(currentText: string, legacyText: string): string {
+    const currentConfig = SSHConfig.parse(currentText);
+    const legacyConfig = SSHConfig.parse(legacyText);
+    const currentHosts = new Set(currentConfig
+        .filter(isHostSection)
+        .flatMap(section => getHostPatternValues(section).map(normalizeHostPattern)));
+
+    for (const line of legacyConfig) {
+        if (isHostSection(line)) {
+            const patterns = getHostPatternValues(line);
+            const newHosts = new Set<string>();
+            const uniquePatterns = patterns.filter(pattern => {
+                const normalizedPattern = normalizeHostPattern(pattern);
+                if (currentHosts.has(normalizedPattern) || newHosts.has(normalizedPattern)) {
+                    return false;
+                }
+                newHosts.add(normalizedPattern);
+                return true;
+            });
+            if (!uniquePatterns.length) {
+                continue;
+            }
+            newHosts.forEach(pattern => currentHosts.add(pattern));
+            if (uniquePatterns.length < patterns.length) {
+                const uniqueHostNames = new Set(uniquePatterns.map(normalizeHostPattern));
+                currentConfig.push({
+                    ...line,
+                    value: Array.isArray(line.value)
+                        ? line.value.filter(pattern => uniqueHostNames.has(normalizeHostPattern(pattern.val)))
+                        : uniquePatterns.join(' '),
+                });
+                continue;
+            }
+        }
+        currentConfig.push(line);
+    }
+
+    return SSHConfig.stringify(currentConfig);
+}
+
+function getHostPatternValues(section: Section): string[] {
+    return Array.isArray(section.value)
+        ? section.value.map(item => item.val)
+        : section.value.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? [];
+}
+
+function normalizeHostPattern(value: string): string {
+    return value.trim().replace(/^(?:"([^"]*)"|'([^']*)')$/, '$1$2').toLocaleLowerCase();
 }
 
 function normalizeContainerSection(section: Section): boolean {
@@ -631,16 +720,16 @@ function removeDirectives(config: SSHConfig, predicate: (line: Directive) => boo
 }
 
 function findExpiresInsertionIndex(config: SSHConfig): number {
-    const containerIdIndex = config.findIndex(line => isDirective(line) && isContainerIdDirective(line as Directive));
-    return containerIdIndex >= 0 ? containerIdIndex + 1 : config.length;
+    const serviceIdIndex = config.findIndex(line => isDirective(line) && isServiceIdDirective(line as Directive));
+    return serviceIdIndex >= 0 ? serviceIdIndex + 1 : config.length;
 }
 
-function findContainerSection(config: SSHConfig, containerId: string): Section | undefined {
-    return config.find(line => isHostSection(line) && sectionHasContainerId(line, containerId)) as Section | undefined;
+function findServiceSection(config: SSHConfig, serviceId: string): Section | undefined {
+    return config.find(line => isHostSection(line) && sectionHasServiceId(line, serviceId)) as Section | undefined;
 }
 
-function sectionHasContainerId(section: Section, containerId: string): boolean {
-    return getDirectiveValue(section.config, isContainerIdDirective) === containerId;
+function sectionHasServiceId(section: Section, serviceId: string): boolean {
+    return getDirectiveValue(section.config, isServiceIdDirective) === serviceId;
 }
 
 function getDirectiveValue(config: SSHConfig, predicate: (line: Directive) => boolean): string | undefined {
@@ -678,11 +767,19 @@ function isDirective(line: Line): line is Directive {
 }
 
 function isCustomDirective(line: Line | Directive): boolean {
-    return isDirective(line) && (isContainerIdDirective(line) || isExpiresAtDirective(line) || isNameDirective(line));
+    return isDirective(line) && (
+        isServiceIdDirective(line)
+        || isExpiresAtDirective(line)
+        || isNameDirective(line)
+    );
 }
 
 function isContainerIdDirective(line: Directive): boolean {
-    return /^containerid$/i.test(line.param);
+    return line.param.toLowerCase() === LEGACY_CONTAINER_ID_DIRECTIVE.toLowerCase();
+}
+
+function isServiceIdDirective(line: Directive): boolean {
+    return /^serviceid$/i.test(line.param);
 }
 
 function isHostNameDirective(line: Directive): boolean {
@@ -725,7 +822,7 @@ const ORDERED_CONTAINER_DIRECTIVES: Array<(line: Directive) => boolean> = [
     isPortDirective,
     isSkipKnownHostsDirective,
     isUserKnownHostsFileDirective,
-    isContainerIdDirective,
+    isServiceIdDirective,
     isExpiresAtDirective,
 ];
 
@@ -767,6 +864,14 @@ function resolveLegacyConfiguredPath(configuredPath: string): string {
         // A missing path is the normal case for a legacy installation.
     }
     return resolvedPath;
+}
+
+function isOrdinarySshConfig(filePath: string): boolean {
+    const ordinaryConfigPath = path.resolve(expandPath('~/.ssh/config'));
+    const normalizedPath = path.resolve(filePath);
+    return process.platform === 'win32'
+        ? normalizedPath.toLocaleLowerCase() === ordinaryConfigPath.toLocaleLowerCase()
+        : normalizedPath === ordinaryConfigPath;
 }
 
 function parsePort(value: string | undefined): number | undefined {

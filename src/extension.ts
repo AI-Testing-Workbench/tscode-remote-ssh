@@ -45,7 +45,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         runGitClone: async (container, signal) => {
             const hostAlias = await getInitializationHostAlias(config, container);
             await remoteSSHResolver.executeGitCloneScript(
-                container.container_id,
+                container.service_id,
                 hostAlias,
                 container.endpoint,
                 signal,
@@ -90,9 +90,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         userApiFactory,
         operationRegistry,
         onSync: result => sidebarSyncState.update(result),
-        onInvalidEndpoint: ({ containerId, endpoint }) => {
+        onInvalidEndpoint: ({ serviceId, endpoint }) => {
             void vscode.window.showErrorMessage(
-                `云端沙箱 服务 "${containerId}" 的 endpoint 无效，应为 IP:Port：${endpoint ?? '(空)'}`,
+                `云端沙箱 服务 "${serviceId}" 的 endpoint 无效，应为 IP:Port：${endpoint ?? '(空)'}`,
                 { modal: true },
             );
         },
@@ -211,7 +211,7 @@ export function deactivate() {
 async function getInitializationHostAlias(config: ContainerConfig, container: ContainerStatusResponse): Promise<string> {
     const document = await config.read();
     const entries = config.list(document.config);
-    const existing = entries.find(entry => entry.containerId === container.container_id);
+    const existing = entries.find(entry => entry.serviceId === container.service_id);
     if (existing?.host) {
         return existing.host;
     }

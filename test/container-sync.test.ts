@@ -40,7 +40,7 @@ describe('ContainerSync', () => {
         expect(result.changed).toBe(true);
         expect(result.containers).toEqual([
             {
-                containerId: 'container-1',
+                serviceId: 'container-1',
                 host: 'alice/repo',
                 giteeRepository: 'repo',
                 hostName: '10.0.0.1',
@@ -54,7 +54,7 @@ describe('ContainerSync', () => {
                 remote: true,
             },
             {
-                containerId: 'container-2',
+                serviceId: 'container-2',
                 host: '云端沙箱 服务',
                 status: 'stopped',
                 endpoint: null,
@@ -82,7 +82,7 @@ describe('ContainerSync', () => {
     it('writes the current SSH username when the username setting is blank', async () => {
         const store = await createStore();
         const document = await store.read();
-        store.upsertContainer(document.config, { containerId: 'legacy', host: 'legacy-host' });
+        store.upsertContainer(document.config, { serviceId: 'legacy', host: 'legacy-host' });
         await store.write(document);
 
         const sync = createSync(store, emptyBatch(), { userName: '' });
@@ -97,7 +97,7 @@ describe('ContainerSync', () => {
         const sync = createSync(store, {
             getContainerStatuses: vi.fn(async () => ({
                 containers: [{
-                    container_id: 'container-usage',
+                    service_id: 'service-usage',
                     status: 'running',
                     endpoint: '10.0.0.4:22',
                     cpu_usage: 12.5,
@@ -119,14 +119,14 @@ describe('ContainerSync', () => {
     it('marks missing containers with ExpiresAt and removes it when they return', async () => {
         const store = await createStore();
         const initial = await store.read();
-        store.upsertContainer(initial.config, { containerId: 'container-3', host: '10.0.0.3' });
+        store.upsertContainer(initial.config, { serviceId: 'service-3', host: '10.0.0.3' });
         await store.write(initial);
 
         let present = false;
         const sync = createSync(store, {
             getContainerStatuses: vi.fn(async () => ({
                 containers: present
-                    ? [status('container-3', 'running', '10.0.0.3:22', '', '')]
+                    ? [status('service-3', 'running', '10.0.0.3:22', '', '')]
                     : [],
             })),
         }, {
@@ -135,7 +135,7 @@ describe('ContainerSync', () => {
 
         const missing = await sync.sync();
         expect(missing.containers).toEqual([{
-            containerId: 'container-3',
+            serviceId: 'service-3',
             host: '10.0.0.3',
             status: 'missing',
             expiresAt: '2026-09-01T00:00:00.000Z',
@@ -146,7 +146,7 @@ describe('ContainerSync', () => {
         present = true;
         const returned = await sync.sync();
         expect(returned.containers[0]).toMatchObject({
-            containerId: 'container-3',
+            serviceId: 'service-3',
             host: '10.0.0.3',
             hostName: '10.0.0.3',
             port: 22,
@@ -160,9 +160,9 @@ describe('ContainerSync', () => {
     it('cleans only the oldest history entries and keeps all history when the limit is zero', async () => {
         const store = await createStore();
         const document = await store.read();
-        store.upsertContainer(document.config, { containerId: 'oldest', host: '10.0.0.10', expiresAt: '2026-01-01T00:00:00.000Z' });
-        store.upsertContainer(document.config, { containerId: 'middle', host: '10.0.0.11', expiresAt: '2026-02-01T00:00:00.000Z' });
-        store.upsertContainer(document.config, { containerId: 'newest', host: '10.0.0.12', expiresAt: '2026-03-01T00:00:00.000Z' });
+        store.upsertContainer(document.config, { serviceId: 'service-oldest', host: '10.0.0.10', expiresAt: '2026-01-01T00:00:00.000Z' });
+        store.upsertContainer(document.config, { serviceId: 'service-middle', host: '10.0.0.11', expiresAt: '2026-02-01T00:00:00.000Z' });
+        store.upsertContainer(document.config, { serviceId: 'service-newest', host: '10.0.0.12', expiresAt: '2026-03-01T00:00:00.000Z' });
         await store.write(document);
 
         const userApi = {
@@ -186,7 +186,7 @@ describe('ContainerSync', () => {
 
         await sync.sync();
         const afterCleanup = await store.read();
-        expect(store.list(afterCleanup.config).map(entry => entry.containerId)).toEqual(['middle', 'newest']);
+        expect(store.list(afterCleanup.config).map(entry => entry.serviceId)).toEqual(['service-middle', 'service-newest']);
 
         const unlimitedSync = new ContainerSync({
             config: store,
@@ -204,7 +204,7 @@ describe('ContainerSync', () => {
             now: () => new Date('2026-09-01T00:00:00.000Z'),
         });
         await unlimitedSync.sync();
-        expect(store.list((await store.read()).config).map(entry => entry.containerId)).toEqual(['middle', 'newest']);
+        expect(store.list((await store.read()).config).map(entry => entry.serviceId)).toEqual(['service-middle', 'service-newest']);
     });
 
     it('surfaces a batch status failure as a sync error', async () => {
@@ -225,7 +225,7 @@ describe('ContainerSync', () => {
         const store = await createStore();
         const document = await store.read();
         store.upsertContainer(document.config, {
-            containerId: 'local-1',
+            serviceId: 'service-local-1',
             host: 'local-service',
             hostName: '10.0.0.1',
             port: 22,
@@ -261,7 +261,7 @@ describe('ContainerSync', () => {
         await vi.waitFor(() => expect(onSync).toHaveBeenCalledOnce());
         expect(onSync).toHaveBeenCalledWith({
             containers: [{
-                containerId: 'local-1',
+                serviceId: 'service-local-1',
                 host: 'local-service',
                 hostName: '10.0.0.1',
                 port: 22,
@@ -274,15 +274,46 @@ describe('ContainerSync', () => {
 
         resolveUserId?.('user-1');
         await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledOnce());
-        resolveStatuses?.({ containers: [status('local-1', 'running', '10.0.0.1:22', '', '')] });
+        resolveStatuses?.({ containers: [status('service-local-1', 'running', '10.0.0.1:22', '', '')] });
 
         const result = await pending;
         expect(result.containers[0]).toMatchObject({
-            containerId: 'local-1',
+            serviceId: 'service-local-1',
             status: 'running',
             remote: true,
         });
         expect(onSync).toHaveBeenCalledTimes(2);
+    });
+
+    it('removes legacy ContainerId entries before publishing the initial snapshot', async () => {
+        const store = await createStore();
+        await fs.writeFile(store.filePath, [
+            'Host legacy-service',
+            '\tContainerId legacy-1',
+            '\tName legacy-service',
+            '',
+            'Host service-only',
+            '\tServiceId service-1',
+            '',
+            'Host ordinary',
+            '\tHostName ordinary.example.com',
+            '',
+        ].join('\n'));
+        const onSync = vi.fn();
+        const sync = createSync(store, emptyBatch(), {}, undefined, onSync);
+
+        await sync.sync();
+
+        expect(onSync).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(onSync.mock.calls[0][0])).toContain('service-1');
+        expect(JSON.stringify(onSync.mock.calls[0][0])).not.toContain('legacy-1');
+        const text = await fs.readFile(store.filePath, 'utf8');
+        expect(text).not.toContain('ContainerId legacy-1');
+        expect(text).not.toContain('Host legacy-service');
+        expect(text).toContain('Host "service-only"');
+        expect(text).toContain('ServiceId service-1');
+        expect(text).toContain('Host ordinary');
+        expect(text).toContain('HostName ordinary.example.com');
     });
 
     it('recovers on the next sync after a transient status failure', async () => {
@@ -303,7 +334,7 @@ describe('ContainerSync', () => {
         expect(first.error?.code).toBe('sync_failed');
         expect(second.error).toBeUndefined();
         expect(second.containers).toHaveLength(1);
-        expect(store.list((await store.read()).config).map(entry => entry.containerId)).toEqual(['container-1']);
+        expect(store.list((await store.read()).config).map(entry => entry.serviceId)).toEqual(['container-1']);
     });
 
     it('does not call the API for an empty URL or empty user ID', async () => {
@@ -374,7 +405,7 @@ describe('ContainerSync', () => {
 
         const result = await sync.sync();
 
-        expect(new Map(result.containers.map(container => [container.containerId, container.host]))).toEqual(new Map([
+        expect(new Map(result.containers.map(container => [container.serviceId, container.host]))).toEqual(new Map([
             ['one', 'alice/repo'],
             ['two', 'alice/repo (1)'],
             ['three', 'alice/repo (2)'],
@@ -384,8 +415,8 @@ describe('ContainerSync', () => {
     it('repairs duplicate Host aliases already present in the config', async () => {
         const store = await createStore();
         const document = await store.read();
-        store.upsertContainer(document.config, { containerId: 'one', host: 'alice/repo' });
-        store.upsertContainer(document.config, { containerId: 'two', host: 'alice/repo' });
+        store.upsertContainer(document.config, { serviceId: 'one', host: 'alice/repo' });
+        store.upsertContainer(document.config, { serviceId: 'two', host: 'alice/repo' });
         await store.write(document);
 
         const sync = createSync(store, {
@@ -421,7 +452,7 @@ describe('ContainerSync', () => {
             userApi: {
                 getContainerStatuses: vi.fn(async () => ({
                     containers: [{
-                        container_id: 'invalid',
+                        service_id: 'service-invalid',
                         status: 'running',
                         endpoint: 'example.com:22',
                         gitee_user: 'alice',
@@ -445,7 +476,7 @@ describe('ContainerSync', () => {
         const second = await sync.sync();
 
         expect(first.containers[0]).toMatchObject({
-            containerId: 'invalid',
+            serviceId: 'service-invalid',
             host: 'alice/repo',
             status: 'running',
             error: {
@@ -454,8 +485,8 @@ describe('ContainerSync', () => {
         });
         expect(second.containers[0]).toMatchObject({ error: { code: 'invalid_endpoint' } });
         expect(onInvalidEndpoint).toHaveBeenCalledOnce();
-        expect(onInvalidEndpoint).toHaveBeenCalledWith({ containerId: 'invalid', endpoint: 'example.com:22' });
-        expect((await fs.readFile(store.filePath, 'utf8'))).not.toContain('ContainerId invalid');
+        expect(onInvalidEndpoint).toHaveBeenCalledWith({ serviceId: 'service-invalid', endpoint: 'example.com:22' });
+        expect((await fs.readFile(store.filePath, 'utf8'))).not.toContain('ServiceId service-invalid');
     });
 
     it('accepts and stores only the IP and port from a debug proxy endpoint when enabled', async () => {
@@ -463,7 +494,7 @@ describe('ContainerSync', () => {
         const sync = createSync(store, {
             getContainerStatuses: vi.fn(async () => ({
                 containers: [{
-                    container_id: 'debug-container',
+                    service_id: 'service-debug-container',
                     status: 'running',
                     endpoint: '10.0.0.30:2200/proxy/XX',
                     gitee_user: 'alice',
@@ -475,7 +506,7 @@ describe('ContainerSync', () => {
         const result = await sync.sync();
 
         expect(result.containers[0]).toMatchObject({
-            containerId: 'debug-container',
+            serviceId: 'service-debug-container',
             host: 'alice/debug-repo',
             hostName: '10.0.0.30',
             port: 2200,
@@ -686,17 +717,17 @@ describe('ContainerSync', () => {
     it('suppresses a stale remote ID after local deletion until the cloud confirms removal', async () => {
         const store = await createStore();
         const document = await store.read();
-        store.upsertContainer(document.config, { containerId: 'deleted-1', host: 'deleted-host' });
-        store.removeContainer(document.config, 'deleted-1');
+        store.upsertContainer(document.config, { serviceId: 'service-deleted-1', host: 'deleted-host' });
+        store.removeContainer(document.config, 'service-deleted-1');
         await store.write(document);
 
-        let remoteIds = ['deleted-1'];
+        let remoteIds = ['service-deleted-1'];
         const sync = createSync(store, {
             getContainerStatuses: vi.fn(async () => ({
                 containers: remoteIds.map(id => status(id, 'running', '10.0.0.1:22', '', '')),
             })),
         });
-        sync.markContainerDeleted('deleted-1');
+        sync.markContainerDeleted('service-deleted-1');
 
         const stale = await sync.sync();
         expect(stale.containers).toEqual([]);
@@ -732,7 +763,7 @@ describe('ContainerSync', () => {
         const store = await createStore();
         const document = await store.read();
         store.upsertContainer(document.config, {
-            containerId: 'container-restore',
+            serviceId: 'service-restore',
             host: 'restore-host',
             expiresAt: '2026-09-01T00:00:00.000Z',
         });
@@ -742,15 +773,15 @@ describe('ContainerSync', () => {
         const registry = new ContainerOperationRegistry();
         const getContainerStatuses = vi.fn(async () => ({ containers: remote }));
         const sync = createSync(store, { getContainerStatuses }, {}, registry);
-        registry.begin('container-restore', 'restore', 'admin');
-        registry.setPhase('container-restore', 'reconciling');
+        registry.begin('service-restore', 'restore', 'admin');
+        registry.setPhase('service-restore', 'reconciling');
 
         await sync.sync();
-        expect(registry.get('container-restore')).toBeDefined();
+        expect(registry.get('service-restore')).toBeDefined();
 
-        remote = [status('container-restore', 'running', '10.0.0.9:22', '', '')];
+        remote = [status('service-restore', 'running', '10.0.0.9:22', '', '')];
         await sync.sync();
-        expect(registry.get('container-restore')).toBeUndefined();
+        expect(registry.get('service-restore')).toBeUndefined();
     });
 });
 
@@ -771,14 +802,14 @@ async function createStore(): Promise<ContainerConfig> {
 }
 
 function status(
-    containerId: string,
+    serviceId: string,
     statusValue: string,
     endpoint: string | null,
     giteeUser: string,
     giteeRepository: string,
 ): ContainerStatusResponse {
     return {
-        container_id: containerId,
+        service_id: serviceId,
         status: statusValue,
         ...(endpoint !== null ? { endpoint } : { endpoint: null }),
         gitee_user: giteeUser,
@@ -795,6 +826,7 @@ function createSync(
     api: Pick<UserRestApi, 'getContainerStatuses'>,
     settings: Partial<ReturnType<NonNullable<ContainerSyncOptionsForTest['getSettings']>>> = {},
     operationRegistry?: ContainerOperationRegistry,
+    onSync?: ConstructorParameters<typeof ContainerSync>[0]['onSync'],
 ): ContainerSync {
     return new ContainerSync({
         config: store,
@@ -811,6 +843,7 @@ function createSync(
             ...settings,
         }),
         operationRegistry,
+        onSync,
         now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 }

@@ -31,9 +31,9 @@ type ClientOptions = {
   files: Record<string, string>;
   /** When set, the hosts the SSH config is expected to declare. */
   hosts?: string[];
-  /** When set, add ContainerId-backed aliases and resolve them through the real resolver. */
+  /** When set, add ServiceId-backed aliases and resolve them through the real resolver. */
   containerAliases?: string[];
-  /** When set, resolve an alias whose ContainerId endpoint must be rejected. */
+  /** When set, resolve an alias whose ServiceId endpoint must be rejected. */
   invalidContainerAlias?: string;
 };
 
@@ -141,7 +141,7 @@ for (const file of files.value) {
             '  Port 2222',
             `  User ${server.username}`,
             `  Password ${server.password}`,
-            `  ContainerId fixture-container-${index}`,
+            `  ServiceId fixture-service-${index}`,
           ].join('\n');
         }).join('\n\n');
         const containerConfigPath = getConfiguredContainerConfigPath();

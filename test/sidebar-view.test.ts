@@ -85,23 +85,23 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('<span class="status-dot pending"></span>\n                    <span class="status-label">同步中</span>');
         expect(view.webview.html).toContain('.status-dot.stopped, .status-dot.failed, .status-dot.error');
         expect(view.webview.html).toContain('data-action="connect"');
-        expect((view.webview.html.match(/data-action="copyContainerId"/g) ?? [])).toHaveLength(7);
-        expect(view.webview.html).toContain('title="复制 ID"');
-        for (const containerId of ['running-1', 'stopped-1', 'failed-1', 'pending-1', 'syncing-1', 'error-1', 'missing-1']) {
-            expect(view.webview.html).toContain(`data-action="copyContainerId" data-container-id="${containerId}"`);
+        expect((view.webview.html.match(/data-action="copyServiceId"/g) ?? [])).toHaveLength(7);
+        expect(view.webview.html).toContain('title="复制服务 ID"');
+        for (const serviceId of ['running-1', 'stopped-1', 'failed-1', 'pending-1', 'syncing-1', 'error-1', 'missing-1']) {
+            expect(view.webview.html).toContain(`data-action="copyServiceId" data-service-id="${serviceId}"`);
         }
         expect(view.webview.html).toMatch(
-            /<strong class="service-name">host-running-1<\/strong>\s*<button class="service-copy-button" data-action="copyContainerId" data-container-id="running-1"/,
+            /<strong class="service-name">host-running-1<\/strong>\s*<button class="service-copy-button" data-action="copyServiceId" data-service-id="running-1"/,
         );
         expect(view.webview.html).toContain('post(\'connect\'');
-        expect(view.webview.html).toMatch(/<article class="container-card" data-container-id="running-1" data-connectable="true">/);
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="true">/);
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="stopped-1" data-connectable="false" disabled>/);
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="failed-1" data-connectable="false" disabled>/);
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="pending-1" data-connectable="false" disabled>/);
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="syncing-1" data-connectable="false" disabled>/);
-        expect(view.webview.html).toMatch(/data-action="restart" data-container-id="failed-1" disabled>/);
-        expect(view.webview.html).toMatch(/data-action="restart" data-container-id="stopped-1">/);
+        expect(view.webview.html).toMatch(/<article class="container-card" data-service-id="running-1" data-connectable="true">/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="running-1" data-connectable="true">/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="stopped-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="failed-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="pending-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="syncing-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="restart" data-service-id="failed-1" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="restart" data-service-id="stopped-1">/);
         expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(view.webview.html).toContain('data-action="clearExpired"');
@@ -144,18 +144,18 @@ describe('SidebarViewProvider', () => {
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
     });
 
-    it('copies the container ID for a service card', async () => {
+    it('copies the service ID for a service card', async () => {
         const state = new SidebarSyncState();
-        state.update({ containers: [syncedContainer('copy-me', 'running', true)], changed: false });
+        state.update({ containers: [syncedContainer('service-copy-me', 'running', true)], changed: false });
         const view = createWebviewView();
         const provider = createProvider({ state, view });
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'copyContainerId', containerId: 'copy-me', requestId: 'copy-1' });
+        view.fireMessage({ command: 'copyServiceId', serviceId: 'service-copy-me', requestId: 'copy-1' });
         await flushMessages();
 
-        expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('copy-me');
-        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('ID 已复制，请按需联系支持人员获取帮助');
+        expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('service-copy-me');
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('服务 ID 已复制，请按需联系支持人员获取帮助');
     });
 
     it('does not copy an ID that does not belong to a visible service card', async () => {
@@ -165,7 +165,7 @@ describe('SidebarViewProvider', () => {
         const provider = createProvider({ state, view });
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'copyContainerId', containerId: 'forged-id' });
+        view.fireMessage({ command: 'copyServiceId', serviceId: 'forged-id' });
         await flushMessages();
 
         expect(vscode.env.clipboard.writeText).not.toHaveBeenCalled();
@@ -210,8 +210,8 @@ describe('SidebarViewProvider', () => {
 
         const resolving = provider.resolveWebviewView(view as never);
         await vi.waitFor(() => expect(view.webview.html).toContain('<span class="status-label">同步中</span>'));
-        expect(view.webview.html).toContain('data-container-id="syncing-1"');
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="syncing-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toContain('data-service-id="syncing-1"');
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="syncing-1" data-connectable="false" disabled>/);
 
         resolveUserId?.('user-1');
         await resolving;
@@ -260,7 +260,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('status-dot pending');
         expect(view.webview.html).toContain('<span class="status-label">停止中</span>');
         expect(view.webview.html).not.toContain('状态查询超时');
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="container-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="container-1" data-connectable="false" disabled>/);
         expect(view.webview.html).toContain('status-pulse');
     });
 
@@ -473,11 +473,11 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'connect', containerId: 'container-1' });
+        view.fireMessage({ command: 'connect', serviceId: 'container-1' });
         await flushMessages();
-        view.fireMessage({ command: 'restart', containerId: 'container-1' });
+        view.fireMessage({ command: 'restart', serviceId: 'container-1' });
         await flushMessages();
-        view.fireMessage({ command: 'delete', containerId: 'container-1' });
+        view.fireMessage({ command: 'delete', serviceId: 'container-1' });
         await flushMessages();
         view.fireMessage({ command: 'executeCommand', commandId: 'workbench.action.remote.close' });
         await flushMessages();
@@ -489,7 +489,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('workbench.action.remote.close');
     });
 
-    it('reads the current ContainerId config before connecting a service', async () => {
+    it('reads the current ServiceId config before connecting a service', async () => {
         const state = new SidebarSyncState();
         state.update({
             containers: [
@@ -507,15 +507,15 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'connect', containerId: 'slash-alias' });
-        view.fireMessage({ command: 'connect', containerId: 'space-alias' });
+        view.fireMessage({ command: 'connect', serviceId: 'slash-alias' });
+        view.fireMessage({ command: 'connect', serviceId: 'space-alias' });
         await flushMessages();
 
         expect(onConnect).toHaveBeenNthCalledWith(1, 'alice/repo', 'repo');
         expect(onConnect).toHaveBeenNthCalledWith(2, 'TestAgent Cloud Service');
     });
 
-    it('rejects a service when the current ContainerId endpoint is invalid', async () => {
+    it('rejects a service when the current ServiceId endpoint is invalid', async () => {
         const state = new SidebarSyncState();
         state.update({
             containers: [syncedContainer('invalid-endpoint', 'running', true)],
@@ -527,7 +527,7 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'connect', containerId: 'invalid-endpoint' });
+        view.fireMessage({ command: 'connect', serviceId: 'invalid-endpoint' });
         await flushMessages();
 
         expect(onConnect).not.toHaveBeenCalled();
@@ -553,9 +553,9 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'connect', containerId: 'container-1', requestId: 'request-1' });
-        view.fireMessage({ command: 'connect', containerId: 'container-1', requestId: 'request-1' });
-        view.fireMessage({ command: 'connect', containerId: 'container-1', requestId: 'request-2' });
+        view.fireMessage({ command: 'connect', serviceId: 'container-1', requestId: 'request-1' });
+        view.fireMessage({ command: 'connect', serviceId: 'container-1', requestId: 'request-1' });
+        view.fireMessage({ command: 'connect', serviceId: 'container-1', requestId: 'request-2' });
         await vi.waitFor(() => expect(onConnect).toHaveBeenCalledOnce());
         expect(onConnect).toHaveBeenCalledWith('host-container-1');
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -697,8 +697,8 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        for (const containerId of ['running-1', 'stopped-1', 'failed-1', 'pending-1']) {
-            view.fireMessage({ command: 'connect', containerId });
+        for (const serviceId of ['running-1', 'stopped-1', 'failed-1', 'pending-1']) {
+            view.fireMessage({ command: 'connect', serviceId });
             await flushMessages();
         }
 
@@ -718,7 +718,7 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'restart', containerId: 'failed-1' });
+        view.fireMessage({ command: 'restart', serviceId: 'failed-1' });
         await flushMessages();
 
         expect(publicApi.restartContainer).not.toHaveBeenCalled();
@@ -750,11 +750,11 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'restart', containerId: 'running-1' });
+        view.fireMessage({ command: 'restart', serviceId: 'running-1' });
         await vi.waitFor(() => expect(publicApi.restartContainer).toHaveBeenCalledOnce());
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="false" disabled>/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="running-1" data-connectable="false" disabled>/);
 
-        view.fireMessage({ command: 'connect', containerId: 'running-1' });
+        view.fireMessage({ command: 'connect', serviceId: 'running-1' });
         await flushMessages();
 
         expect(onConnect).not.toHaveBeenCalled();
@@ -765,7 +765,7 @@ describe('SidebarViewProvider', () => {
 
         releaseRestart?.();
         await flushMessages();
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="running-1" data-connectable="true">/);
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="running-1" data-connectable="true">/);
     });
 
     it('allows refresh while the remote restart request is still pending', async () => {
@@ -785,7 +785,7 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'restart', containerId: 'refreshable-1', requestId: 'restart-refresh-1' });
+        view.fireMessage({ command: 'restart', serviceId: 'refreshable-1', requestId: 'restart-refresh-1' });
         await vi.waitFor(() => expect(publicApi.restartContainer).toHaveBeenCalledOnce());
         view.fireMessage({ command: 'refresh', requestId: 'refresh-during-restart-1' });
         await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
@@ -820,10 +820,10 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'restart', containerId: 'restart-1', requestId: 'restart-1' });
+        view.fireMessage({ command: 'restart', serviceId: 'restart-1', requestId: 'restart-1' });
         await vi.waitFor(() => expect(publicApi.restartContainer).toHaveBeenCalledOnce());
-        expect(view.webview.html).toMatch(/data-action="connect" data-container-id="connect-2" data-connectable="true">/);
-        view.fireMessage({ command: 'connect', containerId: 'connect-2', requestId: '1' });
+        expect(view.webview.html).toMatch(/data-action="connect" data-service-id="connect-2" data-connectable="true">/);
+        view.fireMessage({ command: 'connect', serviceId: 'connect-2', requestId: '1' });
         await vi.waitFor(() => expect(onConnect).toHaveBeenCalledOnce());
 
         expect(onConnect).toHaveBeenCalledWith('host-connect-2');
@@ -844,7 +844,7 @@ describe('SidebarViewProvider', () => {
         });
 
         await provider.resolveWebviewView(view as never);
-        view.fireMessage({ command: 'connect', containerId: 'cancelled-1', requestId: 'cancelled-1' });
+        view.fireMessage({ command: 'connect', serviceId: 'cancelled-1', requestId: 'cancelled-1' });
         await flushMessages();
 
         expect(onConnect).toHaveBeenCalledOnce();
@@ -875,7 +875,7 @@ describe('SidebarViewProvider', () => {
         });
 
         await provider.resolveWebviewView(view as never);
-        view.fireMessage({ command: 'restart', containerId: 'restarting-1', requestId: 'restart-1' });
+        view.fireMessage({ command: 'restart', serviceId: 'restarting-1', requestId: 'restart-1' });
         await flushMessages();
 
         expect(reconcileContainerOperation).toHaveBeenCalledOnce();
@@ -909,7 +909,7 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'delete', containerId: 'container-1' });
+        view.fireMessage({ command: 'delete', serviceId: 'container-1' });
         await flushMessages();
 
         expect(publicApi.deleteContainer).toHaveBeenCalledWith('container-1');
@@ -960,7 +960,7 @@ describe('SidebarViewProvider', () => {
         const provider = createProvider({ state, view });
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'openNovnc', containerId: 'autotest-1' });
+        view.fireMessage({ command: 'openNovnc', serviceId: 'autotest-1' });
         await flushMessages();
 
         expect(vscode.Uri.parse).toHaveBeenCalledWith(novncUrl);
@@ -979,7 +979,7 @@ describe('SidebarViewProvider', () => {
         const provider = createProvider({ state, view });
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'openNovnc', containerId: 'autotest-1', requestId: 'novnc-1' });
+        view.fireMessage({ command: 'openNovnc', serviceId: 'autotest-1', requestId: 'novnc-1' });
         await flushMessages();
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('无法打开沙箱访问链接', { modal: true });
@@ -1076,7 +1076,7 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        view.fireMessage({ command: 'removeHistory', containerId: 'history-1' });
+        view.fireMessage({ command: 'removeHistory', serviceId: 'history-1' });
         await flushMessages();
 
         expect(config.removeContainer).toHaveBeenCalledWith(expect.anything(), 'history-1');
@@ -1129,7 +1129,7 @@ describe('SidebarViewProvider', () => {
         await provider.resolveWebviewView(view as never);
 
         expect(view.webview.html.match(/<div class="history-warning"/g)).toHaveLength(1);
-        expect(view.webview.html).toContain('data-container-id="deleted-in-cloud"');
+        expect(view.webview.html).toContain('data-service-id="deleted-in-cloud"');
     });
 
     it('creates a user container, validates its endpoint, and writes only user fields', async () => {
@@ -1138,11 +1138,11 @@ describe('SidebarViewProvider', () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
-            container_id: 'created-1',
+            container_id: 'physical-created-1',
             service_id: 'service-created-1',
             status: 'pending',
             endpoint: '10.0.0.5:2222',
-        }));
+        } as never));
         const values = ['https://gitee.com/alice/repo.git', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
@@ -1168,7 +1168,7 @@ describe('SidebarViewProvider', () => {
             ignoreFocusOut: true,
         }));
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
-            containerId: 'created-1',
+            serviceId: 'service-created-1',
             host: 'alice/repo',
             name: 'alice/repo',
             hostName: '10.0.0.5',
@@ -1191,7 +1191,6 @@ describe('SidebarViewProvider', () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
-            container_id: 'created-from-url',
             service_id: 'service-created-from-url',
             status: 'pending',
             endpoint: '10.0.0.7:2222',
@@ -1218,7 +1217,6 @@ describe('SidebarViewProvider', () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
-            container_id: 'created-without-gitee',
             service_id: 'service-created-without-gitee',
             status: 'pending',
             endpoint: '10.0.0.6:2222',
@@ -1235,7 +1233,7 @@ describe('SidebarViewProvider', () => {
             { initializationSignal: expect.any(AbortSignal) },
         );
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
-            containerId: 'created-without-gitee',
+            serviceId: 'service-created-without-gitee',
             host: DEFAULT_CONTAINER_HOST_NAME,
             name: DEFAULT_CONTAINER_HOST_NAME,
             hostName: '10.0.0.6',
@@ -1260,7 +1258,6 @@ describe('SidebarViewProvider', () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
-            container_id: 'created-2',
             service_id: 'service-created-2',
             status: 'pending',
             endpoint: 'example.com:22',
@@ -1274,7 +1271,7 @@ describe('SidebarViewProvider', () => {
         await provider.createContainerFromPrompt();
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            '服务 "created-2" 的 endpoint 无效，应为 IP:Port 格式：example.com:22',
+            '服务 "service-created-2" 的 endpoint 无效，应为 IP:Port 格式：example.com:22',
             { modal: true },
         );
         expect(config.read).not.toHaveBeenCalled();
@@ -1300,11 +1297,11 @@ describe('SidebarViewProvider', () => {
     it('waits for public 码云 initialization before validating a null endpoint', async () => {
         const userApi = createUserApi(false);
         userApi.createContainer = vi.fn(async () => ({
-            container_id: 'created-after-git',
+            container_id: 'physical-created-after-git',
             service_id: 'service-created-after-git',
             status: 'pending',
             endpoint: null,
-        }));
+        } as never));
         let resolveInitialization: (() => void) | undefined;
         const initialization = new Promise<void>(resolve => {
             resolveInitialization = resolve;
@@ -1333,7 +1330,7 @@ describe('SidebarViewProvider', () => {
         await creating;
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            '服务 "created-after-git" 的 endpoint 无效，应为 IP:Port 格式：(空)',
+            '服务 "service-created-after-git" 的 endpoint 无效，应为 IP:Port 格式：(空)',
             { modal: true },
         );
         expect(config.upsertContainer).not.toHaveBeenCalled();
@@ -1363,7 +1360,6 @@ describe('SidebarViewProvider', () => {
         await vi.waitFor(() => expect(publicApi.createContainer).toHaveBeenCalledOnce());
         expect(runMutation).not.toHaveBeenCalled();
         resolveCreation?.({
-            container_id: 'created-after-wait',
             service_id: 'service-after-wait',
             status: 'pending',
             endpoint: '10.0.0.8:2222',
@@ -1377,7 +1373,6 @@ describe('SidebarViewProvider', () => {
     it('aborts public initialization when its sidebar view is disposed', async () => {
         const userApi = createUserApi(false);
         userApi.createContainer = vi.fn(async () => ({
-            container_id: 'created-before-dispose',
             service_id: 'service-before-dispose',
             status: 'pending',
             endpoint: '10.0.0.9:2222',
@@ -1415,11 +1410,11 @@ describe('SidebarViewProvider', () => {
     it('keeps public initialization alive while switching sidebars', async () => {
         const userApi = createUserApi(false);
         userApi.createContainer = vi.fn(async () => ({
-            container_id: 'created-during-sidebar-switch',
+            container_id: 'physical-during-sidebar-switch',
             service_id: 'service-during-sidebar-switch',
             status: 'pending',
             endpoint: '10.0.0.10:2222',
-        }));
+        } as never));
         let resolveInitialization: ((value: unknown) => void) | undefined;
         let initializationSignal: AbortSignal | undefined;
         const initialization = new Promise<unknown>(resolve => {
@@ -1457,7 +1452,7 @@ describe('SidebarViewProvider', () => {
         expect(initializationSignal?.aborted).toBe(false);
         resolveInitialization?.({
             container: {
-                container_id: 'created-during-sidebar-switch',
+                service_id: 'service-during-sidebar-switch',
                 status: 'running',
                 endpoint: '10.0.0.10:2222',
                 git_fin_status: 'initialized',
@@ -1499,12 +1494,12 @@ describe('Webview script', () => {
     it('connects when the service card itself is double-clicked', () => {
         const messages: unknown[] = [];
         const card = createScriptElement({
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const connectButton = createScriptElement({
             'data-action': 'connect',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const document = {
@@ -1512,7 +1507,7 @@ describe('Webview script', () => {
                 if (selector === '[data-action]') {
                     return [connectButton];
                 }
-                if (selector === '.container-card[data-container-id]') {
+                if (selector === '.container-card[data-service-id]') {
                     return [card];
                 }
                 if (selector === '[data-action="connect"]') {
@@ -1530,24 +1525,24 @@ describe('Webview script', () => {
 
         card.fire('dblclick', { target: card });
 
-        expect(messages).toEqual([{ command: 'connect', containerId: 'container-1', requestId: '1' }]);
+        expect(messages).toEqual([{ command: 'connect', serviceId: 'service-1', requestId: '1' }]);
         expect(connectButton.hasAttribute('disabled')).toBe(true);
         expect(connectButton.classList.contains('is-loading')).toBe(true);
     });
 
-    it('copies a card ID when the copy button is clicked without connecting the card', () => {
+    it('copies a service ID when its button is clicked without connecting the card', () => {
         const messages: unknown[] = [];
         const card = createScriptElement({
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const copyButton = createScriptElement({
-            'data-action': 'copyContainerId',
-            'data-container-id': 'container-1',
+            'data-action': 'copyServiceId',
+            'data-service-id': 'service-1',
         });
         const connectButton = createScriptElement({
             'data-action': 'connect',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const document = {
@@ -1555,7 +1550,7 @@ describe('Webview script', () => {
                 if (selector === '[data-action]') {
                     return [copyButton, connectButton];
                 }
-                if (selector === '.container-card[data-container-id]') {
+                if (selector === '.container-card[data-service-id]') {
                     return [card];
                 }
                 if (selector === '[data-action="connect"]') {
@@ -1574,7 +1569,7 @@ describe('Webview script', () => {
         copyButton.fire('click', { target: copyButton });
         card.fire('dblclick', { target: copyButton });
 
-        expect(messages).toEqual([{ command: 'copyContainerId', containerId: 'container-1', requestId: '1' }]);
+        expect(messages).toEqual([{ command: 'copyServiceId', serviceId: 'service-1', requestId: '1' }]);
         expect(copyButton.hasAttribute('disabled')).toBe(true);
         expect(connectButton.hasAttribute('disabled')).toBe(false);
     });
@@ -1606,7 +1601,7 @@ describe('Webview script', () => {
 
         refreshButton.fire('click', { target: refreshButton });
 
-        expect(messages).toEqual([{ command: 'refresh', containerId: null, requestId: '1' }]);
+        expect(messages).toEqual([{ command: 'refresh', requestId: '1' }]);
         expect(refreshButton.classList.contains('is-loading')).toBe(false);
         expect(refreshButton.hasAttribute('disabled')).toBe(false);
         expect(refreshButton.getAttribute('data-request-id')).toBeNull();
@@ -1616,24 +1611,24 @@ describe('Webview script', () => {
         const messages: unknown[] = [];
         let messageListener: ((event: { data: unknown }) => void) | undefined;
         const card = createScriptElement({
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const connectButton = createScriptElement({
             'data-action': 'connect',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const restartButton = createScriptElement({
             'data-action': 'restart',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
         }, '<svg>restart</svg>重启');
         const document = {
             querySelectorAll: (selector: string): ScriptElement[] => {
                 if (selector === '[data-action]') {
                     return [connectButton, restartButton];
                 }
-                if (selector === '.container-card[data-container-id]') {
+                if (selector === '.container-card[data-service-id]') {
                     return [card];
                 }
                 if (selector === '[data-action="connect"]') {
@@ -1663,36 +1658,36 @@ describe('Webview script', () => {
             data: {
                 command: 'operationComplete',
                 action: 'restart',
-                containerId: 'container-1',
+                serviceId: 'service-1',
                 requestId: 'old-request',
             },
         });
 
         expect(connectButton.hasAttribute('disabled')).toBe(true);
-        expect(messages).toEqual([{ command: 'restart', containerId: 'container-1', requestId: '1' }]);
+        expect(messages).toEqual([{ command: 'restart', serviceId: 'service-1', requestId: '1' }]);
     });
 
     it('does not connect when a card child action is double-clicked', () => {
         const messages: unknown[] = [];
         const card = createScriptElement({
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const connectButton = createScriptElement({
             'data-action': 'connect',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
             'data-connectable': 'true',
         });
         const openButton = createScriptElement({
             'data-action': 'openNovnc',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
         });
         const document = {
             querySelectorAll: (selector: string): ScriptElement[] => {
                 if (selector === '[data-action]') {
                     return [connectButton, openButton];
                 }
-                if (selector === '.container-card[data-container-id]') {
+                if (selector === '.container-card[data-service-id]') {
                     return [card];
                 }
                 if (selector === '[data-action="connect"]') {
@@ -1719,11 +1714,11 @@ describe('Webview script', () => {
         const messages: unknown[] = [];
         const restartButton = createScriptElement({
             'data-action': 'restart',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
         }, '<svg>restart</svg>重启');
         const deleteButton = createScriptElement({
             'data-action': 'delete',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
         }, '<svg>delete</svg>销毁');
         const document = {
             querySelectorAll: (selector: string): ScriptElement[] => selector === '[data-action]'
@@ -1749,7 +1744,7 @@ describe('Webview script', () => {
 
         restartButton.fire('click', { target: restartButton });
 
-        expect(messages).toEqual([{ command: 'restart', containerId: 'container-1', requestId: '1' }]);
+        expect(messages).toEqual([{ command: 'restart', serviceId: 'service-1', requestId: '1' }]);
         expect(restartButton.classList.contains('is-loading')).toBe(true);
 
         deleteButton.fire('click', { target: deleteButton });
@@ -1764,8 +1759,8 @@ describe('Webview script', () => {
         deleteButton.fire('click', { target: deleteButton });
 
         expect(messages).toEqual([
-            { command: 'restart', containerId: 'container-1', requestId: '1' },
-            { command: 'delete', containerId: 'container-1', requestId: '2' },
+            { command: 'restart', serviceId: 'service-1', requestId: '1' },
+            { command: 'delete', serviceId: 'service-1', requestId: '2' },
         ]);
     });
 
@@ -1794,14 +1789,14 @@ describe('Webview script', () => {
 
         const firstButton = createScriptElement({
             'data-action': 'restart',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
         }, '<svg>restart</svg>重启');
         run(firstButton);
         firstButton.fire('click', { target: firstButton });
 
         const rebuiltButton = createScriptElement({
             'data-action': 'restart',
-            'data-container-id': 'container-1',
+            'data-service-id': 'service-1',
         }, '<svg>restart</svg>重启');
         run(rebuiltButton);
         expect(rebuiltButton.innerHTML).toBe('确认?');
@@ -1809,12 +1804,12 @@ describe('Webview script', () => {
 
         rebuiltButton.fire('click', { target: rebuiltButton });
 
-        expect(messages).toEqual([{ command: 'restart', containerId: 'container-1', requestId: '1' }]);
+        expect(messages).toEqual([{ command: 'restart', serviceId: 'service-1', requestId: '1' }]);
     });
 });
 
 function syncedContainer(
-    containerId: string,
+    serviceId: string,
     status: string,
     remote: boolean,
     expiresAt?: string,
@@ -1823,8 +1818,8 @@ function syncedContainer(
     extras: Partial<SyncedContainer> = {},
 ): SyncedContainer {
     return {
-        containerId,
-        host: `host-${containerId}`,
+        serviceId,
+        host: `host-${serviceId}`,
         hostName: '10.0.0.1',
         status,
         remote,
@@ -1906,8 +1901,8 @@ interface ProviderTestOptions {
         refreshAfterMutation?: () => Promise<ContainerSyncResult>;
         runMutation?: <T>(operation: () => Promise<T>) => Promise<T>;
         reconcileContainerOperation?: (operation: import('../src/containerOperations').ContainerOperationState) => Promise<boolean>;
-        markContainerDeleted?: (containerId: string) => void;
-        clearContainerDeleted?: (containerId: string) => void;
+        markContainerDeleted?: (serviceId: string) => void;
+        clearContainerDeleted?: (serviceId: string) => void;
     };
     config: ContainerConfig;
     publicApi: PublicUserContainerApi;
@@ -1928,11 +1923,15 @@ interface ProviderTestOptions {
 
 function createUserApi(admin: boolean): UserRestApi {
     return {
-        createContainer: vi.fn(async () => ({ container_id: 'container-1', service_id: 'service-1', status: 'pending' })),
-        getContainerIds: vi.fn(async () => ({ container_ids: [] })),
+        createContainer: vi.fn(async () => ({
+            container_id: 'physical-service-1',
+            service_id: 'service-1',
+            status: 'pending',
+        } as never)),
+        getServiceIds: vi.fn(async () => ({ service_ids: [] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => ({
-            container_id: 'container-1',
+            service_id: 'service-1',
             status: 'running',
             gitee_user: '',
             gitee_repository: '',
@@ -1947,9 +1946,9 @@ function createUserApi(admin: boolean): UserRestApi {
 
 function createPublicApi(userApi?: UserRestApi): PublicUserContainerApi {
     return {
-        createContainer: vi.fn(async () => ({ container_id: 'container-1', service_id: 'service-1', status: 'pending' })),
+        createContainer: vi.fn(async () => ({ service_id: 'service-1', status: 'pending' })),
         getContainer: vi.fn(async () => ({
-            container_id: 'container-1',
+            service_id: 'service-1',
             status: 'running',
             gitee_user: '',
             gitee_repository: '',
@@ -1957,7 +1956,7 @@ function createPublicApi(userApi?: UserRestApi): PublicUserContainerApi {
         checkAdmin: vi.fn(async () => userApi
             ? userApi.checkAdmin({ user_id: 'user-1' })
             : ({ admin: false, limit: 'user' as const })),
-        getActiveContainerIds: vi.fn(async () => ({ container_ids: [] })),
+        getActiveServiceIds: vi.fn(async () => ({ service_ids: [] })),
         syncFiles: vi.fn(async () => ({
             direction: 'upload' as const,
             copied: 0,
@@ -1985,12 +1984,12 @@ function createConfig(entries: ContainerConfigEntry[] = []): ContainerConfig {
 }
 
 function configuredContainer(
-    containerId: string,
-    host = `host-${containerId}`,
+    serviceId: string,
+    host = `host-${serviceId}`,
     hostName = '127.0.0.1',
     port = 22,
 ): ContainerConfigEntry {
-    return { containerId, host, hostName, port };
+    return { serviceId, host, hostName, port };
 }
 
 function settings(backendApiUrl: string) {

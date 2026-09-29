@@ -91,7 +91,7 @@ describe('extension activation API', () => {
             'checkAdmin',
             'createContainer',
             'deleteContainer',
-            'getActiveContainerIds',
+            'getActiveServiceIds',
             'getContainer',
             'restartContainer',
             'startContainer',

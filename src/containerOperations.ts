@@ -13,7 +13,7 @@ export type ContainerOperationSource = 'admin' | 'sidebar';
 export type ContainerOperationOutcome = 'succeeded' | 'failed';
 
 export interface ContainerOperationState {
-    containerId: string;
+    serviceId: string;
     action: ContainerOperationAction;
     phase: ContainerOperationPhase;
     source: ContainerOperationSource;
@@ -34,17 +34,17 @@ export class ContainerOperationRegistry {
     private nextOperationId = 0;
 
     public begin(
-        containerId: string,
+        serviceId: string,
         action: ContainerOperationAction,
         source: ContainerOperationSource,
     ): ContainerOperationState | undefined {
-        const normalizedId = containerId.trim();
+        const normalizedId = serviceId.trim();
         if (!normalizedId || this.operations.has(normalizedId)) {
             return undefined;
         }
 
         const operation: ContainerOperationState = {
-            containerId: normalizedId,
+            serviceId: normalizedId,
             action,
             phase: 'processing',
             source,
@@ -55,8 +55,8 @@ export class ContainerOperationRegistry {
         return cloneOperation(operation);
     }
 
-    public setPhase(containerId: string, phase: ContainerOperationPhase, operationId?: number): ContainerOperationState | undefined {
-        const current = this.operations.get(containerId);
+    public setPhase(serviceId: string, phase: ContainerOperationPhase, operationId?: number): ContainerOperationState | undefined {
+        const current = this.operations.get(serviceId);
         if (!current || operationId !== undefined && current.operationId !== operationId) {
             return undefined;
         }
@@ -65,25 +65,25 @@ export class ContainerOperationRegistry {
         }
 
         const operation = { ...current, phase };
-        this.operations.set(containerId, operation);
+        this.operations.set(serviceId, operation);
         this.notify({ type: 'reconciling', operation });
         return cloneOperation(operation);
     }
 
-    public complete(containerId: string, outcome: ContainerOperationOutcome = 'succeeded', operationId?: number): ContainerOperationState | undefined {
-        const current = this.operations.get(containerId);
+    public complete(serviceId: string, outcome: ContainerOperationOutcome = 'succeeded', operationId?: number): ContainerOperationState | undefined {
+        const current = this.operations.get(serviceId);
         if (!current || operationId !== undefined && current.operationId !== operationId) {
             return undefined;
         }
 
-        this.operations.delete(containerId);
+        this.operations.delete(serviceId);
         const operation = cloneOperation(current);
         this.notify({ type: 'completed', operation, outcome });
         return operation;
     }
 
-    public get(containerId: string): ContainerOperationState | undefined {
-        const operation = this.operations.get(containerId);
+    public get(serviceId: string): ContainerOperationState | undefined {
+        const operation = this.operations.get(serviceId);
         return operation ? cloneOperation(operation) : undefined;
     }
 
@@ -91,12 +91,12 @@ export class ContainerOperationRegistry {
         return Array.from(this.operations.values(), cloneOperation);
     }
 
-    public has(containerId: string): boolean {
-        return this.operations.has(containerId);
+    public has(serviceId: string): boolean {
+        return this.operations.has(serviceId);
     }
 
     public isCurrent(operation: ContainerOperationState): boolean {
-        return this.operations.get(operation.containerId)?.operationId === operation.operationId;
+        return this.operations.get(operation.serviceId)?.operationId === operation.operationId;
     }
 
     public subscribe(listener: ContainerOperationListener): { dispose: () => void } {

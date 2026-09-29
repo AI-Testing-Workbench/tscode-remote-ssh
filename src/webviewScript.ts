@@ -11,7 +11,7 @@ const readViewState = () => {
         return {};
     }
 };
-const getConfirmationKey = actionButton => String(actionButton.getAttribute('data-action')) + ':' + (actionButton.getAttribute('data-container-id') || '');
+const getConfirmationKey = actionButton => String(actionButton.getAttribute('data-action')) + ':' + (actionButton.getAttribute('data-service-id') || '');
 const readConfirmations = () => {
     const state = readViewState();
     return state.sidebarConfirmations && typeof state.sidebarConfirmations === 'object'
@@ -54,16 +54,16 @@ const clearActionState = actionButton => {
     actionButton.removeAttribute('aria-busy');
     actionButton.removeAttribute('data-request-id');
 };
-const post = (command, containerId, actionButton) => {
+const post = (command, serviceId, actionButton) => {
     if (!command) return;
     const requestId = String(++nextRequestId);
     if (actionButton) actionButton.setAttribute('data-request-id', requestId);
     const fail = () => {
         clearActionState(actionButton);
-        if (blocksConnection(command)) updateConnectionButtons(containerId, false);
+        if (blocksConnection(command)) updateConnectionButtons(serviceId, false);
     };
     try {
-        const posted = vscode.postMessage({ command, containerId, requestId });
+        const posted = vscode.postMessage({ command, ...(serviceId ? { serviceId } : {}), requestId });
         if (posted && typeof posted.then === 'function') {
             posted.then(result => {
                 if (result === false) fail();
@@ -101,10 +101,10 @@ const confirmDestructiveAction = actionButton => {
     actionButton.classList.add('is-confirming');
     return false;
 };
-const updateConnectionButtons = (containerId, locked) => {
-    if (!containerId) return;
+const updateConnectionButtons = (serviceId, locked) => {
+    if (!serviceId) return;
     document.querySelectorAll('[data-action="connect"]').forEach(connectButton => {
-        if (connectButton.getAttribute('data-container-id') !== containerId) return;
+        if (connectButton.getAttribute('data-service-id') !== serviceId) return;
         if (locked) {
             connectButton.setAttribute('disabled', '');
             connectButton.setAttribute('aria-busy', 'true');
@@ -125,12 +125,12 @@ document.querySelectorAll('[data-action]').forEach(actionButton => {
         const action = actionButton.getAttribute('data-action');
         if (requiresConfirmation(action) && !confirmDestructiveAction(actionButton)) return;
         if (!startLoading(actionButton)) return;
-        const containerId = actionButton.getAttribute('data-container-id');
-        if (blocksConnection(action)) updateConnectionButtons(containerId, true);
-        post(action, containerId, actionButton);
+        const serviceId = actionButton.getAttribute('data-service-id');
+        if (blocksConnection(action)) updateConnectionButtons(serviceId, true);
+        post(action, serviceId, actionButton);
     });
 });
-document.querySelectorAll('.container-card[data-container-id]').forEach(containerCard => {
+document.querySelectorAll('.container-card[data-service-id]').forEach(containerCard => {
     containerCard.addEventListener('dblclick', event => {
         let target = event && event.target;
         while (target && target !== containerCard) {
@@ -138,11 +138,11 @@ document.querySelectorAll('.container-card[data-container-id]').forEach(containe
             target = target.parentElement;
         }
         if (containerCard.getAttribute('data-connectable') !== 'true') return;
-        const containerId = containerCard.getAttribute('data-container-id');
+        const serviceId = containerCard.getAttribute('data-service-id');
         const connectButton = Array.from(document.querySelectorAll('[data-action="connect"]'))
-            .find(button => button.getAttribute('data-container-id') === containerId);
+            .find(button => button.getAttribute('data-service-id') === serviceId);
         if (!connectButton || !startLoading(connectButton)) return;
-        post('connect', containerId, connectButton);
+        post('connect', serviceId, connectButton);
     });
 });
 window.addEventListener('message', event => {
@@ -153,10 +153,10 @@ window.addEventListener('message', event => {
         document.querySelectorAll('[data-action]').forEach(actionButton => {
             if (!actionButton.classList.contains('is-loading')) return;
             if (actionButton.getAttribute('data-action') !== message.action) return;
-            if (typeof message.containerId === 'string' && actionButton.getAttribute('data-container-id') !== message.containerId) return;
+            if (typeof message.serviceId === 'string' && actionButton.getAttribute('data-service-id') !== message.serviceId) return;
             if (typeof message.requestId === 'string' && actionButton.getAttribute('data-request-id') !== message.requestId) return;
-            if (blocksConnection(message.action) && typeof message.containerId === 'string') {
-                updateConnectionButtons(message.containerId, false);
+            if (blocksConnection(message.action) && typeof message.serviceId === 'string') {
+                updateConnectionButtons(message.serviceId, false);
             }
             actionButton.classList.remove('is-loading');
             actionButton.removeAttribute('disabled');

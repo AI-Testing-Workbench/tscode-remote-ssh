@@ -85,7 +85,7 @@ function renderTabContent(state: AdminPanelState): string {
         case 'images':
             return renderImagesTab(state.images, state.defaultImages, state.selectedImageFilename, state.search, state.containers);
         case 'containers':
-            return renderContainersTab(state.containers, state.images, state.defaultImages, state.search, state.processingContainerIds);
+            return renderContainersTab(state.containers, state.images, state.defaultImages, state.search, state.processingServiceIds);
         case 'volume':
             return renderVolumeTab(state.volume);
         case 'whitelist':
@@ -294,10 +294,10 @@ function renderContainersTab(
     images: ImageListItem[],
     defaultImages: AdminDefaultImage[],
     search = '',
-    processingContainerIds: string[] = [],
+    processingServiceIds: string[] = [],
 ): string {
-    const processing = new Set(processingContainerIds);
-    const rows = containers.map(container => renderContainerRow(container, processing.has(container.container_id))).join('');
+    const processing = new Set(processingServiceIds);
+    const rows = containers.map(container => renderContainerRow(container, processing.has(container.service_id))).join('');
     const empty = containers.length ? '' : '<p class="empty-message" data-empty-data>暂无容器数据</p>';
     const emptySearch = containers.length ? '<p class="empty-message" data-empty-search hidden>没有匹配的容器</p>' : '';
     return `<section class="tab-panel" data-tab-panel data-patch-key="tab-containers" aria-labelledby="containers-tab">
@@ -457,7 +457,7 @@ function renderListControls(kind: 'images' | 'containers' | 'users', stateKey: s
     const options: Array<[string, string]> = kind === 'images'
         ? [['name', '名称'], ['status', '状态'], ['size', '大小'], ['created', '创建时间']]
         : kind === 'containers'
-            ? [['container_id', '容器 ID'], ['user_id', '用户 ID'], ['status', '状态'], ['created_at', '创建时间']]
+            ? [['service_id', '服务 ID'], ['user_id', '用户 ID'], ['status', '状态'], ['created_at', '创建时间']]
             : [['user_id', '用户 ID']];
     const statusOptions = kind === 'images'
         ? [['not_pushed', '未推送'], ['pushed', '已推送'], ['default', '默认镜像']]
@@ -499,7 +499,7 @@ function renderContainerRow(container: AdminContainerResponse, processing: boole
         ? `<span class="tag container-type-badge" data-container-type="${escapeAttribute(container.type)}">${escapeHtml(containerTypeLabel(container.type))}</span>`
         : '';
     const searchText = [
-        container.container_id,
+        container.service_id,
         container.user_id,
         container.image,
         status,
@@ -511,10 +511,10 @@ function renderContainerRow(container: AdminContainerResponse, processing: boole
         container.gitee_branch ?? '',
         container.gitee_url,
     ].join(' ');
-    return `<article class="${rowClasses}" data-patch-key="container:${escapeAttribute(container.container_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-filter-type="${escapeAttribute(container.type ?? '')}" data-sort-container_id="${escapeAttribute(container.container_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
+    return `<article class="${rowClasses}" data-patch-key="service:${escapeAttribute(container.service_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-filter-type="${escapeAttribute(container.type ?? '')}" data-sort-service_id="${escapeAttribute(container.service_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
         <div class="container-card-heading">
-            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.container_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted, container.git_fin_status))}</span>${typeBadge}</div><span>镜像: ${escapeHtml(container.image)}</span></div></div>
-            <div class="container-heading-actions"><button class="small-button log-button" type="button" data-action="getContainerLog" data-container-id="${escapeAttribute(container.container_id)}">日志</button><button class="small-button connect-button" type="button" data-action="connectContainer" data-container-id="${escapeAttribute(container.container_id)}"${connectDisabled ? ' disabled' : ''}>连接</button></div>
+            <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.service_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted, container.git_fin_status))}</span>${typeBadge}</div><span>镜像: ${escapeHtml(container.image)}</span><span class="physical-container-id">容器 ID: ${escapeHtml(container.container_id)}</span></div></div>
+            <div class="container-heading-actions"><button class="small-button log-button" type="button" data-action="getContainerLog" data-service-id="${escapeAttribute(container.service_id)}">日志</button><button class="small-button connect-button" type="button" data-action="connectContainer" data-service-id="${escapeAttribute(container.service_id)}"${connectDisabled ? ' disabled' : ''}>连接</button></div>
         </div>
         <div class="container-details">
             <div class="container-info-row">
@@ -536,8 +536,8 @@ function renderContainerRow(container: AdminContainerResponse, processing: boole
         </div>
         <div class="container-actions">
             ${deleted
-                ? `<div class="container-operation-row"><button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="permanent-delete">永久删除</button></div><div class="container-expiration-row"><input class="inline-number" data-field="expirationHours" data-persist-key="container.${escapeAttribute(container.container_id)}.expirationHours" type="number" min="0" step="1" placeholder="有效期 (小时)"><button class="small-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="restore">立即恢复</button></div>`
-                : `<div class="container-operation-row">${containerActionButton(container, 'start', '启动')}${containerActionButton(container, 'stop', '停止')}${containerActionButton(container, 'restart', '重启')}<button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="delete">业务删除</button><button class="small-button danger-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="permanent-delete">永久删除</button></div><div class="container-expiration-row"><input class="inline-number" data-field="expirationHours" data-persist-key="container.${escapeAttribute(container.container_id)}.expirationHours" type="number" min="0" step="1" placeholder="有效期 (小时)"${transitioning ? ' disabled' : ''}><button class="small-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="expiration"${transitioning ? ' disabled' : ''}>设置有效期</button></div>`}
+                ? `<div class="container-operation-row"><button class="small-button danger-button" type="button" data-action="containerAction" data-service-id="${escapeAttribute(container.service_id)}" data-container-action="permanent-delete">永久删除</button></div><div class="container-expiration-row"><input class="inline-number" data-field="expirationHours" data-persist-key="service.${escapeAttribute(container.service_id)}.expirationHours" type="number" min="0" step="1" placeholder="有效期 (小时)"><button class="small-button" type="button" data-action="containerAction" data-service-id="${escapeAttribute(container.service_id)}" data-container-action="restore">立即恢复</button></div>`
+                : `<div class="container-operation-row">${containerActionButton(container, 'start', '启动')}${containerActionButton(container, 'stop', '停止')}${containerActionButton(container, 'restart', '重启')}<button class="small-button danger-button" type="button" data-action="containerAction" data-service-id="${escapeAttribute(container.service_id)}" data-container-action="delete">业务删除</button><button class="small-button danger-button" type="button" data-action="containerAction" data-service-id="${escapeAttribute(container.service_id)}" data-container-action="permanent-delete">永久删除</button></div><div class="container-expiration-row"><input class="inline-number" data-field="expirationHours" data-persist-key="service.${escapeAttribute(container.service_id)}.expirationHours" type="number" min="0" step="1" placeholder="有效期 (小时)"${transitioning ? ' disabled' : ''}><button class="small-button" type="button" data-action="containerAction" data-service-id="${escapeAttribute(container.service_id)}" data-container-action="expiration"${transitioning ? ' disabled' : ''}>设置有效期</button></div>`}
         </div>
     </article>`;
 }
@@ -551,7 +551,7 @@ function renderLogModal(): string {
         <section class="log-dialog" role="dialog" aria-modal="true" aria-labelledby="container-log-title">
             <header class="log-dialog-header">
                 <div><span class="log-dialog-label">容器日志</span><strong id="container-log-title" data-log-title>未选择容器</strong></div>
-                <div class="log-dialog-actions"><button class="small-button" type="button" data-action="getContainerLog" data-container-id="" data-log-refresh>刷新</button><button class="small-button" type="button" data-action="closeContainerLog">关闭</button></div>
+                <div class="log-dialog-actions"><button class="small-button" type="button" data-action="getContainerLog" data-service-id="" data-log-refresh>刷新</button><button class="small-button" type="button" data-action="closeContainerLog">关闭</button></div>
             </header>
             <pre class="log-content" data-log-content>正在加载日志...</pre>
         </section>
@@ -564,7 +564,7 @@ function containerActionButton(container: AdminContainerResponse, action: string
         || action === 'start' && (status === 'running' || status === 'pending')
         || action === 'stop' && (status === 'stopped' || status === 'failed')
         || action === 'restart' && status === 'failed';
-    return `<button class="small-button" type="button" data-action="containerAction" data-container-id="${escapeAttribute(container.container_id)}" data-container-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
+    return `<button class="small-button" type="button" data-action="containerAction" data-service-id="${escapeAttribute(container.service_id)}" data-container-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
 }
 
 function renderUsersTab(kind: 'whitelist' | 'admin', title: string, users: string[], search = ''): string {

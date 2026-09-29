@@ -5,9 +5,11 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SSHConfig from 'ssh-config';
 import type { SFTPWrapper } from 'ssh2';
-import { FileSyncError, FileSyncService, parseSyncPath } from '../src/api/fileSync';
+import { FileSyncError, FileSyncService, getRemoteServiceId, parseSyncPath } from '../src/api/fileSync';
 
 const temporaryDirectories: string[] = [];
+const SERVICE_ID = 'service+opaque-7f2a';
+const PHYSICAL_CONTAINER_ID = 'container-physical-94bd';
 
 afterEach(async () => {
     while (temporaryDirectories.length) {
@@ -19,18 +21,25 @@ afterEach(async () => {
 });
 
 describe('FileSyncService', () => {
-    it('distinguishes Windows drives, UNC paths, Unix paths, and container paths', () => {
+    it('distinguishes local paths and opaque service ID paths', () => {
         expect(parseSyncPath('C:\\workspace\\file.txt')).toMatchObject({ kind: 'local' });
         expect(parseSyncPath('\\\\server\\share\\file.txt')).toMatchObject({ kind: 'local' });
         expect(parseSyncPath('/workspace/file.txt')).toMatchObject({ kind: 'local' });
-        expect(parseSyncPath('container-1:/workspace/file.txt')).toEqual({
+        expect(parseSyncPath(`${SERVICE_ID}:/workspace/file.txt`)).toEqual({
             kind: 'remote',
-            containerId: 'container-1',
+            serviceId: SERVICE_ID,
             path: '/workspace/file.txt',
         });
+        expect(parseSyncPath('tenant/opaque+service:/workspace/file.txt')).toEqual({
+            kind: 'remote',
+            serviceId: 'tenant/opaque+service',
+            path: '/workspace/file.txt',
+        });
+        expect(getRemoteServiceId('/workspace/file.txt', `${SERVICE_ID}:/workspace/file.txt`)).toBe(SERVICE_ID);
         expect(() => parseSyncPath('workspace/file.txt')).toThrowError(FileSyncError);
-        expect(() => parseSyncPath('container-1:relative/file.txt')).toThrowError(FileSyncError);
-        expect(() => parseSyncPath('container-1:/workspace/../secret')).toThrowError(FileSyncError);
+        expect(() => parseSyncPath(':/workspace/file.txt')).toThrowError('服务 ID 不能为空');
+        expect(() => parseSyncPath(`${SERVICE_ID}:relative/file.txt`)).toThrowError(FileSyncError);
+        expect(() => parseSyncPath(`${SERVICE_ID}:/workspace/../secret`)).toThrowError(FileSyncError);
     });
 
     it('uploads and downloads files through streaming SFTP with overwrite results', async () => {
@@ -39,9 +48,9 @@ describe('FileSyncService', () => {
         const downloaded = path.join(directory, 'downloaded.txt');
         await fs.writeFile(source, 'upload content', 'utf8');
         const remote = new MemorySftp();
-        const service = createService(remote);
+        const { service, configList, getContainerStatus, sftpProvider } = createService(remote);
 
-        const upload = await service.syncFiles(source, 'container-1:/workspace/file.txt');
+        const upload = await service.syncFiles(source, `${SERVICE_ID}:/workspace/file.txt`);
         expect(remote.readFile('/workspace/file.txt')).toBe('upload content');
         expect(upload).toMatchObject({
             direction: 'upload',
@@ -52,7 +61,7 @@ describe('FileSyncService', () => {
             complete: true,
         });
 
-        const download = await service.syncFiles('container-1:/workspace/file.txt', downloaded);
+        const download = await service.syncFiles(`${SERVICE_ID}:/workspace/file.txt`, downloaded);
         expect(await fs.readFile(downloaded, 'utf8')).toBe('upload content');
         expect(download).toMatchObject({
             direction: 'download',
@@ -63,6 +72,11 @@ describe('FileSyncService', () => {
             complete: true,
         });
         expect(remote.end).toHaveBeenCalledTimes(2);
+        expect(configList).toHaveBeenCalledTimes(2);
+        expect(getContainerStatus).toHaveBeenNthCalledWith(1, SERVICE_ID);
+        expect(getContainerStatus).toHaveBeenNthCalledWith(2, SERVICE_ID);
+        expect(getContainerStatus).not.toHaveBeenCalledWith(PHYSICAL_CONTAINER_ID);
+        expect(sftpProvider).toHaveBeenCalledWith(expect.objectContaining({ serviceId: SERVICE_ID }));
     });
 
     it('recursively syncs directories, supports empty directories, and mirrors extras', async () => {
@@ -73,9 +87,9 @@ describe('FileSyncService', () => {
         const remote = new MemorySftp();
         remote.mkdirPath('/target');
         remote.setFile('/target/stale.txt', 'stale');
-        const service = createService(remote);
+        const { service } = createService(remote);
 
-        const result = await service.syncFiles(localRoot, 'container-1:/target', 'overwrite', true);
+        const result = await service.syncFiles(localRoot, `${SERVICE_ID}:/target`, 'overwrite', true);
 
         expect(remote.readFile('/target/file.txt')).toBe('new');
         expect(remote.has('/target/empty')).toBe(true);
@@ -90,9 +104,9 @@ describe('FileSyncService', () => {
         const remote = new MemorySftp();
         remote.mkdirPath('/workspace');
         remote.setFile('/workspace/file.txt', 'old content');
-        const service = createService(remote);
+        const { service } = createService(remote);
 
-        const result = await service.syncFiles(source, 'container-1:/workspace/file.txt', 'skip');
+        const result = await service.syncFiles(source, `${SERVICE_ID}:/workspace/file.txt`, 'skip');
 
         expect(remote.readFile('/workspace/file.txt')).toBe('old content');
         expect(result).toMatchObject({ skipped: 1, complete: false, copied: 0 });
@@ -101,13 +115,17 @@ describe('FileSyncService', () => {
     it('rejects same-endpoint paths, stopped containers, and unsupported symlinks', async () => {
         const directory = await createTemporaryDirectory();
         const remote = new MemorySftp();
-        const service = createService(remote, 'stopped');
+        const { service } = createService(remote, 'stopped');
 
         await expect(service.syncFiles(path.join(directory, 'one'), path.join(directory, 'two'))).rejects.toMatchObject({
             code: 'same_endpoint',
         });
-        await expect(service.syncFiles(path.join(directory, 'one'), 'container-1:/one')).rejects.toMatchObject({
-            code: 'container_not_running',
+        await expect(service.syncFiles(`${SERVICE_ID}:/one`, `${SERVICE_ID}:/two`)).rejects.toMatchObject({
+            code: 'same_endpoint',
+        });
+        await expect(service.syncFiles(path.join(directory, 'one'), `${SERVICE_ID}:/one`)).rejects.toMatchObject({
+            code: 'service_not_running',
+            message: expect.stringContaining(SERVICE_ID),
         });
 
         const source = path.join(directory, 'link');
@@ -121,7 +139,7 @@ describe('FileSyncService', () => {
             }
             throw error;
         }
-        await expect(createService(remote).syncFiles(source, 'container-1:/link')).rejects.toMatchObject({
+        await expect(createService(remote).service.syncFiles(source, `${SERVICE_ID}:/link`)).rejects.toMatchObject({
             code: 'unsupported_file_type',
         });
     });
@@ -131,9 +149,9 @@ describe('FileSyncService', () => {
         const source = path.join(directory, 'source.txt');
         await fs.writeFile(source, 'content', 'utf8');
         const remote = new FailingMemorySftp();
-        const service = createService(remote);
+        const { service } = createService(remote);
 
-        await expect(service.syncFiles(source, 'container-1:/workspace/file.txt')).rejects.toMatchObject({
+        await expect(service.syncFiles(source, `${SERVICE_ID}:/workspace/file.txt`)).rejects.toMatchObject({
             code: 'transfer_failed',
         });
         expect(remote.paths().some(item => item.includes('.testagent-sync-'))).toBe(false);
@@ -141,16 +159,20 @@ describe('FileSyncService', () => {
     });
 });
 
-function createService(remote: MemorySftp, status = 'running'): FileSyncService {
-    const config = SSHConfig.parse('Host container-alias\n\tContainerId container-1\n\tHostName 127.0.0.1\n\tPort 22\n');
-    return new FileSyncService({
+function createService(remote: MemorySftp, status = 'running') {
+    const config = SSHConfig.parse(`Host service-alias\n\tServiceId ${SERVICE_ID}\n\tHostName 127.0.0.1\n\tPort 22\n`);
+    const configList = vi.fn(() => [{ serviceId: SERVICE_ID, host: 'service-alias', hostName: '127.0.0.1', port: 22 }]);
+    const getContainerStatus = vi.fn(async () => ({ status }));
+    const sftpProvider = vi.fn(async () => ({ sftp: remote.asSftp() }));
+    const service = new FileSyncService({
         config: {
             read: vi.fn(async () => ({ config, originalText: '' })),
-            list: vi.fn(() => [{ containerId: 'container-1', host: 'container-alias', hostName: '127.0.0.1', port: 22 }]),
+            list: configList,
         },
-        getContainerStatus: vi.fn(async () => ({ status })),
-        sftpProvider: vi.fn(async () => ({ sftp: remote.asSftp() })),
+        getContainerStatus,
+        sftpProvider,
     });
+    return { service, configList, getContainerStatus, sftpProvider };
 }
 
 async function createTemporaryDirectory(): Promise<string> {

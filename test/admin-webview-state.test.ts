@@ -301,11 +301,11 @@ function createLogDocument(): {
 } {
     const document = new FakeDocument();
     const row = new FakeElement('article', { class: 'resource-row' });
-    const logButton = new FakeElement('button', { 'data-action': 'getContainerLog', 'data-container-id': 'container-1' });
+    const logButton = new FakeElement('button', { 'data-action': 'getContainerLog', 'data-service-id': 'service-1' });
     const modal = new FakeElement('div', { 'data-log-modal': '' });
     const title = new FakeElement('strong', { 'data-log-title': '' });
     const content = new FakeElement('pre', { 'data-log-content': '' });
-    const refreshButton = new FakeElement('button', { 'data-action': 'getContainerLog', 'data-container-id': '', 'data-log-refresh': '' });
+    const refreshButton = new FakeElement('button', { 'data-action': 'getContainerLog', 'data-service-id': '', 'data-log-refresh': '' });
     const closeButton = new FakeElement('button', { 'data-action': 'closeContainerLog' });
     modal.hidden = true;
     row.appendChild(logButton);
@@ -462,26 +462,30 @@ describe('Admin Webview state', () => {
         first.document.dispatch('click', first.logButton);
 
         expect(first.modal.hidden).toBe(false);
-        expect(first.title.textContent).toBe('container-1');
-        expect(firstRuntime.getState()).toMatchObject({ log: { open: true, containerId: 'container-1' } });
+        expect(first.title.textContent).toBe('service-1');
+        expect(firstRuntime.getState()).toMatchObject({ log: { open: true, serviceId: 'service-1' } });
+        expect(first.logButton.getAttribute('data-service-id')).toBe('service-1');
+        expect(firstRuntime.messages).toContainEqual(expect.objectContaining({ command: 'getContainerLog', serviceId: 'service-1' }));
 
-        firstRuntime.dispatchMessage({ command: 'containerLog', containerId: 'container-1', log: 'first log' });
+        firstRuntime.dispatchMessage({ command: 'containerLog', serviceId: 'container-1', log: 'physical ID must not match' });
+        expect(first.content.textContent).toBe('正在加载日志...');
+        firstRuntime.dispatchMessage({ command: 'containerLog', serviceId: 'service-1', log: 'first log' });
         expect(first.content.textContent).toBe('first log');
 
         const second = createLogDocument();
         const secondRuntime = runScript(second.document, firstRuntime.getState());
 
         expect(second.modal.hidden).toBe(false);
-        expect(second.title.textContent).toBe('container-1');
+        expect(second.title.textContent).toBe('service-1');
         expect(second.content.textContent).toBe('正在加载日志...');
-        expect(secondRuntime.messages).toContainEqual({ command: 'getContainerLog', containerId: 'container-1' });
+        expect(secondRuntime.messages).toContainEqual({ command: 'getContainerLog', serviceId: 'service-1' });
 
-        secondRuntime.dispatchMessage({ command: 'containerLog', containerId: 'container-1', log: 'latest log' });
+        secondRuntime.dispatchMessage({ command: 'containerLog', serviceId: 'service-1', log: 'latest log' });
         expect(second.content.textContent).toBe('latest log');
         second.document.dispatch('click', second.closeButton);
         expect(second.modal.hidden).toBe(true);
-        expect(secondRuntime.getState()).toMatchObject({ log: { open: false, containerId: 'container-1' } });
-        secondRuntime.dispatchMessage({ command: 'containerLog', containerId: 'container-1', log: 'stale log' });
+        expect(secondRuntime.getState()).toMatchObject({ log: { open: false, serviceId: 'service-1' } });
+        secondRuntime.dispatchMessage({ command: 'containerLog', serviceId: 'service-1', log: 'stale log' });
         expect(second.modal.hidden).toBe(true);
     });
 });

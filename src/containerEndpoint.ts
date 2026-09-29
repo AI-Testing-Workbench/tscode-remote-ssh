@@ -7,23 +7,23 @@ export interface ParsedContainerEndpoint {
 }
 
 export interface InvalidContainerEndpoint {
-    containerId: string;
+    serviceId: string;
     endpoint: string | null | undefined;
 }
 
 export class InvalidContainerEndpointError extends Error {
     constructor(
-        public readonly containerId: string,
+        public readonly serviceId: string,
         public readonly endpoint: string | null | undefined,
     ) {
-        super(`服务 "${containerId}" 的 endpoint 无效，必须是 IP:Port`);
+        super(`服务 "${serviceId}" 的 endpoint 无效，必须是 IP:Port`);
         this.name = 'InvalidContainerEndpointError';
     }
 }
 
 export class DebugEnvironmentPreparationCancelledError extends Error {
-    constructor(public readonly containerId: string) {
-        super(`已取消服务 "${containerId}" 的调试确认`);
+    constructor(public readonly serviceId: string) {
+        super(`已取消服务 "${serviceId}" 的调试确认`);
         this.name = 'DebugEnvironmentPreparationCancelledError';
     }
 }
@@ -38,26 +38,26 @@ export type DebugEnvironmentPrompt = (
 
 export function createDebugEnvironmentConfirmer(
     prompt: DebugEnvironmentPrompt,
-): (containerId: string) => Promise<void> {
+): (serviceId: string) => Promise<void> {
     const confirmations = new Map<string, Promise<void>>();
-    return containerId => {
-        const existingConfirmation = confirmations.get(containerId);
+    return serviceId => {
+        const existingConfirmation = confirmations.get(serviceId);
         if (existingConfirmation) {
             return existingConfirmation;
         }
 
-        const confirmation = confirmDebugEnvironment(prompt, containerId).catch(error => {
-            confirmations.delete(containerId);
+        const confirmation = confirmDebugEnvironment(prompt, serviceId).catch(error => {
+            confirmations.delete(serviceId);
             throw error;
         });
-        confirmations.set(containerId, confirmation);
+        confirmations.set(serviceId, confirmation);
         return confirmation;
     };
 }
 
 export async function confirmDebugEnvironment(
     prompt: DebugEnvironmentPrompt,
-    containerId: string,
+    serviceId: string,
 ): Promise<void> {
     const result = await prompt(
         `当前处于调试模式，\n请完成容器环境准备后继续。`,
@@ -65,7 +65,7 @@ export async function confirmDebugEnvironment(
         DEBUG_ENVIRONMENT_CONFIRMATION
     );
     if (result !== DEBUG_ENVIRONMENT_CONFIRMATION) {
-        throw new DebugEnvironmentPreparationCancelledError(containerId);
+        throw new DebugEnvironmentPreparationCancelledError(serviceId);
     }
 }
 

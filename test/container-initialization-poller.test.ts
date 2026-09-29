@@ -48,7 +48,6 @@ describe('ContainerInitializationPoller', () => {
         });
 
         await expect(poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
             endpoint: null,
@@ -61,7 +60,8 @@ describe('ContainerInitializationPoller', () => {
             'container',
         ]);
         expect(runGitClone).toHaveBeenCalledOnce();
-        expect(runGitClone).toHaveBeenCalledWith(expect.objectContaining({ container_id: 'container-1', endpoint: '127.0.0.1:2222' }), expect.any(AbortSignal));
+        expect(userApi.getContainer).toHaveBeenCalledWith('service-1');
+        expect(runGitClone).toHaveBeenCalledWith(expect.objectContaining({ service_id: 'service-1', endpoint: '127.0.0.1:2222' }), expect.any(AbortSignal));
         expect(gitApi.getGitState).toHaveBeenCalledWith('service-1', 'user-1');
         expect(gitApi.submitGitCredential).toHaveBeenCalledWith('service-1', 'user-1', credential);
     });
@@ -95,7 +95,6 @@ describe('ContainerInitializationPoller', () => {
         });
 
         await expect(poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
             endpoint: 'not-an-ip:invalid',
@@ -135,7 +134,6 @@ describe('ContainerInitializationPoller', () => {
 
         let completed = false;
         const initialization = poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
         }).then(result => {
@@ -170,12 +168,11 @@ describe('ContainerInitializationPoller', () => {
         });
 
         await expect(poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
         })).rejects.toMatchObject({
             code: 'git_clone_execution_failed',
-            message: '服务 "container-1" 的码云初始化脚本执行失败',
+            message: '服务 "service-1" 的码云初始化脚本执行失败',
         });
     });
 
@@ -200,7 +197,6 @@ describe('ContainerInitializationPoller', () => {
         });
 
         await expect(poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
         })).rejects.toMatchObject({ code: 'failed_git' });
@@ -226,7 +222,6 @@ describe('ContainerInitializationPoller', () => {
         });
 
         await expect(poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
         })).rejects.toMatchObject({ code: 'git_clone_execution_failed' });
@@ -258,7 +253,6 @@ describe('ContainerInitializationPoller', () => {
         });
 
         await expect(poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
             signal: controller.signal,
@@ -286,7 +280,7 @@ describe('ContainerInitializationPoller', () => {
             credentialPrompt: vi.fn(async () => undefined),
         });
 
-        await expect(poller.initialize({ containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' }))
+        await expect(poller.initialize({ serviceId: 'service-1', operatorUserId: 'user-1' }))
             .rejects.toMatchObject({ code: 'failed_user_cancelled' });
         expect(gitApi.reportUserCancelled).toHaveBeenCalledOnce();
         expect(gitApi.reportUserCancelled).toHaveBeenCalledWith('service-1', 'user-1');
@@ -326,7 +320,6 @@ describe('ContainerInitializationPoller', () => {
         });
 
         const initialization = poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
         });
@@ -359,7 +352,7 @@ describe('ContainerInitializationPoller', () => {
         const runGitClone = vi.fn(async () => undefined);
         const poller = new ContainerInitializationPoller({ userApi, gitApi, runGitClone, sleep });
 
-        await expect(poller.initialize({ containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' }))
+        await expect(poller.initialize({ serviceId: 'service-1', operatorUserId: 'user-1' }))
             .resolves.toMatchObject({ gitStatus: 'initialized' });
         expect(sleep).toHaveBeenCalledTimes(4);
         expect(runGitClone).toHaveBeenCalledOnce();
@@ -396,7 +389,6 @@ describe('ContainerInitializationPoller', () => {
             });
 
             await expect(poller.initialize({
-                containerId: `container-${statusCode}`,
                 serviceId: `service-${statusCode}`,
                 operatorUserId: 'user-1',
             })).resolves.toMatchObject({ gitStatus: 'initialized' });
@@ -415,7 +407,7 @@ describe('ContainerInitializationPoller', () => {
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
         const poller = new ContainerInitializationPoller({ userApi, gitApi, sleep: vi.fn(async () => undefined) });
 
-        await expect(poller.initialize({ containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' }))
+        await expect(poller.initialize({ serviceId: 'service-1', operatorUserId: 'user-1' }))
             .rejects.toMatchObject({ code: 'failed_unexpected_state' });
         expect(gitApi.submitGitCredential).not.toHaveBeenCalled();
         expect(gitApi.reportUserCancelled).not.toHaveBeenCalled();
@@ -432,7 +424,7 @@ describe('ContainerInitializationPoller', () => {
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
         const poller = new ContainerInitializationPoller({ userApi, gitApi, sleep: vi.fn(async () => undefined) });
 
-        await expect(poller.initialize({ containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' }))
+        await expect(poller.initialize({ serviceId: 'service-1', operatorUserId: 'user-1' }))
             .rejects.toMatchObject({ code: 'failed_git' });
         expect(userApi.getContainer).toHaveBeenCalledOnce();
 
@@ -444,7 +436,7 @@ describe('ContainerInitializationPoller', () => {
             gitApi,
             sleep: vi.fn(async () => undefined),
         });
-        await expect(failedPoller.initialize({ containerId: 'container-2', serviceId: 'service-2', operatorUserId: 'user-1' }))
+        await expect(failedPoller.initialize({ serviceId: 'service-2', operatorUserId: 'user-1' }))
             .rejects.toMatchObject({ code: 'failed_container' });
         expect(gitApi.getGitState).toHaveBeenCalledOnce();
     });
@@ -460,7 +452,7 @@ describe('ContainerInitializationPoller', () => {
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
         const poller = new ContainerInitializationPoller({ userApi, gitApi, sleep: vi.fn(async () => undefined) });
 
-        await expect(poller.initialize({ containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' }))
+        await expect(poller.initialize({ serviceId: 'service-1', operatorUserId: 'user-1' }))
             .rejects.toMatchObject({ code: 'failed_initialize' });
         expect(gitApi.getGitState).not.toHaveBeenCalled();
     });
@@ -486,7 +478,7 @@ describe('ContainerInitializationPoller', () => {
             statusSyncInterval: 0,
             sleep: vi.fn(async () => undefined),
         });
-        const input = { containerId: 'container-1', serviceId: 'service-1', operatorUserId: 'user-1' };
+        const input = { serviceId: 'service-1', operatorUserId: 'user-1' };
 
         const first = poller.initialize(input);
         const second = poller.initialize(input);
@@ -517,7 +509,6 @@ describe('ContainerInitializationPoller', () => {
         });
 
         const pending = poller.initialize({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-1',
             signal: controller.signal,
@@ -540,9 +531,7 @@ describe('ContainerInitializationPoller', () => {
         } as unknown as Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>;
         const poller = new ContainerInitializationPoller({ userApi, gitApi });
 
-        await expect(poller.initialize({ containerId: '', serviceId: 'service-1', operatorUserId: 'user-1' }))
-            .rejects.toMatchObject({ code: 'container_id_missing' });
-        await expect(poller.initialize({ containerId: 'container-1', serviceId: '', operatorUserId: 'user-1' }))
+        await expect(poller.initialize({ serviceId: '', operatorUserId: 'user-1' }))
             .rejects.toMatchObject({ code: 'service_id_missing' });
         expect(userApi.getContainer).not.toHaveBeenCalled();
     });
@@ -550,7 +539,7 @@ describe('ContainerInitializationPoller', () => {
 
 function containerStatus(status: string, git_fin_status: string | undefined): ContainerStatusResponse {
     return {
-        container_id: 'container-1',
+        service_id: 'service-1',
         status,
         gitee_user: '',
         gitee_repository: '',

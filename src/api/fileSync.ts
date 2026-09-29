@@ -22,11 +22,11 @@ export interface SftpSession {
 }
 
 export type SftpProvider = (entry: ContainerConfigEntry) => Promise<SftpSession>;
-export type ContainerStatusReader = (containerId: string) => Promise<Pick<ContainerStatusResponse, 'status'>>;
+export type ServiceStatusReader = (serviceId: string) => Promise<Pick<ContainerStatusResponse, 'status'>>;
 
 export interface FileSyncServiceOptions {
     config: Pick<ContainerConfig, 'read' | 'list'>;
-    getContainerStatus: ContainerStatusReader;
+    getContainerStatus: ServiceStatusReader;
     sftpProvider?: SftpProvider;
 }
 
@@ -39,17 +39,18 @@ export interface LocalSyncPath {
 
 export interface RemoteSyncPath {
     kind: 'remote';
-    containerId: string;
+    serviceId: string;
     path: string;
 }
 
 export type FileSyncErrorCode =
     | 'invalid_path'
     | 'same_endpoint'
-    | 'container_id_invalid'
-    | 'container_not_configured'
-    | 'container_status_failed'
-    | 'container_not_running'
+    | 'service_id_invalid'
+    | 'service_not_configured'
+    | 'config_read_failed'
+    | 'service_status_failed'
+    | 'service_not_running'
     | 'sftp_unavailable'
     | 'mirror_requires_directory'
     | 'unsupported_file_type'
@@ -66,8 +67,6 @@ export class FileSyncError extends Error {
     }
 }
 
-const REMOTE_CONTAINER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const REMOTE_PATH = /^([^:/\\\s]+):(\/.*)$/;
 const FILE_TYPE_MASK = 0o170000;
 const DIRECTORY_TYPE = 0o040000;
 const FILE_TYPE = 0o100000;
@@ -87,50 +86,49 @@ export function parseSyncPath(value: string): SyncPath {
     }
 
     const separatorIndex = normalized.indexOf(':');
-    if (separatorIndex > 0 && normalized.slice(separatorIndex + 1).startsWith('/')) {
-        const containerId = normalized.slice(0, separatorIndex);
-        if (!REMOTE_CONTAINER_ID.test(containerId)) {
-            throw new FileSyncError('container_id_invalid', '远端路径中的容器 ID 无效');
-        }
+    if (separatorIndex === 0) {
+        throw new FileSyncError('service_id_invalid', '远端路径中的服务 ID 不能为空');
     }
-    const remoteMatch = REMOTE_PATH.exec(normalized);
-    if (!remoteMatch) {
-        throw new FileSyncError('invalid_path', '远端路径必须使用 containerId:/absolute/path 格式');
+    if (separatorIndex < 0) {
+        throw new FileSyncError('invalid_path', '远端路径必须使用 serviceId:/absolute/path 格式');
     }
-    const containerId = remoteMatch[1];
-    if (!REMOTE_CONTAINER_ID.test(containerId)) {
-        throw new FileSyncError('container_id_invalid', '远端路径中的容器 ID 无效');
+    const serviceId = normalized.slice(0, separatorIndex);
+    const remotePath = normalized.slice(separatorIndex + 1);
+    if (!serviceId.trim()) {
+        throw new FileSyncError('service_id_invalid', '远端路径中的服务 ID 不能为空');
     }
-    const remotePath = remoteMatch[2];
+    if (!remotePath.startsWith('/')) {
+        throw new FileSyncError('invalid_path', '远端路径必须使用 serviceId:/absolute/path 格式');
+    }
     if (remotePath.includes('\\') || remotePath.split('/').includes('..')) {
         throw new FileSyncError('invalid_path', '远端路径不能包含路径穿越片段');
     }
 
     return {
         kind: 'remote',
-        containerId,
+        serviceId,
         path: path.posix.normalize(remotePath),
     };
 }
 
-export function getRemoteContainerId(source: string, target: string): string {
+export function getRemoteServiceId(source: string, target: string): string {
     const sourcePath = parseSyncPath(source);
     const targetPath = parseSyncPath(target);
     if (sourcePath.kind === targetPath.kind) {
         throw new FileSyncError('same_endpoint', '同步源和目标必须分别位于本地与远端');
     }
     if (sourcePath.kind === 'remote') {
-        return sourcePath.containerId;
+        return sourcePath.serviceId;
     }
     if (targetPath.kind === 'remote') {
-        return targetPath.containerId;
+        return targetPath.serviceId;
     }
     throw new FileSyncError('same_endpoint', '同步源和目标必须分别位于本地与远端');
 }
 
 export class FileSyncService implements FileSyncRunner {
     private readonly config: Pick<ContainerConfig, 'read' | 'list'>;
-    private readonly getContainerStatus: ContainerStatusReader;
+    private readonly getContainerStatus: ServiceStatusReader;
     private readonly sftpProvider: SftpProvider | undefined;
 
     public constructor(options: FileSyncServiceOptions) {
@@ -164,28 +162,28 @@ export class FileSyncService implements FileSyncRunner {
             throw new FileSyncError('same_endpoint', '同步源和目标必须分别位于本地与远端');
         }
         const document = await this.readConfig();
-        const entry = this.config.list(document.config).find(item => item.containerId === remotePath.containerId);
+        const entry = this.config.list(document.config).find(item => item.serviceId === remotePath.serviceId);
         if (!entry) {
             throw new FileSyncError(
-                'container_not_configured',
-                `容器 "${remotePath.containerId}" 未在 SSH 配置中登记`,
+                'service_not_configured',
+                `服务 "${remotePath.serviceId}" 未在 SSH 配置中登记`,
             );
         }
 
         let status: Pick<ContainerStatusResponse, 'status'>;
         try {
-            status = await this.getContainerStatus(remotePath.containerId);
+            status = await this.getContainerStatus(remotePath.serviceId);
         } catch (error) {
             throw new FileSyncError(
-                'container_status_failed',
-                `无法读取容器 "${remotePath.containerId}" 的运行状态`,
+                'service_status_failed',
+                `无法读取服务 "${remotePath.serviceId}" 的运行状态`,
                 error,
             );
         }
         if (typeof status?.status !== 'string' || status.status.trim().toLowerCase() !== 'running') {
             throw new FileSyncError(
-                'container_not_running',
-                `容器 "${remotePath.containerId}" 当前未处于 running 状态`,
+                'service_not_running',
+                `服务 "${remotePath.serviceId}" 当前未处于 running 状态`,
             );
         }
         if (!this.sftpProvider) {
@@ -198,7 +196,7 @@ export class FileSyncService implements FileSyncRunner {
         } catch (error) {
             throw new FileSyncError(
                 'sftp_unavailable',
-                `无法连接容器 "${remotePath.containerId}" 的 SFTP 服务`,
+                `无法连接服务 "${remotePath.serviceId}" 的 SFTP 服务`,
                 error,
             );
         }
@@ -425,7 +423,7 @@ export class FileSyncService implements FileSyncRunner {
         try {
             return await this.config.read();
         } catch (error) {
-            throw new FileSyncError('container_not_configured', '读取 SSH 配置失败', error);
+            throw new FileSyncError('config_read_failed', '读取 SSH 配置失败', error);
         }
     }
 }

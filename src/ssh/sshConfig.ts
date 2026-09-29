@@ -42,6 +42,7 @@ function isIncludeDirective(line: Line): line is Section {
 const SSH_CONFIG_PROPERTIES: Record<string, string> = {
     'host': 'Host',
     'hostname': 'HostName',
+    'serviceid': 'ServiceId',
     'user': 'User',
     'port': 'Port',
     'identityagent': 'IdentityAgent',

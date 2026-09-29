@@ -19,7 +19,7 @@ export interface ContainerSyncError {
 }
 
 export interface SyncedContainer {
-    containerId: string;
+    serviceId: string;
     host: string;
     giteeRepository?: string;
     hostName?: string;
@@ -144,7 +144,7 @@ export class ContainerSync {
     private syncGeneration = 0;
     private operationGeneration = 0;
     private initialLocalSnapshotLoaded = false;
-    private readonly locallyDeletedContainerIds = new Set<string>();
+    private readonly locallyDeletedServiceIds = new Set<string>();
     private readonly invalidEndpointNotifications = new Set<string>();
 
     constructor(options: ContainerSyncOptions) {
@@ -221,12 +221,12 @@ export class ContainerSync {
         return trackedRefresh;
     }
 
-    public markContainerDeleted(containerId: string): void {
-        this.locallyDeletedContainerIds.add(containerId);
+    public markContainerDeleted(serviceId: string): void {
+        this.locallyDeletedServiceIds.add(serviceId);
     }
 
-    public clearContainerDeleted(containerId: string): void {
-        this.locallyDeletedContainerIds.delete(containerId);
+    public clearContainerDeleted(serviceId: string): void {
+        this.locallyDeletedServiceIds.delete(serviceId);
     }
 
     public async reconcileContainerOperation(operation: ContainerOperationState): Promise<boolean> {
@@ -241,7 +241,7 @@ export class ContainerSync {
         if (this.disposed) {
             return false;
         }
-        const current = this.operationRegistry?.get(operation.containerId);
+        const current = this.operationRegistry?.get(operation.serviceId);
         if (!current || current.action !== operation.action || current.operationId !== operation.operationId) {
             return true;
         }
@@ -249,7 +249,7 @@ export class ContainerSync {
             return false;
         }
 
-        this.operationRegistry?.complete(operation.containerId, 'succeeded', operation.operationId);
+        this.operationRegistry?.complete(operation.serviceId, 'succeeded', operation.operationId);
         return true;
     }
 
@@ -317,7 +317,7 @@ export class ContainerSync {
         this.operationSubscription.dispose();
         this.mutationRefresh = undefined;
         this.mutationGate = undefined;
-        this.locallyDeletedContainerIds.clear();
+        this.locallyDeletedServiceIds.clear();
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = undefined;
@@ -329,8 +329,11 @@ export class ContainerSync {
         let document;
         try {
             document = await this.config.read();
+            if (this.config.removeLegacyContainerEntries(document.config)) {
+                await this.config.write(document);
+            }
         } catch (error) {
-            return this.resultWithError(toSyncError(error, 'config_error', '读取服务配置失败'));
+            return this.resultWithError(toSyncError(error, 'config_error', '迁移或清理服务配置失败'));
         }
 
         const localEntries = this.config.list(document.config);
@@ -380,12 +383,12 @@ export class ContainerSync {
         }
 
         const { remoteIds, remoteStatuses } = catalog;
-        for (const containerId of this.locallyDeletedContainerIds) {
-            if (!remoteIds.includes(containerId)) {
-                this.locallyDeletedContainerIds.delete(containerId);
+        for (const serviceId of this.locallyDeletedServiceIds) {
+            if (!remoteIds.includes(serviceId)) {
+                this.locallyDeletedServiceIds.delete(serviceId);
             }
         }
-        const visibleRemoteIds = remoteIds.filter(containerId => !this.locallyDeletedContainerIds.has(containerId));
+        const visibleRemoteIds = remoteIds.filter(serviceId => !this.locallyDeletedServiceIds.has(serviceId));
         if (!this.isCurrentSync(syncGeneration, operationGeneration)) {
             return this.disposedResult();
         }
@@ -399,13 +402,13 @@ export class ContainerSync {
         const localById = indexEntries(localEntries);
         const hostAssignments = this.assignHostNames(visibleRemoteIds, remoteStatuses, localEntries);
 
-        for (const containerId of visibleRemoteIds) {
-            const localEntry = localById.get(containerId);
-            const assignment = hostAssignments.get(containerId);
+        for (const serviceId of visibleRemoteIds) {
+            const localEntry = localById.get(serviceId);
+            const assignment = hostAssignments.get(serviceId);
 
             if (assignment?.hostName || localEntry) {
                 changed = this.config.upsertContainer(document.config, {
-                    containerId,
+                    serviceId,
                     host: assignment?.host ?? localEntry?.host ?? DEFAULT_CONTAINER_HOST_NAME,
                     ...(assignment?.name ? { name: assignment.name } : {}),
                     ...(assignment?.hostName ? { hostName: assignment.hostName } : {}),
@@ -424,8 +427,8 @@ export class ContainerSync {
             return this.resultWithError(toSyncError(error, 'clock_error', '无法生成服务历史时间'));
         }
         for (const localEntry of localEntries) {
-            if (!remoteIds.includes(localEntry.containerId) && !localEntry.expiresAt) {
-                changed = this.config.setExpiresAt(document.config, localEntry.containerId, expirationTimestamp) || changed;
+            if (!remoteIds.includes(localEntry.serviceId) && !localEntry.expiresAt) {
+                changed = this.config.setExpiresAt(document.config, localEntry.serviceId, expirationTimestamp) || changed;
             }
         }
 
@@ -462,10 +465,10 @@ export class ContainerSync {
     ): Promise<{ remoteIds: string[]; remoteStatuses: Map<string, RemoteStatusResult> }> {
         const list = await userApi.getContainerStatuses({ user_id: userId });
         const containers = Array.isArray(list?.containers) ? list.containers : [];
-        const remoteIds = uniqueContainerIds(containers.map(container => container.container_id));
+        const remoteIds = uniqueServiceIds(containers.map(container => container.service_id));
         const remoteStatuses = new Map<string, RemoteStatusResult>();
         for (const container of containers) {
-            remoteStatuses.set(container.container_id, this.parseStatusResponse(container, allowDebugProxy));
+            remoteStatuses.set(container.service_id, this.parseStatusResponse(container, allowDebugProxy));
         }
         return { remoteIds, remoteStatuses };
     }
@@ -473,13 +476,13 @@ export class ContainerSync {
     private parseStatusResponse(response: ContainerStatusResponse, allowDebugProxy: boolean): RemoteStatusResult {
         const parsedEndpoint = parseContainerEndpoint(response.endpoint, { allowDebugProxy });
         if (!parsedEndpoint) {
-            this.reportInvalidEndpoint(response.container_id, response.endpoint);
+            this.reportInvalidEndpoint(response.service_id, response.endpoint);
             return {
                 response,
                 error: { code: 'invalid_endpoint', message: '云端沙箱 服务 endpoint 必须是 IP:Port' },
             } as const;
         }
-        this.clearInvalidEndpointNotifications(response.container_id);
+        this.clearInvalidEndpointNotifications(response.service_id);
         return { response, parsedEndpoint };
     }
 
@@ -498,7 +501,7 @@ export class ContainerSync {
 
         let changed = false;
         for (const entry of history.slice(0, history.length - normalizedLimit)) {
-            changed = this.config.removeContainer(config, entry.containerId) || changed;
+            changed = this.config.removeContainer(config, entry.serviceId) || changed;
         }
         return changed;
     }
@@ -512,7 +515,7 @@ export class ContainerSync {
             if (operation.phase !== 'reconciling' || !this.isOperationConfirmed(operation, result)) {
                 continue;
             }
-            this.operationRegistry.complete(operation.containerId, 'succeeded', operation.operationId);
+            this.operationRegistry.complete(operation.serviceId, 'succeeded', operation.operationId);
         }
     }
 
@@ -527,7 +530,7 @@ export class ContainerSync {
             return false;
         }
 
-        const container = result.containers.find(item => item.containerId === operation.containerId);
+        const container = result.containers.find(item => item.serviceId === operation.serviceId);
         if (!container) {
             return true;
         }
@@ -562,11 +565,11 @@ export class ContainerSync {
         hostAssignments: Map<string, HostAssignment>,
     ): SyncedContainer[] {
         const entries = indexEntries(this.config.list(config));
-        const states: SyncedContainer[] = remoteIds.map(containerId => {
-            const entry = entries.get(containerId);
-            const remoteStatus = remoteStatuses.get(containerId);
+        const states: SyncedContainer[] = remoteIds.map(serviceId => {
+            const entry = entries.get(serviceId);
+            const remoteStatus = remoteStatuses.get(serviceId);
             const response = remoteStatus?.response;
-            const assignment = hostAssignments.get(containerId);
+            const assignment = hostAssignments.get(serviceId);
             const host = entry?.host ?? assignment?.host ?? '';
             const hostName = entry?.hostName ?? assignment?.hostName ?? remoteStatus?.parsedEndpoint?.host;
             const port = entry?.port ?? assignment?.port ?? remoteStatus?.parsedEndpoint?.port;
@@ -574,7 +577,7 @@ export class ContainerSync {
                 ? { code: 'endpoint_missing', message: '云端沙箱 服务状态未返回可用 endpoint' }
                 : undefined;
             return {
-                containerId,
+                serviceId,
                 host,
                 ...(response?.gitee_repository?.trim() ? { giteeRepository: response.gitee_repository.trim() } : {}),
                 ...(hostName ? { hostName } : {}),
@@ -593,9 +596,9 @@ export class ContainerSync {
         });
         const remoteIdSet = new Set(remoteIds);
         for (const entry of entries.values()) {
-            if (!remoteIdSet.has(entry.containerId)) {
+            if (!remoteIdSet.has(entry.serviceId)) {
                 states.push({
-                    containerId: entry.containerId,
+                    serviceId: entry.serviceId,
                     host: entry.host,
                     status: 'missing',
                     expiresAt: entry.expiresAt,
@@ -608,7 +611,7 @@ export class ContainerSync {
 
     private localOnlyStates(entries: ContainerConfigEntry[], error: ContainerSyncError): SyncedContainer[] {
         return Array.from(indexEntries(entries).values(), entry => ({
-            containerId: entry.containerId,
+            serviceId: entry.serviceId,
             host: entry.host,
             ...(entry.hostName ? { hostName: entry.hostName } : {}),
             ...(entry.port !== undefined ? { port: entry.port } : {}),
@@ -630,7 +633,7 @@ export class ContainerSync {
         try {
             this.onSync?.({
                 containers: Array.from(indexEntries(entries).values(), entry => ({
-                    containerId: entry.containerId,
+                    serviceId: entry.serviceId,
                     host: entry.host,
                     ...(entry.hostName ? { hostName: entry.hostName } : {}),
                     ...(entry.port !== undefined ? { port: entry.port } : {}),
@@ -663,9 +666,9 @@ export class ContainerSync {
 
         const assignments = new Map<string, HostAssignment>();
         const localById = indexEntries(localEntries);
-        for (const containerId of remoteIds) {
-            const localEntry = localById.get(containerId);
-            const remoteStatus = remoteStatuses.get(containerId);
+        for (const serviceId of remoteIds) {
+            const localEntry = localById.get(serviceId);
+            const remoteStatus = remoteStatuses.get(serviceId);
             const response = remoteStatus?.response;
             const hostName = remoteStatus?.parsedEndpoint?.host ?? localEntry?.hostName ?? localEntry?.host;
             const port = remoteStatus?.parsedEndpoint?.port ?? localEntry?.port;
@@ -678,7 +681,7 @@ export class ContainerSync {
                 ? existingHost
                 : getUniqueHostName(baseName, usedNames);
             assignedNames.add(normalizeHostName(host));
-            assignments.set(containerId, {
+            assignments.set(serviceId, {
                 host,
                 name: baseName,
                 ...(hostName ? { hostName } : {}),
@@ -688,21 +691,21 @@ export class ContainerSync {
         return assignments;
     }
 
-    private reportInvalidEndpoint(containerId: string, endpoint: string | null | undefined): void {
-        const key = `${containerId}\u0000${String(endpoint)}`;
+    private reportInvalidEndpoint(serviceId: string, endpoint: string | null | undefined): void {
+        const key = `${serviceId}\u0000${String(endpoint)}`;
         if (this.invalidEndpointNotifications.has(key)) {
             return;
         }
         this.invalidEndpointNotifications.add(key);
         try {
-            this.onInvalidEndpoint?.({ containerId, endpoint });
+            this.onInvalidEndpoint?.({ serviceId, endpoint });
         } catch {
             // An error notification must not abort synchronization.
         }
     }
 
-    private clearInvalidEndpointNotifications(containerId: string): void {
-        const prefix = `${containerId}\u0000`;
+    private clearInvalidEndpointNotifications(serviceId: string): void {
+        const prefix = `${serviceId}\u0000`;
         for (const key of this.invalidEndpointNotifications) {
             if (key.startsWith(prefix)) {
                 this.invalidEndpointNotifications.delete(key);
@@ -729,22 +732,22 @@ interface HostAssignment {
 function indexEntries(entries: ContainerConfigEntry[]): Map<string, ContainerConfigEntry> {
     const result = new Map<string, ContainerConfigEntry>();
     for (const entry of entries) {
-        if (!result.has(entry.containerId)) {
-            result.set(entry.containerId, entry);
+        if (!result.has(entry.serviceId)) {
+            result.set(entry.serviceId, entry);
         }
     }
     return result;
 }
 
-function uniqueContainerIds(containerIds: string[]): string[] {
+function uniqueServiceIds(serviceIds: string[]): string[] {
     const result: string[] = [];
     const seen = new Set<string>();
-    for (const containerId of containerIds) {
-        if (typeof containerId !== 'string' || !containerId.trim() || seen.has(containerId)) {
+    for (const serviceId of serviceIds) {
+        if (typeof serviceId !== 'string' || !serviceId.trim() || seen.has(serviceId)) {
             continue;
         }
-        seen.add(containerId);
-        result.push(containerId);
+        seen.add(serviceId);
+        result.push(serviceId);
     }
     return result;
 }

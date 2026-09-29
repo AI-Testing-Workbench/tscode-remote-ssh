@@ -39,12 +39,12 @@ export interface UserContainerQuery {
     gitee_branch?: string | null;
 }
 
-export interface ContainerIdsResponse {
-    container_ids: string[];
+export interface ServiceIdsResponse {
+    service_ids: string[];
 }
 
 export interface ContainerStatusResponse {
-    container_id: string;
+    service_id: string;
     type?: ContainerTypeValue | null;
     novnc_url?: string | null;
     status: string;
@@ -63,7 +63,6 @@ export interface ContainerStatusListResponse {
 }
 
 export interface CreateContainerResponse {
-    container_id: string;
     service_id: string;
     type?: ContainerTypeValue | null;
     novnc_url?: string | null;
@@ -73,7 +72,7 @@ export interface CreateContainerResponse {
     expires_at?: string | null;
 }
 
-export type PublicContainerCallback = (containerId: string) => void | Promise<void>;
+export type PublicContainerCallback = (serviceId: string) => void | Promise<void>;
 
 export interface PublicCreateContainerCallbacks {
     postCompleted?: PublicContainerCallback;
@@ -118,6 +117,7 @@ export interface AdminCreateContainerRequest {
 
 export interface AdminContainerResponse {
     container_id: string;
+    service_id: string;
     type?: ContainerTypeValue | null;
     novnc_url?: string | null;
     status: string;
@@ -140,9 +140,7 @@ export interface AdminContainerResponse {
     business_deleted: boolean;
 }
 
-export interface AdminCreateContainerResponse extends AdminContainerResponse {
-    service_id: string;
-}
+export type AdminCreateContainerResponse = Omit<AdminContainerResponse, 'git_fin_status'>;
 
 export interface AdminContainerListResponse {
     containers: AdminContainerResponse[];
@@ -177,7 +175,7 @@ export interface ExpirationRequest {
 }
 
 export interface ExpirationResponse {
-    container_id: string;
+    service_id: string;
     expires_at: string | null;
 }
 

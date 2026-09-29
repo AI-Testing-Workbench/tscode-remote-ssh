@@ -53,7 +53,7 @@ describe('openRemoteSSHWindow', () => {
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'vscode.openFolder',
             { scheme: 'vscode-remote', authority: 'ssh-remote+dev', path: remotePath },
-            { forceNewWindow: false }
+            { forceNewWindow: false, noRecentEntry: true }
         );
         expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
             'vscode.newWindow',
@@ -69,7 +69,7 @@ describe('openRemoteSSHWindow', () => {
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'vscode.openFolder',
             { scheme: 'vscode-remote', authority: 'ssh-remote+dev', path: '/app/repo' },
-            { forceNewWindow: false }
+            { forceNewWindow: false, noRecentEntry: true }
         );
     });
 
@@ -81,7 +81,7 @@ describe('openRemoteSSHWindow', () => {
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'vscode.openFolder',
             { scheme: 'vscode-remote', authority: 'ssh-remote+dev', path: '/app' },
-            { forceNewWindow: false }
+            { forceNewWindow: false, noRecentEntry: true }
         );
     });
 
@@ -184,11 +184,11 @@ describe('openRemoteSSHWindow', () => {
         await fs.writeFile(configPath, [
             'Host "云端沙箱 Service"',
             '\tHostName 10.0.0.1',
-            '\tContainerId service-1',
+            '\tServiceId service-1',
             '',
             'Host "Expired 云端沙箱 Service"',
             '\tHostName 10.0.0.2',
-            '\tContainerId expired-service',
+            '\tServiceId expired-service',
             '\tExpiresAt 2026-09-01T00:00:00.000Z',
             '',
             'Host ordinary-ssh-host',
@@ -199,12 +199,12 @@ describe('openRemoteSSHWindow', () => {
         const document = await configured.read();
         expect(configured.list(document.config)).toEqual([
             {
-                containerId: 'service-1',
+                serviceId: 'service-1',
                 host: '云端沙箱 Service',
                 hostName: '10.0.0.1',
             },
             {
-                containerId: 'expired-service',
+                serviceId: 'expired-service',
                 host: 'Expired 云端沙箱 Service',
                 hostName: '10.0.0.2',
                 expiresAt: '2026-09-01T00:00:00.000Z',

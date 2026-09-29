@@ -2,11 +2,12 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClientChannel } from 'ssh2';
 import type SSHConnectionType from '../src/ssh/sshConnection';
-import { RemoteSSHResolver, SSHConfiguration, SSHConnection } from './rewires/remote';
+import { getRemoteAuthority, RemoteSSHResolver, SSHConfiguration, SSHConnection } from './rewires/remote';
 import { Log } from './mocks/logger';
 import * as vscode from './mocks/vscode';
 import type { Log as SourceLog } from '../src/common/logger';
 import { GIT_CLONE_COMMAND } from '../src/ssh/gitCloneCommand';
+import SSHDestination from '../src/ssh/sshDestination';
 
 describe('码云初始化脚本执行', () => {
     afterEach(() => {
@@ -30,12 +31,13 @@ describe('码云初始化脚本执行', () => {
             return channel as unknown as ClientChannel;
         });
         const close = vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
-        mockSSHConfig();
+        const getHostConfiguration = mockSSHConfig();
 
-        await createResolver().executeGitCloneScript('container-1', 'repo-host', '10.20.30.40:2222');
+        await createResolver().executeGitCloneScript('service-1', 'repo-host', '10.20.30.40:2222');
 
         expect(connect).toHaveBeenCalledOnce();
         expect(connectionConfigs[0]).toMatchObject({ host: '10.20.30.40', port: 2222, username: 'root' });
+        expect(getHostConfiguration).toHaveBeenCalledWith('repo-host');
         expect(execChannel).toHaveBeenCalledOnce();
         expect(close).toHaveBeenCalledOnce();
     });
@@ -52,7 +54,7 @@ describe('码云初始化脚本执行', () => {
         vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
         mockSSHConfig();
 
-        await expect(createResolver().executeGitCloneScript('container-1', 'repo-host', '10.20.30.40:2222'))
+        await expect(createResolver().executeGitCloneScript('service-1', 'repo-host', '10.20.30.40:2222'))
             .resolves.toBeUndefined();
     });
 
@@ -76,7 +78,7 @@ describe('码云初始化脚本执行', () => {
         vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
         mockSSHConfig();
 
-        await createResolver().executeGitCloneScript('container-1', 'repo-host', '10.20.30.40:2222');
+        await createResolver().executeGitCloneScript('service-1', 'repo-host', '10.20.30.40:2222');
 
         expect(connect).toHaveBeenCalledTimes(2);
     });
@@ -90,7 +92,7 @@ describe('码云初始化脚本执行', () => {
         mockSSHConfig();
 
         await expect(createResolver().executeGitCloneScript(
-            'container-1',
+            'service-1',
             'repo-host',
             '10.20.30.40:2222',
         )).rejects.toThrow('连接服务失败，请检查网络、连接配置和身份验证信息');
@@ -111,7 +113,7 @@ describe('码云初始化脚本执行', () => {
         vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
         mockSSHConfig();
 
-        await expect(createResolver().executeGitCloneScript('container-1', 'repo-host', '10.20.30.40:2222'))
+        await expect(createResolver().executeGitCloneScript('service-1', 'repo-host', '10.20.30.40:2222'))
             .rejects.toThrow('码云初始化脚本执行失败，退出状态：17');
     });
 
@@ -124,13 +126,67 @@ describe('码云初始化脚本执行', () => {
         });
         const close = vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
         mockSSHConfig();
-        const execution = createResolver().executeGitCloneScript('container-1', 'repo-host', '10.20.30.40:2222', controller.signal);
+        const execution = createResolver().executeGitCloneScript('service-1', 'repo-host', '10.20.30.40:2222', controller.signal);
 
         await vi.waitFor(() => expect(execChannel).toHaveBeenCalledOnce());
         controller.abort();
         await expect(execution).rejects.toThrow('码云初始化脚本执行已取消');
         expect(channel.close).toHaveBeenCalledOnce();
         expect(close).toHaveBeenCalledOnce();
+    });
+});
+
+describe('SSH service identity', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vscode.resetConfiguration();
+    });
+
+    it('uses ServiceId for service endpoint validation while keeping Host as the authority alias', async () => {
+        const getHostConfiguration = mockSSHConfig({
+            ServiceId: 'service-1',
+            HostName: 'not-an-ip',
+            Port: '2222',
+        });
+        const resolver = createResolver();
+        const authority = getRemoteAuthority(new SSHDestination('readable-host-alias').toEncodedString());
+
+        await expect(resolver.resolve(authority, new vscode.RemoteAuthorityResolverContext() as never))
+            .rejects.toThrow('服务 "service-1" 的 endpoint 无效');
+
+        expect(getHostConfiguration).toHaveBeenCalledWith('readable-host-alias');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('服务 "service-1" 的 endpoint 无效'),
+            { modal: true },
+        );
+    });
+
+    it('deduplicates debug confirmation by service ID rather than SSH alias', async () => {
+        vscode.setConfigurationValue('tscode.remote', 'debug', true);
+        vscode.window.showWarningMessage.mockResolvedValue('继续' as never);
+        vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
+            return Promise.resolve(this);
+        });
+        vi.spyOn(SSHConnection.prototype, 'execChannel').mockImplementation(async () => {
+            const channel = createSSHChannel();
+            setTimeout(() => {
+                channel.emit('exit', 0);
+                channel.emit('close');
+            }, 0);
+            return channel as unknown as ClientChannel;
+        });
+        vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
+        const getHostConfiguration = mockSSHConfig();
+        const resolver = createResolver();
+
+        await resolver.executeGitCloneScript('service-1', 'host-alias-a', '10.20.30.40:2222');
+        await resolver.executeGitCloneScript('service-1', 'host-alias-b', '10.20.30.40:2222');
+        await resolver.executeGitCloneScript('service-2', 'host-alias-a', '10.20.30.40:2222');
+
+        expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2);
+        expect(getHostConfiguration).toHaveBeenNthCalledWith(1, 'host-alias-a');
+        expect(getHostConfiguration).toHaveBeenNthCalledWith(2, 'host-alias-b');
+        expect(getHostConfiguration).toHaveBeenNthCalledWith(3, 'host-alias-a');
     });
 });
 
@@ -141,17 +197,20 @@ function createResolver(): InstanceType<typeof RemoteSSHResolver> {
     );
 }
 
-function mockSSHConfig(): void {
+function mockSSHConfig(overrides: Record<string, string> = {}): ReturnType<typeof vi.fn> {
+    const getHostConfiguration = vi.fn(() => ({
+        User: 'ssh-config-user',
+        IdentitiesOnly: 'yes',
+        IdentityFile: [],
+        ...overrides,
+    }));
     const sshConfig = {
-        getHostConfiguration: vi.fn(() => ({
-            User: 'ssh-config-user',
-            IdentitiesOnly: 'yes',
-            IdentityFile: [],
-        })),
+        getHostConfiguration,
     };
     vi.spyOn(SSHConfiguration, 'loadFromFS').mockResolvedValue(
         sshConfig as unknown as Awaited<ReturnType<typeof SSHConfiguration.loadFromFS>>,
     );
+    return getHostConfiguration;
 }
 
 function createSSHChannel(): EventEmitter & { stderr: EventEmitter; close: ReturnType<typeof vi.fn> } {

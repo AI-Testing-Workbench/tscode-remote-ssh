@@ -7,7 +7,7 @@ import type { AdminDefaultImage, AdminPanelState } from '../src/adminWebview/typ
 import { REST_ERROR_CODES, RestClientError, type AdminRestApi, type UserRestApi } from '../src/api/restClient';
 import * as vscode from './mocks/vscode';
 import { ContainerOperationRegistry } from '../src/containerOperations';
-import { ContainerInitializationError } from '../src/containerInitializationPoller';
+import { ContainerInitializationError, type ContainerInitializationInput } from '../src/containerInitializationPoller';
 
 const activePanels: AdminPanel[] = [];
 
@@ -394,7 +394,7 @@ describe('AdminPanel', () => {
         const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
 
         await adminPanel.open();
-        panel.fireMessage({ command: 'containerAction', containerId: 'container-1', action: 'start' });
+        panel.fireMessage({ command: 'containerAction', serviceId: 'service-1', action: 'start' });
         await flushMessages();
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -412,11 +412,11 @@ describe('AdminPanel', () => {
         const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
 
         await adminPanel.open();
-        panel.fireMessage({ command: 'containerAction', containerId: 'container-1', action: 'restart' });
+        panel.fireMessage({ command: 'containerAction', serviceId: 'service-1', action: 'restart' });
         await flushMessages();
 
         expect(adminApi.restartContainer).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('容器 "container-1" 处于失败状态，不能重启');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "service-1" 处于失败状态，不能重启');
     });
 
     it('keeps a timed-out administrator lifecycle operation in reconciliation', async () => {
@@ -436,15 +436,15 @@ describe('AdminPanel', () => {
 
         await adminPanel.open();
         await send(panel, { command: 'selectTab', tab: 'containers' });
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'stop' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'stop' });
 
-        expect(adminApi.stopContainer).toHaveBeenCalledWith('container-1');
+        expect(adminApi.stopContainer).toHaveBeenCalledWith('service-1');
         expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
-            containerId: 'container-1',
+            serviceId: 'service-1',
             action: 'stop',
             phase: 'reconciling',
         }));
-        expect(operationRegistry.get('container-1')).toMatchObject({ action: 'stop', phase: 'reconciling' });
+        expect(operationRegistry.get('service-1')).toMatchObject({ action: 'stop', phase: 'reconciling' });
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining('1 分钟'));
         expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'adminUpdate',
@@ -477,10 +477,10 @@ describe('AdminPanel', () => {
 
         await adminPanel.open();
         await send(panel, { command: 'selectTab', tab: 'containers' });
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'restore', expirationHours: '24' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'restore', expirationHours: '24' });
 
-        expect(adminApi.restoreContainer).toHaveBeenCalledWith('container-1', { expiration_hours: 24 });
-        expect(operationRegistry.get('container-1')).toMatchObject({ action: 'restore', phase: 'reconciling' });
+        expect(adminApi.restoreContainer).toHaveBeenCalledWith('service-1', { expiration_hours: 24 });
+        expect(operationRegistry.get('service-1')).toMatchObject({ action: 'restore', phase: 'reconciling' });
         expect(vscode.window.withProgress).toHaveBeenCalledWith(expect.objectContaining({
             title: '正在恢复 云端沙箱 服务',
             location: vscode.ProgressLocation.Notification,
@@ -511,10 +511,10 @@ describe('AdminPanel', () => {
         await adminPanel.open();
         await send(panel, { command: 'selectTab', tab: 'containers' });
         panel.webview.postMessage.mockClear();
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'restore' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'restore' });
 
         expect(adminApi.restoreContainer).not.toHaveBeenCalled();
-        expect(operationRegistry.get('container-1')).toBeUndefined();
+        expect(operationRegistry.get('service-1')).toBeUndefined();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('有效期必须是数字');
         expect(panel.webview.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({
             command: 'adminUpdate',
@@ -546,7 +546,7 @@ describe('AdminPanel', () => {
             images: [],
             defaultImages: createDefaultImages('registry.test:5000/testagent/missing:v1', null),
             containers: [],
-            orphanContainerIds: ['orphan-1', 'orphan-2'],
+            orphanContainerIds: ['orphan-container-1', 'orphan-container-2'],
             stats: {
                 container_count: 3,
                 whitelist_container_count: 2,
@@ -687,7 +687,7 @@ describe('AdminPanel', () => {
         }
         const operationInProgressHtml = renderAdminPage({
             ...state,
-            processingContainerIds: ['container-1'],
+            processingServiceIds: ['service-1'],
             containers: [sampleContainer()],
         }, 'nonce', 'vscode-resource://test');
         expect(getConnectButton(operationInProgressHtml)).toMatch(/disabled>/);
@@ -699,6 +699,11 @@ describe('AdminPanel', () => {
         const logButtonPosition = containerHtml.indexOf('data-action="getContainerLog"');
         const connectButtonPosition = containerHtml.indexOf('data-action="connectContainer"');
         expect(containerHtml).toContain('status-border-success');
+        expect(containerHtml).toContain('<strong>service-1</strong>');
+        expect(containerHtml).toContain('容器 ID: container-1');
+        expect(containerHtml).toContain('data-service-id="service-1"');
+        expect(containerHtml).toContain('data-persist-key="service.service-1.expirationHours"');
+        expect(containerHtml).not.toContain('data-container-id');
         expect(logButtonPosition).toBeGreaterThanOrEqual(0);
         expect(connectButtonPosition).toBeGreaterThan(logButtonPosition);
         expect(getConnectButton(containerHtml)).not.toMatch(/disabled>/);
@@ -812,7 +817,7 @@ describe('AdminPanel', () => {
             activeTab: 'images',
             containers: [
                 sampleContainer(),
-                { ...sampleContainer(), container_id: 'container-deleted', status: 'business_deleted', business_deleted: true },
+                { ...sampleContainer(), service_id: 'service-deleted', container_id: 'container-deleted', status: 'business_deleted', business_deleted: true },
             ],
             images: [{
                 id: 'image-1',
@@ -1079,8 +1084,8 @@ describe('AdminPanel', () => {
         vscode.window.showWarningMessage.mockImplementation(async (_message, _options, ...items) => items[0]);
 
         await adminPanel.open();
-        await send(panel, { command: 'getContainerLog', containerId: 'container-1' });
-        await send(panel, { command: 'deleteOrphanContainers', orphanContainerIds: 'orphan-1,orphan-2' });
+        await send(panel, { command: 'getContainerLog', serviceId: 'service-1' });
+        await send(panel, { command: 'deleteOrphanContainers', orphanContainerIds: 'orphan-container-1,orphan-container-2' });
         await send(panel, { command: 'uploadImage', registry: 'registry.test:5000', namespace: 'testagent', autoPush: false });
         await send(panel, { command: 'pushImage', fullName: 'registry.test:5000/testagent/app:v1' });
         await send(panel, { command: 'setDefaultImage', fullName: 'registry.test:5000/testagent/app:v1', type: 'testagent_cloud' });
@@ -1107,11 +1112,11 @@ describe('AdminPanel', () => {
             gitee_full_url: 'https://gitee.com/alice/repo/tree/main?tab=readme',
         });
         await send(panel, { command: 'setLimit', container_limit: '4', cpu: '2', memory: '4' });
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'start' });
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'expiration', expirationHours: '3' });
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'restore', expirationHours: '5' });
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'delete' });
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'permanent-delete' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'start' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'expiration', expirationHours: '3' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'restore', expirationHours: '5' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'delete' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'permanent-delete' });
         await send(panel, { command: 'addWhitelistUser', user_id: 'user-3' });
         await send(panel, { command: 'deleteWhitelistUser', userId: 'user-3' });
         await send(panel, { command: 'addAdminUser', user_id: 'admin-2' });
@@ -1124,8 +1129,8 @@ describe('AdminPanel', () => {
             namespace: 'testagent',
             auto_push: false,
         }));
-        expect(adminApi.getContainerLog).toHaveBeenCalledWith('container-1');
-        expect(adminApi.deleteOrphanContainers).toHaveBeenCalledWith({ container_ids: ['orphan-1', 'orphan-2'] });
+        expect(adminApi.getContainerLog).toHaveBeenCalledWith('service-1');
+        expect(adminApi.deleteOrphanContainers).toHaveBeenCalledWith({ container_ids: ['orphan-container-1', 'orphan-container-2'] });
         expect(adminApi.pushImage).toHaveBeenCalledWith({ full_name: 'registry.test:5000/testagent/app:v1' });
         expect(adminApi.setDefaultImage).toHaveBeenCalledWith({
             full_name: 'registry.test:5000/testagent/app:v1',
@@ -1158,11 +1163,11 @@ describe('AdminPanel', () => {
             authorize_general_account: false,
         });
         expect(adminApi.setContainerLimit).toHaveBeenCalledWith({ container_limit: 4, cpu: 2, memory: 4 });
-        expect(adminApi.startContainer).toHaveBeenCalledWith('container-1');
-        expect(adminApi.setExpiration).toHaveBeenCalledWith('container-1', { expiration_hours: 3 });
-        expect(adminApi.restoreContainer).toHaveBeenCalledWith('container-1', { expiration_hours: 5 });
-        expect(adminApi.deleteContainer).toHaveBeenCalledWith('container-1');
-        expect(adminApi.permanentDeleteContainer).toHaveBeenCalledWith('container-1');
+        expect(adminApi.startContainer).toHaveBeenCalledWith('service-1');
+        expect(adminApi.setExpiration).toHaveBeenCalledWith('service-1', { expiration_hours: 3 });
+        expect(adminApi.restoreContainer).toHaveBeenCalledWith('service-1', { expiration_hours: 5 });
+        expect(adminApi.deleteContainer).toHaveBeenCalledWith('service-1');
+        expect(adminApi.permanentDeleteContainer).toHaveBeenCalledWith('service-1');
         expect(adminApi.addWhitelistUser).toHaveBeenCalledWith({ user_id: 'user-3' });
         expect(adminApi.deleteWhitelistUser).toHaveBeenCalledWith({ user_id: 'user-3' });
         expect(adminApi.addAdminUser).toHaveBeenCalledWith({ user_id: 'admin-2' });
@@ -1188,10 +1193,10 @@ describe('AdminPanel', () => {
         const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), containerConfig, onConnect });
 
         await adminPanel.open();
-        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+        await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
 
         expect(containerConfig.upsertContainer).toHaveBeenCalledWith(configDocument.config, {
-            containerId: 'container-1',
+            serviceId: 'service-1',
             host: 'alice/repo',
             name: 'alice/repo',
             hostName: '10.0.0.1',
@@ -1217,23 +1222,23 @@ describe('AdminPanel', () => {
         const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), onConnect, operationRegistry });
 
         await adminPanel.open();
-        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+        await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
 
         expect(onConnect).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('容器 "container-1" 已业务删除，无法连接');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "service-1" 已业务删除，无法连接');
 
         container = { ...sampleContainer(), status: 'processing' };
         await send(panel, { command: 'refresh' });
-        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
-        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('容器 "container-1" 正在处理中，暂时无法连接');
+        await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
+        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('服务 "service-1" 正在处理中，暂时无法连接');
 
         container = { ...sampleContainer(), status: 'running' };
         await send(panel, { command: 'refresh' });
-        operationRegistry.begin('container-1', 'stop', 'admin');
-        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+        operationRegistry.begin('service-1', 'stop', 'admin');
+        await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
 
         expect(onConnect).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('容器 "container-1" 正在处理中，暂时无法连接');
+        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('服务 "service-1" 正在处理中，暂时无法连接');
         operationRegistry.dispose();
     });
 
@@ -1247,12 +1252,12 @@ describe('AdminPanel', () => {
         await adminPanel.open();
         const requestsBeforeAction = vi.mocked(adminApi.listContainers).mock.calls.length;
 
-        await send(panel, { command: 'containerAction', containerId: 'container-1', action: 'delete' });
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'delete' });
 
         expect(adminApi.deleteContainer).not.toHaveBeenCalled();
         expect(vi.mocked(adminApi.listContainers).mock.calls.length).toBe(requestsBeforeAction);
         expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-            '确定对容器「container-1」执行业务删除吗？',
+            '确定对服务「service-1」执行业务删除吗？',
             { modal: true },
             '业务删除',
         );
@@ -1274,7 +1279,7 @@ describe('AdminPanel', () => {
         });
 
         await adminPanel.open();
-        await send(panel, { command: 'connectContainer', containerId: 'container-1' });
+        await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
 
         expect(userApi.checkAdmin).toHaveBeenCalledTimes(2);
         expect(adminApi.startContainer).not.toHaveBeenCalled();
@@ -1311,14 +1316,14 @@ describe('AdminPanel', () => {
         const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
 
         await adminPanel.open();
-        panel.fireMessage({ command: 'containerAction', containerId: 'container-1', action: 'start', requestId: 'request-1' });
-        panel.fireMessage({ command: 'containerAction', containerId: 'container-1', action: 'start', requestId: 'request-1' });
+        panel.fireMessage({ command: 'containerAction', serviceId: 'service-1', action: 'start', requestId: 'request-1' });
+        panel.fireMessage({ command: 'containerAction', serviceId: 'service-1', action: 'start', requestId: 'request-1' });
         await vi.waitFor(() => expect(adminApi.startContainer).toHaveBeenCalledOnce());
 
         resolveStart?.();
         await flushMessages();
 
-        expect(adminApi.startContainer).toHaveBeenCalledWith('container-1');
+        expect(adminApi.startContainer).toHaveBeenCalledWith('service-1');
         expect(panel.webview.postMessage).toHaveBeenCalledWith({
             command: 'operationComplete',
             action: 'containerAction',
@@ -1335,7 +1340,10 @@ describe('AdminPanel', () => {
             resolveInitialization = resolve;
         });
         const initializationPoller = {
-            initialize: vi.fn(() => initialization),
+            initialize: vi.fn((input: ContainerInitializationInput) => {
+                expect(input).not.toHaveProperty('containerId');
+                return initialization;
+            }),
         };
         const adminPanel = createPanel({
             adminApiFactory: vi.fn(() => adminApi),
@@ -1354,7 +1362,6 @@ describe('AdminPanel', () => {
         await creating;
 
         expect(initializationPoller.initialize).toHaveBeenCalledWith(expect.objectContaining({
-            containerId: 'container-1',
             serviceId: 'service-1',
             operatorUserId: 'user-5',
             statusReader: adminApi,
@@ -1406,7 +1413,7 @@ describe('AdminPanel', () => {
         });
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            '服务 "container-1" 的 endpoint 无效，应为 IP:Port 格式：(空)',
+            '服务 "service-1" 的 endpoint 无效，应为 IP:Port 格式：(空)',
         );
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
     });
@@ -1418,7 +1425,6 @@ describe('AdminPanel', () => {
         adminApi.createContainer = vi.fn(async () => ({ ...sampleContainer(), service_id: 'service-1', endpoint: null }));
         const initializationPoller = {
             initialize: vi.fn(async () => ({
-                containerId: 'container-1',
                 serviceId: 'service-1',
                 operatorUserId: 'user-5',
                 container: { ...sampleContainer(), endpoint: '10.0.0.8:2222' },
@@ -1688,7 +1694,7 @@ function createPanel(options: Partial<ConstructorParameters<typeof AdminPanel>[0
 function createUserApi(admin: boolean): UserRestApi {
     return {
         createContainer: vi.fn(),
-        getContainerIds: vi.fn(),
+        getServiceIds: vi.fn(),
         getContainerStatuses: vi.fn(),
         getContainer: vi.fn(),
         checkAdmin: vi.fn(async () => ({ admin, limit: admin ? 'none' as const : 'user' as const })),
@@ -1726,7 +1732,7 @@ function createAdminApi(): AdminRestApi {
         unsetDefaultImage: vi.fn(async () => undefined),
             createContainer: vi.fn(async () => ({ ...sampleContainer(), service_id: 'service-1' })),
             listContainers: vi.fn(async () => ({ containers: [sampleContainer()] })),
-        listOrphanContainers: vi.fn(async () => ({ container_ids: ['orphan-1', 'orphan-2'] })),
+        listOrphanContainers: vi.fn(async () => ({ container_ids: ['orphan-container-1', 'orphan-container-2'] })),
             deleteOrphanContainers: vi.fn(async () => undefined),
             getContainer: vi.fn(async () => sampleContainer()),
         getContainerLog: vi.fn(async () => 'log'),
@@ -1735,7 +1741,7 @@ function createAdminApi(): AdminRestApi {
         restartContainer: vi.fn(async () => undefined),
         deleteContainer: vi.fn(async () => undefined),
         permanentDeleteContainer: vi.fn(async () => undefined),
-        setExpiration: vi.fn(async () => ({ container_id: 'container-1', expires_at: '2026-09-05T00:00:00Z' })),
+        setExpiration: vi.fn(async () => ({ service_id: 'service-1', expires_at: '2026-09-05T00:00:00Z' })),
         restoreContainer: vi.fn(async () => undefined),
         getState: vi.fn(async () => ({
             container_count: 1,
@@ -1771,6 +1777,7 @@ function createDefaultImages(testagentCloud: string | null, autotestCloud: strin
 
 function sampleContainer() {
     return {
+        service_id: 'service-1',
         container_id: 'container-1',
         status: 'running',
         endpoint: '10.0.0.1:22',

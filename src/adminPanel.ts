@@ -314,10 +314,10 @@ export class AdminPanel implements vscode.Disposable {
                 return;
             }
             if (message.command === 'getContainerLog') {
-                const containerId = requireText(message.containerId, '容器 ID 不能为空');
-                const log = await adminApi.getContainerLog(containerId);
+                const serviceId = requireText(message.serviceId, '服务 ID 不能为空');
+                const log = await adminApi.getContainerLog(serviceId);
                 if (this.isActive(panel, generation)) {
-                    await panel.webview.postMessage({ command: 'containerLog', containerId, log });
+                    await panel.webview.postMessage({ command: 'containerLog', serviceId, log });
                 }
                 return;
             }
@@ -522,7 +522,6 @@ export class AdminPanel implements vscode.Disposable {
                         this.initializationControllers.add(initializationController);
                         try {
                             const initialization = await this.initializationPoller.initialize({
-                                containerId: created.container_id,
                                 serviceId: created.service_id,
                                 operatorUserId: request.user_id,
                                 endpoint: created.endpoint,
@@ -532,7 +531,7 @@ export class AdminPanel implements vscode.Disposable {
                             const finalContainer = getInitializationResultContainer(initialization);
                             const endpoint = finalContainer ? finalContainer.endpoint : created.endpoint;
                             if (!parseContainerEndpoint(endpoint, { allowDebugProxy: this.getSettings().debug })) {
-                                throw new Error(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${endpoint ?? '(空)'}`);
+                                throw new Error(`服务 "${created.service_id}" 的 endpoint 无效，应为 IP:Port 格式：${endpoint ?? '(空)'}`);
                             }
                         } finally {
                             this.initializationControllers.delete(initializationController);
@@ -548,7 +547,7 @@ export class AdminPanel implements vscode.Disposable {
             case 'containerAction':
                 return this.containerAction(adminApi, message, panel, generation);
             case 'connectContainer':
-                await this.connectContainer(requireText(message.containerId, '容器 ID 不能为空'), panel, generation);
+                await this.connectContainer(requireText(message.serviceId, '服务 ID 不能为空'), panel, generation);
                 return false;
             case 'addWhitelistUser':
                 await adminApi.addWhitelistUser({ user_id: requireText(message.user_id, '用户 ID 不能为空') });
@@ -694,20 +693,20 @@ export class AdminPanel implements vscode.Disposable {
         panel: vscode.WebviewPanel,
         generation: number,
     ): Promise<boolean> {
-        const containerId = requireText(message.containerId, '容器 ID 不能为空');
+        const serviceId = requireText(message.serviceId, '服务 ID 不能为空');
         const action = requireOneOf(message.action, ['start', 'stop', 'restart', 'delete', 'permanent-delete', 'expiration', 'restore'] as const, '无效容器操作');
-        const container = this.state.containers.find(item => item.container_id === containerId);
+        const container = this.state.containers.find(item => item.service_id === serviceId);
         if (!this.isActive(panel, generation)) {
             return false;
         }
         if (action === 'restart' && container && !container.business_deleted && container.status.toLowerCase() === 'failed') {
-            throw new Error(`容器 "${containerId}" 处于失败状态，不能重启`);
+            throw new Error(`服务 "${serviceId}" 处于失败状态，不能重启`);
         }
         const restoreExpiration = action === 'restore' ? toExpirationRequest(message) : undefined;
 
         if (action === 'delete' || action === 'permanent-delete') {
             const label = action === 'delete' ? '业务删除' : '永久删除';
-            const confirmed = await confirmAction(`确定对容器「${containerId}」执行${label}吗？`, label);
+            const confirmed = await confirmAction(`确定对服务「${serviceId}」执行${label}吗？`, label);
             if (!confirmed) {
                 return false;
             }
@@ -717,9 +716,9 @@ export class AdminPanel implements vscode.Disposable {
         }
 
         if (isContainerOperationAction(action)) {
-            const operation = this.operationRegistry?.begin(containerId, action, 'admin');
+            const operation = this.operationRegistry?.begin(serviceId, action, 'admin');
             if (this.operationRegistry && !operation) {
-                throw new Error(`容器 "${containerId}" 正在执行操作，请稍后重试`);
+                throw new Error(`服务 "${serviceId}" 正在执行操作，请稍后重试`);
             }
 
             try {
@@ -728,18 +727,18 @@ export class AdminPanel implements vscode.Disposable {
                     location: vscode.ProgressLocation.Notification,
                     cancellable: false,
                 }, async progress => {
-                    progress.report({ message: `容器 ${containerId}` });
-                    await this.executeLifecycleAction(adminApi, containerId, action, restoreExpiration);
+                    progress.report({ message: `服务 ${serviceId}` });
+                    await this.executeLifecycleAction(adminApi, serviceId, action, restoreExpiration);
                 });
 
                 if (operation) {
-                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
+                    const reconciling = this.operationRegistry?.setPhase(serviceId, 'reconciling', operation.operationId);
                     if (reconciling) {
                         this.scheduleReconciliationTimeout(reconciling);
                         const confirmed = await this.reconcileContainerOperation(reconciling);
                         if (!confirmed) {
                             void vscode.window.showInformationMessage(
-                                `云端沙箱 服务 "${containerId}" 已提交${getContainerOperationName(action)}，正在确认状态`,
+                                `云端沙箱 服务 "${serviceId}" 已提交${getContainerOperationName(action)}，正在确认状态`,
                             );
                         }
                     }
@@ -747,20 +746,20 @@ export class AdminPanel implements vscode.Disposable {
                 return true;
             } catch (error) {
                 if (operation && isRequestTimeoutError(error)) {
-                    const reconciling = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
+                    const reconciling = this.operationRegistry?.setPhase(serviceId, 'reconciling', operation.operationId);
                     if (reconciling) {
                         this.scheduleReconciliationTimeout(reconciling);
                         void this.reconcileContainerOperation(reconciling);
                     }
                     if (this.panel) {
                         void vscode.window.showInformationMessage(
-                            `云端沙箱 服务 "${containerId}" 的${getContainerOperationName(action)}请求已等待 1 分钟，正在进行重试...`,
+                            `云端沙箱 服务 "${serviceId}" 的${getContainerOperationName(action)}请求已等待 1 分钟，正在进行重试...`,
                         );
                     }
                     return true;
                 }
                 if (operation) {
-                    this.operationRegistry?.complete(containerId, 'failed', operation.operationId);
+                    this.operationRegistry?.complete(serviceId, 'failed', operation.operationId);
                 }
                 throw error;
             }
@@ -768,28 +767,28 @@ export class AdminPanel implements vscode.Disposable {
 
         switch (action) {
             case 'expiration':
-                await adminApi.setExpiration(containerId, toExpirationRequest(message));
+                await adminApi.setExpiration(serviceId, toExpirationRequest(message));
                 return true;
         }
     }
 
-    private async connectContainer(containerId: string, panel: vscode.WebviewPanel, generation: number): Promise<void> {
-        const container = this.state.containers.find(item => item.container_id === containerId);
+    private async connectContainer(serviceId: string, panel: vscode.WebviewPanel, generation: number): Promise<void> {
+        const container = this.state.containers.find(item => item.service_id === serviceId);
         if (!container) {
-            throw new Error(`容器 "${containerId}" 不在当前管理员清单中`);
+            throw new Error(`服务 "${serviceId}" 不在当前管理员清单中`);
         }
         if (container.business_deleted || container.status.toLowerCase() === 'business_deleted') {
-            throw new Error(`容器 "${containerId}" 已业务删除，无法连接`);
+            throw new Error(`服务 "${serviceId}" 已业务删除，无法连接`);
         }
-        if (isContainerConnectionProcessing(container.status) || this.operationRegistry?.has(containerId)) {
-            throw new Error(`容器 "${containerId}" 正在处理中，暂时无法连接`);
+        if (isContainerConnectionProcessing(container.status) || this.operationRegistry?.has(serviceId)) {
+            throw new Error(`服务 "${serviceId}" 正在处理中，暂时无法连接`);
         }
         if (!container.endpoint?.trim()) {
-            throw new Error(`容器 "${containerId}" 尚无可用 endpoint，无法连接`);
+            throw new Error(`服务 "${serviceId}" 尚无可用 endpoint，无法连接`);
         }
         const endpoint = parseContainerEndpoint(container.endpoint, { allowDebugProxy: this.getSettings().debug });
         if (!endpoint) {
-            throw new InvalidContainerEndpointError(containerId, container.endpoint);
+            throw new InvalidContainerEndpointError(serviceId, container.endpoint);
         }
         if (!this.onConnect) {
             throw new Error('当前环境没有可用的连接处理器');
@@ -799,14 +798,14 @@ export class AdminPanel implements vscode.Disposable {
         if (!this.isActive(panel, generation)) {
             return;
         }
-        if (this.operationRegistry?.has(containerId)) {
-            throw new Error(`容器 "${containerId}" 正在处理中，暂时无法连接`);
+        if (this.operationRegistry?.has(serviceId)) {
+            throw new Error(`服务 "${serviceId}" 正在处理中，暂时无法连接`);
         }
 
         const entries = this.containerConfig.list(document.config);
-        const existing = entries.find(entry => entry.containerId === containerId);
+        const existing = entries.find(entry => entry.serviceId === serviceId);
         const usedHosts = new Set(entries
-            .filter(entry => entry.containerId !== containerId)
+            .filter(entry => entry.serviceId !== serviceId)
             .map(entry => entry.host.trim())
             .filter(Boolean));
         const existingHost = existing?.host.trim();
@@ -816,7 +815,7 @@ export class AdminPanel implements vscode.Disposable {
         const name = existing?.name?.trim() || host;
         const settings = this.getSettings();
         this.containerConfig.upsertContainer(document.config, {
-            containerId,
+            serviceId,
             host,
             name,
             hostName: endpoint.host,
@@ -826,7 +825,7 @@ export class AdminPanel implements vscode.Disposable {
             userName: settings.userName,
         });
         await this.containerConfig.write(document);
-        if (!this.isActive(panel, generation) || this.operationRegistry?.has(containerId)) {
+        if (!this.isActive(panel, generation) || this.operationRegistry?.has(serviceId)) {
             return;
         }
 
@@ -835,31 +834,31 @@ export class AdminPanel implements vscode.Disposable {
 
     private async executeLifecycleAction(
         adminApi: AdminRestApi,
-        containerId: string,
+        serviceId: string,
         action: ContainerOperationAction,
         restoreExpiration?: ExpirationRequest,
     ): Promise<void> {
         switch (action) {
             case 'start':
-                await adminApi.startContainer(containerId);
+                await adminApi.startContainer(serviceId);
                 return;
             case 'stop':
-                await adminApi.stopContainer(containerId);
+                await adminApi.stopContainer(serviceId);
                 return;
             case 'restart':
-                await adminApi.restartContainer(containerId);
+                await adminApi.restartContainer(serviceId);
                 return;
             case 'delete':
-                await adminApi.deleteContainer(containerId);
+                await adminApi.deleteContainer(serviceId);
                 return;
             case 'permanent-delete':
-                await adminApi.permanentDeleteContainer(containerId);
+                await adminApi.permanentDeleteContainer(serviceId);
                 return;
             case 'restore':
                 if (!restoreExpiration) {
                     throw new Error('恢复操作缺少有效期');
                 }
-                await adminApi.restoreContainer(containerId, restoreExpiration);
+                await adminApi.restoreContainer(serviceId, restoreExpiration);
                 return;
         }
     }
@@ -1013,15 +1012,15 @@ export class AdminPanel implements vscode.Disposable {
     private handleContainerOperationEvent(event: ContainerOperationEvent): void {
         const panel = this.panel;
         if (event.type === 'completed') {
-            this.clearReconciliationTimer(event.operation.containerId, event.operation.operationId);
+            this.clearReconciliationTimer(event.operation.serviceId, event.operation.operationId);
             if (panel && event.operation.source === 'admin' && event.outcome === 'succeeded') {
                 void vscode.window.showInformationMessage(
-                    `云端沙箱 服务 "${event.operation.containerId}" 已${getContainerOperationName(event.operation.action)}`,
+                    `云端沙箱 服务 "${event.operation.serviceId}" 已${getContainerOperationName(event.operation.action)}`,
                 );
             }
             if (panel && event.operation.source === 'admin' && event.outcome === 'failed' && event.operation.phase === 'reconciling') {
                 void vscode.window.showWarningMessage(
-                    `云端沙箱 服务 "${event.operation.containerId}" 的${getContainerOperationName(event.operation.action)}结果暂时无法确认，请刷新后再试`,
+                    `云端沙箱 服务 "${event.operation.serviceId}" 的${getContainerOperationName(event.operation.action)}结果暂时无法确认，请刷新后再试`,
                 );
             }
             if (panel && this.state.status === 'ready' && this.state.activeTab !== 'volume') {
@@ -1038,12 +1037,12 @@ export class AdminPanel implements vscode.Disposable {
         if (!this.operationRegistry) {
             return this.state;
         }
-        const processingContainerIds = this.operationRegistry.list().map(operation => operation.containerId);
+        const processingServiceIds = this.operationRegistry.list().map(operation => operation.serviceId);
         return {
             ...this.state,
-            processingContainerIds,
+            processingServiceIds,
             containers: this.state.containers.map(container => {
-                const operation = this.operationRegistry?.get(container.container_id);
+                const operation = this.operationRegistry?.get(container.service_id);
                 if (!operation || container.business_deleted && operation.action !== 'restore') {
                     return container;
                 }
@@ -1061,7 +1060,7 @@ export class AdminPanel implements vscode.Disposable {
             return true;
         }
         if (!this.onContainerOperation) {
-            this.operationRegistry.complete(operation.containerId, 'succeeded', operation.operationId);
+            this.operationRegistry.complete(operation.serviceId, 'succeeded', operation.operationId);
             return true;
         }
         if (!this.operationRegistry.isCurrent(operation)) {
@@ -1070,7 +1069,7 @@ export class AdminPanel implements vscode.Disposable {
         try {
             const confirmed = await this.onContainerOperation(operation);
             if (confirmed && this.operationRegistry.isCurrent(operation)) {
-                this.operationRegistry.complete(operation.containerId, 'succeeded', operation.operationId);
+                this.operationRegistry.complete(operation.serviceId, 'succeeded', operation.operationId);
                 return true;
             }
         } catch (error) {
@@ -1081,29 +1080,29 @@ export class AdminPanel implements vscode.Disposable {
     }
 
     private scheduleReconciliationTimeout(operation: ContainerOperationState): void {
-        this.clearReconciliationTimer(operation.containerId);
+        this.clearReconciliationTimer(operation.serviceId);
         const timer = setTimeout(() => {
-            const entry = this.reconciliationTimers.get(operation.containerId);
+            const entry = this.reconciliationTimers.get(operation.serviceId);
             if (!entry || entry.operationId !== operation.operationId) {
                 return;
             }
-            this.reconciliationTimers.delete(operation.containerId);
-            const current = this.operationRegistry?.get(operation.containerId);
+            this.reconciliationTimers.delete(operation.serviceId);
+            const current = this.operationRegistry?.get(operation.serviceId);
             if (!current || current.operationId !== operation.operationId || current.phase !== 'reconciling' || current.action !== operation.action) {
                 return;
             }
-            this.operationRegistry?.complete(operation.containerId, 'failed', operation.operationId);
+            this.operationRegistry?.complete(operation.serviceId, 'failed', operation.operationId);
         }, OPERATION_RECONCILIATION_TIMEOUT_MS);
-        this.reconciliationTimers.set(operation.containerId, { operationId: operation.operationId, timer });
+        this.reconciliationTimers.set(operation.serviceId, { operationId: operation.operationId, timer });
     }
 
-    private clearReconciliationTimer(containerId: string, operationId?: number): void {
-        const entry = this.reconciliationTimers.get(containerId);
+    private clearReconciliationTimer(serviceId: string, operationId?: number): void {
+        const entry = this.reconciliationTimers.get(serviceId);
         if (!entry || operationId !== undefined && entry.operationId !== operationId) {
             return;
         }
         clearTimeout(entry.timer);
-        this.reconciliationTimers.delete(containerId);
+        this.reconciliationTimers.delete(serviceId);
     }
 
     private clearReconciliationTimers(): void {

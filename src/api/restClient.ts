@@ -12,7 +12,7 @@ import {
     AdminCheckRequest,
     AdminCheckResponse,
     AdminStateResponse,
-    ContainerIdsResponse,
+    ServiceIdsResponse,
     ContainerLimitRequest,
     ContainerLimitResponse,
     ContainerStatusListResponse,
@@ -149,14 +149,14 @@ export interface RestClientOptions {
 
 export interface UserRestApi {
     createContainer(request: CreateContainerRequest): Promise<CreateContainerResponse>;
-    getContainerIds(query: UserContainerQuery): Promise<ContainerIdsResponse>;
+    getServiceIds(query: UserContainerQuery): Promise<ServiceIdsResponse>;
     getContainerStatuses(query: UserContainerQuery): Promise<ContainerStatusListResponse>;
-    getContainer(containerId: string): Promise<ContainerStatusResponse>;
+    getContainer(serviceId: string): Promise<ContainerStatusResponse>;
     checkAdmin(request: AdminCheckRequest): Promise<AdminCheckResponse>;
-    startContainer(containerId: string): Promise<void>;
-    stopContainer(containerId: string): Promise<void>;
-    restartContainer(containerId: string): Promise<void>;
-    deleteContainer(containerId: string): Promise<void>;
+    startContainer(serviceId: string): Promise<void>;
+    stopContainer(serviceId: string): Promise<void>;
+    restartContainer(serviceId: string): Promise<void>;
+    deleteContainer(serviceId: string): Promise<void>;
 }
 
 export interface GitRestApi {
@@ -179,15 +179,15 @@ export interface AdminRestApi {
     listContainers(): Promise<AdminContainerListResponse>;
     listOrphanContainers(): Promise<OrphanContainerListResponse>;
     deleteOrphanContainers(request: OrphanContainerDeleteRequest): Promise<void>;
-    getContainer(containerId: string): Promise<AdminContainerResponse>;
-    getContainerLog(containerId: string): Promise<string>;
-    startContainer(containerId: string): Promise<void>;
-    stopContainer(containerId: string): Promise<void>;
-    restartContainer(containerId: string): Promise<void>;
-    deleteContainer(containerId: string): Promise<void>;
-    permanentDeleteContainer(containerId: string): Promise<void>;
-    setExpiration(containerId: string, request: ExpirationRequest): Promise<ExpirationResponse>;
-    restoreContainer(containerId: string, request: ExpirationRequest): Promise<void>;
+    getContainer(serviceId: string): Promise<AdminContainerResponse>;
+    getContainerLog(serviceId: string): Promise<string>;
+    startContainer(serviceId: string): Promise<void>;
+    stopContainer(serviceId: string): Promise<void>;
+    restartContainer(serviceId: string): Promise<void>;
+    deleteContainer(serviceId: string): Promise<void>;
+    permanentDeleteContainer(serviceId: string): Promise<void>;
+    setExpiration(serviceId: string, request: ExpirationRequest): Promise<ExpirationResponse>;
+    restoreContainer(serviceId: string, request: ExpirationRequest): Promise<void>;
     getState(): Promise<AdminStateResponse>;
     getContainerLimit(): Promise<ContainerLimitResponse>;
     setContainerLimit(request: ContainerLimitRequest): Promise<ContainerLimitResponse>;
@@ -356,7 +356,7 @@ export class RestClient {
                 jsonBody: request,
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
             }),
-            getContainerIds: query => this.requestJson<ContainerIdsResponse>('GET', '/user/containers', { query }),
+            getServiceIds: query => this.requestJson<ServiceIdsResponse>('GET', '/user/containers', { query }),
             getContainerStatuses: async query => {
                 const response = await this.requestJson<ContainerStatusListResponse>('GET', '/user/containers/status', { query });
                 return {
@@ -364,14 +364,14 @@ export class RestClient {
                     containers: response.containers.map(normalizeContainerStatus),
                 };
             },
-            getContainer: async containerId => normalizeContainerStatus(
-                await this.requestJson<ContainerStatusResponse>('GET', this.containerPath('/user/containers', containerId)),
+            getContainer: async serviceId => normalizeContainerStatus(
+                await this.requestJson<ContainerStatusResponse>('GET', this.servicePath('/user/containers', serviceId)),
             ),
             checkAdmin: request => this.requestJson<AdminCheckResponse>('POST', '/user/check', { jsonBody: request }),
-            startContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'stop'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'restart'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/user/containers', containerId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            startContainer: serviceId => this.requestNoContent('POST', this.actionPath('/user/containers', serviceId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            stopContainer: serviceId => this.requestNoContent('POST', this.actionPath('/user/containers', serviceId, 'stop'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            restartContainer: serviceId => this.requestNoContent('POST', this.actionPath('/user/containers', serviceId, 'restart'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            deleteContainer: serviceId => this.requestNoContent('POST', this.actionPath('/user/containers', serviceId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
         };
 
         const reportGitFailure = (serviceId: string, operatorUserId: string, status: GitFailureStatus) => this.requestJson<GitReportResponse>(
@@ -414,15 +414,15 @@ export class RestClient {
             listContainers: () => this.requestJson<AdminContainerListResponse>('GET', '/admin/containers'),
             listOrphanContainers: () => this.requestJson<OrphanContainerListResponse>('GET', '/admin/containers/orphans'),
             deleteOrphanContainers: request => this.requestNoContent('POST', '/admin/containers/orphans/delete', { jsonBody: request }),
-            getContainer: containerId => this.requestJson<AdminContainerResponse>('GET', this.containerPath('/admin/containers', containerId)),
-            getContainerLog: containerId => this.requestText('GET', `${this.containerPath('/admin/containers', containerId)}/log`),
-            startContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            stopContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'stop'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            restartContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restart'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            deleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            permanentDeleteContainer: containerId => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'permanent-delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
-            setExpiration: (containerId, request) => this.requestJson<ExpirationResponse>('POST', this.actionPath('/admin/containers', containerId, 'expiration'), { jsonBody: request }),
-            restoreContainer: (containerId, request) => this.requestNoContent('POST', this.actionPath('/admin/containers', containerId, 'restore'), { jsonBody: request, timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            getContainer: serviceId => this.requestJson<AdminContainerResponse>('GET', this.servicePath('/admin/containers', serviceId)),
+            getContainerLog: serviceId => this.requestText('GET', `${this.servicePath('/admin/containers', serviceId)}/log`),
+            startContainer: serviceId => this.requestNoContent('POST', this.actionPath('/admin/containers', serviceId, 'start'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            stopContainer: serviceId => this.requestNoContent('POST', this.actionPath('/admin/containers', serviceId, 'stop'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            restartContainer: serviceId => this.requestNoContent('POST', this.actionPath('/admin/containers', serviceId, 'restart'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            deleteContainer: serviceId => this.requestNoContent('POST', this.actionPath('/admin/containers', serviceId, 'delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            permanentDeleteContainer: serviceId => this.requestNoContent('POST', this.actionPath('/admin/containers', serviceId, 'permanent-delete'), { timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
+            setExpiration: (serviceId, request) => this.requestJson<ExpirationResponse>('POST', this.actionPath('/admin/containers', serviceId, 'expiration'), { jsonBody: request }),
+            restoreContainer: (serviceId, request) => this.requestNoContent('POST', this.actionPath('/admin/containers', serviceId, 'restore'), { jsonBody: request, timeoutMs: DEFAULT_LIFECYCLE_TIMEOUT_MS }),
             getState: () => this.requestJson<AdminStateResponse>('GET', '/admin/state'),
             getContainerLimit: () => this.requestJson<ContainerLimitResponse>('GET', '/admin/containers/limit'),
             setContainerLimit: request => this.requestJson<ContainerLimitResponse>('POST', '/admin/containers/limit', { jsonBody: request }),
@@ -695,8 +695,8 @@ export class RestClient {
         return url;
     }
 
-    private containerPath(prefix: string, containerId: string): string {
-        return `${prefix}/${encodeURIComponent(containerId)}`;
+    private servicePath(prefix: string, serviceId: string): string {
+        return `${prefix}/${encodeURIComponent(serviceId)}`;
     }
 
     private gitPath(serviceId: string, resource: string): string {
@@ -727,8 +727,8 @@ export class RestClient {
         return { [ADMIN_OPERATOR_USER_ID_HEADER]: normalizedUserId };
     }
 
-    private actionPath(prefix: string, containerId: string, action: string): string {
-        return `${this.containerPath(prefix, containerId)}/${action}`;
+    private actionPath(prefix: string, serviceId: string, action: string): string {
+        return `${this.servicePath(prefix, serviceId)}/${action}`;
     }
 
     private defaultImagePath(type?: ContainerTypeValue): string {

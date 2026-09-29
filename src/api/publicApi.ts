@@ -5,9 +5,9 @@ import { Log } from '../common/logger';
 import { getRemoteSettings, RemoteSettings } from '../settings';
 import { UserIdProvider } from '../user';
 import {
-    ContainerIdsResponse,
     ContainerStatusResponse,
     CreateContainerResponse,
+    ServiceIdsResponse,
     AdminCheckResponse,
     FileSyncResult,
     PublicContainerCallback,
@@ -48,8 +48,8 @@ export interface PublicUserContainerApi {
         request: PublicCreateContainerRequest,
         options?: { initializationSignal?: AbortSignal },
     ): Promise<CreateContainerResponse>;
-    getActiveContainerIds(query?: PublicContainerQuery): Promise<ContainerIdsResponse>;
-    getContainer(containerId: string): Promise<PublicContainerStatusResponse>;
+    getActiveServiceIds(query?: PublicContainerQuery): Promise<ServiceIdsResponse>;
+    getContainer(serviceId: string): Promise<PublicContainerStatusResponse>;
     checkAdmin(): Promise<AdminCheckResponse>;
     syncFiles(
         source: string,
@@ -57,10 +57,10 @@ export interface PublicUserContainerApi {
         conflict?: PublicFileSyncConflict,
         mirror?: boolean,
     ): Promise<FileSyncResult>;
-    startContainer(containerId: string): Promise<void>;
-    stopContainer(containerId: string): Promise<void>;
-    restartContainer(containerId: string): Promise<void>;
-    deleteContainer(containerId: string): Promise<void>;
+    startContainer(serviceId: string): Promise<void>;
+    stopContainer(serviceId: string): Promise<void>;
+    restartContainer(serviceId: string): Promise<void>;
+    deleteContainer(serviceId: string): Promise<void>;
 }
 
 export type TestAgentRemoteApi = PublicUserContainerApi;
@@ -151,9 +151,9 @@ export function createPublicUserContainerApi(
 
     const fileSync = options.fileSync ?? new FileSyncService({
         config: options.containerConfig ?? new ContainerConfig(),
-        getContainerStatus: async containerId => {
+        getContainerStatus: async serviceId => {
             const { userApi } = await prepareUserRequest();
-            return userApi.getContainer(containerId);
+            return userApi.getContainer(serviceId);
         },
         sftpProvider: options.sftpProvider,
     });
@@ -173,7 +173,7 @@ export function createPublicUserContainerApi(
             await runCreateCallback('postCompleted', callbacks.postCompleted, {
                 pluginId,
                 userApi,
-                containerId: created.container_id,
+                serviceId: created.service_id,
             });
 
             let result: CreateContainerResponse = created;
@@ -181,7 +181,6 @@ export function createPublicUserContainerApi(
             if (initializationPoller) {
                 // The postCompleted callback is the handoff into the internal waiting/SSH/Git initialization flow.
                 const initialization = await initializationPoller.initialize({
-                    containerId: created.container_id,
                     serviceId: created.service_id,
                     operatorUserId: userId,
                     endpoint: created.endpoint,
@@ -194,7 +193,7 @@ export function createPublicUserContainerApi(
                     await runCreateCallback('gitInitialized', callbacks.gitInitialized, {
                         pluginId,
                         userApi,
-                        containerId: created.container_id,
+                        serviceId: created.service_id,
                     });
                     result = mergeFinalContainerStatus(created, finalContainer);
                 }
@@ -205,35 +204,35 @@ export function createPublicUserContainerApi(
                 await runCreateCallback('containerPrepared', callbacks.containerPrepared, {
                     pluginId,
                     userApi,
-                    containerId: created.container_id,
+                    serviceId: created.service_id,
                 });
             }
             return result;
         },
-        getActiveContainerIds: async query => {
+        getActiveServiceIds: async query => {
             const normalizedQuery = query ?? {};
             assertObject(normalizedQuery, '查询参数必须是对象');
             const { userId, userApi } = await prepareUserRequest();
             const queryFields = omitPublicFields(normalizedQuery, new Set(['user_id']));
             const response = await userApi.getContainerStatuses({ ...queryFields, user_id: userId });
-            const containerIds: string[] = [];
+            const serviceIds: string[] = [];
             const seen = new Set<string>();
             for (const container of response.containers ?? []) {
-                if (typeof container.container_id !== 'string'
+                if (typeof container.service_id !== 'string'
                     || typeof container.status !== 'string'
                     || container.status.trim().toLowerCase() !== 'running'
-                    || seen.has(container.container_id)) {
+                    || seen.has(container.service_id)) {
                     continue;
                 }
-                seen.add(container.container_id);
-                containerIds.push(container.container_id);
+                seen.add(container.service_id);
+                serviceIds.push(container.service_id);
             }
-            return { container_ids: containerIds };
+            return { service_ids: serviceIds };
         },
-        getContainer: async containerId => {
+        getContainer: async serviceId => {
             const { userApi } = await prepareUserRequest();
-            const response = stripPublicContainerFields(await userApi.getContainer(containerId));
-            const name = await getConfiguredContainerName(options.containerConfig, containerId);
+            const response = stripPublicContainerFields(await userApi.getContainer(serviceId));
+            const name = await getConfiguredContainerName(options.containerConfig, serviceId);
             return name === undefined ? response : { ...response, name };
         },
         checkAdmin: async () => {
@@ -241,38 +240,38 @@ export function createPublicUserContainerApi(
             return stripUserId(await userApi.checkAdmin({ user_id: userId }));
         },
         syncFiles: (source, target, conflict, mirror) => fileSync.syncFiles(source, target, conflict, mirror),
-        startContainer: async containerId => {
+        startContainer: async serviceId => {
             const { userApi } = await prepareUserRequest();
-            await userApi.startContainer(containerId);
+            await userApi.startContainer(serviceId);
         },
-        stopContainer: async containerId => {
+        stopContainer: async serviceId => {
             const { userApi } = await prepareUserRequest();
-            await userApi.stopContainer(containerId);
+            await userApi.stopContainer(serviceId);
         },
-        restartContainer: async containerId => {
+        restartContainer: async serviceId => {
             const { userApi } = await prepareUserRequest();
-            await userApi.restartContainer(containerId);
+            await userApi.restartContainer(serviceId);
         },
-        deleteContainer: async containerId => {
+        deleteContainer: async serviceId => {
             const { userApi } = await prepareUserRequest();
-            await userApi.deleteContainer(containerId);
+            await userApi.deleteContainer(serviceId);
         },
     };
 
     async function runCreateCallback(
         stage: keyof PublicCreateContainerCallbacks,
         callback: PublicContainerCallback | undefined,
-        context: { pluginId: string; userApi: UserRestApi; containerId: string },
+        context: { pluginId: string; userApi: UserRestApi; serviceId: string },
     ): Promise<void> {
         if (!callback) {
             return;
         }
         try {
-            await callback(context.containerId);
+            await callback(context.serviceId);
         } catch (originalError) {
             let cleanupError: unknown;
             try {
-                await context.userApi.deleteContainer(context.containerId);
+                await context.userApi.deleteContainer(context.serviceId);
             } catch (error) {
                 cleanupError = error;
             }
@@ -350,13 +349,13 @@ function getPluginDisplayName(pluginId: string): string {
 
 async function getConfiguredContainerName(
     config: Pick<ContainerConfig, 'read' | 'list'> | undefined,
-    containerId: string,
+    serviceId: string,
 ): Promise<string | undefined> {
     if (!config) {
         return undefined;
     }
     const document = await config.read();
-    const entry = config.list(document.config).find(item => item.containerId === containerId);
+    const entry = config.list(document.config).find(item => item.serviceId === serviceId);
     if (!entry) {
         return undefined;
     }
@@ -393,13 +392,15 @@ function stripUserId<T extends object>(value: T): T {
 }
 
 function stripPublicContainerFields<T extends object>(value: T): T {
-    const safeValue = stripUserId(value) as T & { name?: unknown };
+    const safeValue = stripUserId(value) as T & { container_id?: unknown; name?: unknown };
+    delete safeValue.container_id;
     delete safeValue.name;
     return safeValue as T;
 }
 
 function stripPublicCreateFields<T extends object>(value: T): T {
-    const safeValue = stripUserId(value) as T & { plugin_id?: unknown; callbacks?: unknown };
+    const safeValue = stripUserId(value) as T & { container_id?: unknown; plugin_id?: unknown; callbacks?: unknown };
+    delete safeValue.container_id;
     delete safeValue.plugin_id;
     delete safeValue.callbacks;
     return safeValue as T;

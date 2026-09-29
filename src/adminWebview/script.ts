@@ -58,7 +58,7 @@ const getFocusStateKey = element => {
     if (element.matches('[data-action]')) {
         const action = element.getAttribute('data-action') || '';
         const identity = [
-            element.getAttribute('data-container-id'),
+            element.getAttribute('data-service-id'),
             element.getAttribute('data-container-action'),
             element.getAttribute('data-full-name'),
             element.getAttribute('data-user-id'),
@@ -214,29 +214,29 @@ const saveLogState = patch => {
     vscode.setState({ ...saved, log: { ...getSavedLogState(), ...patch } });
 };
 
-const updateLogModal = (containerId, content) => {
+const updateLogModal = (serviceId, content) => {
     const modal = document.querySelector('[data-log-modal]');
     const title = document.querySelector('[data-log-title]');
     const logContent = document.querySelector('[data-log-content]');
     const refresh = document.querySelector('[data-log-refresh]');
-    if (title) title.textContent = containerId || '未选择容器';
+    if (title) title.textContent = serviceId || '未选择服务';
     if (logContent) logContent.textContent = content;
-    if (refresh) refresh.setAttribute('data-container-id', containerId);
+    if (refresh) refresh.setAttribute('data-service-id', serviceId);
     if (modal) modal.hidden = false;
 };
 
-const openContainerLog = containerId => {
-    if (!containerId) return;
-    updateLogModal(containerId, '正在加载日志...');
-    saveLogState({ open: true, containerId });
+const openContainerLog = serviceId => {
+    if (!serviceId) return;
+    updateLogModal(serviceId, '正在加载日志...');
+    saveLogState({ open: true, serviceId });
     post('setLogOpen', { open: true });
 };
 
 const restoreLogState = () => {
     const saved = getSavedLogState();
-    if (saved.open !== true || typeof saved.containerId !== 'string' || !saved.containerId) return;
-    openContainerLog(saved.containerId);
-    post('getContainerLog', { containerId: saved.containerId });
+    if (saved.open !== true || typeof saved.serviceId !== 'string' || !saved.serviceId) return;
+    openContainerLog(saved.serviceId);
+    post('getContainerLog', { serviceId: saved.serviceId });
 };
 
 const getListContext = () => {
@@ -329,7 +329,7 @@ const getNodeKey = node => {
     const action = node.getAttribute('data-action');
     if (action) {
         return 'action:' + action + ':' + [
-            node.getAttribute('data-container-id'),
+            node.getAttribute('data-service-id'),
             node.getAttribute('data-container-action'),
             node.getAttribute('data-full-name'),
             node.getAttribute('data-user-id'),
@@ -552,7 +552,7 @@ const readForm = root => {
 
 const readButtonData = button => {
     const values = {};
-    if (button.dataset.containerId) values.containerId = button.dataset.containerId;
+    if (button.dataset.serviceId) values.serviceId = button.dataset.serviceId;
     if (button.dataset.containerAction) values.action = button.dataset.containerAction;
     if (button.dataset.fullName) values.fullName = button.dataset.fullName;
     if (button.dataset.userId) values.userId = button.dataset.userId;
@@ -772,7 +772,7 @@ document.addEventListener('click', event => {
 
     if (!startLoading(button)) return;
     if (action === 'getContainerLog') {
-        openContainerLog(button.getAttribute('data-container-id') || '');
+        openContainerLog(button.getAttribute('data-service-id') || '');
     }
     const form = button.closest('[data-form]') || button.closest('.resource-row');
     const requestId = post(action, { ...readForm(form), ...readButtonData(button) }, true);
@@ -868,12 +868,12 @@ window.addEventListener('message', event => {
 window.addEventListener('message', event => {
     const message = event.data;
     if (!message || typeof message !== 'object' || message.command !== 'containerLog') return;
-    const containerId = typeof message.containerId === 'string' ? message.containerId : '';
+    const serviceId = typeof message.serviceId === 'string' ? message.serviceId : '';
     const savedLog = getSavedLogState();
-    if (savedLog.open !== true || savedLog.containerId !== containerId) return;
+    if (savedLog.open !== true || savedLog.serviceId !== serviceId) return;
     const logText = typeof message.log === 'string' && message.log ? message.log : '暂无日志';
-    updateLogModal(containerId, logText);
-    saveLogState({ open: true, containerId });
+    updateLogModal(serviceId, logText);
+    saveLogState({ open: true, serviceId });
 });
 
 restoreFormState();

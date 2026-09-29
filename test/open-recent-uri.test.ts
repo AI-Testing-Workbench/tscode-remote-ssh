@@ -83,7 +83,7 @@ describe('handleOpenRecentUri', () => {
         expect(command).toBe('vscode.openFolder');
         expect(target).toMatchObject({ scheme: 'vscode-remote', path: '/app/repo' });
         expect((target as { authority: string }).authority).toContain('ssh-remote+');
-        expect(options).toEqual({ forceNewWindow: false });
+        expect(options).toEqual({ forceNewWindow: false, noRecentEntry: true });
     });
 
     it('does nothing when there is no matching record', async () => {

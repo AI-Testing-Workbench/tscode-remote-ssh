@@ -152,7 +152,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
     private tunnels: TunnelInfo[] = [];
 
     private labelFormatterDisposable: vscode.Disposable | undefined;
-    private readonly confirmDebugEnvironmentOnce: (containerId: string) => Promise<void>;
+    private readonly confirmDebugEnvironmentOnce: (serviceId: string) => Promise<void>;
 
     constructor(
         readonly context: vscode.ExtensionContext,
@@ -201,14 +201,14 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 const sshHostName = sshHostConfig['HostName'] ? sshHostConfig['HostName'].replace('%h', sshDest.hostname) : sshDest.hostname;
                 const sshUser = sshHostConfig['User'] || sshDest.user || os.userInfo().username || ''; // https://github.com/openssh/openssh-portable/blob/5ec5504f1d328d5bfa64280cd617c3efec4f78f3/sshconnect.c#L1561-L1562
                 const sshPort = sshHostConfig['Port'] ? parseInt(sshHostConfig['Port'], 10) : (sshDest.port || 22);
-                const containerId = sshHostConfig['ContainerId'];
-                if (containerId) {
+                const serviceId = sshHostConfig['ServiceId'];
+                if (serviceId) {
                     const endpoint = formatContainerEndpoint(sshHostName, sshHostConfig['Port']);
                     if (!parseContainerEndpoint(endpoint)) {
-                        throw new InvalidContainerEndpointError(containerId, endpoint);
+                        throw new InvalidContainerEndpointError(serviceId, endpoint);
                     }
                     if (getRemoteSettings().debug) {
-                        await this.confirmDebugEnvironmentOnce(containerId);
+                        await this.confirmDebugEnvironmentOnce(serviceId);
                     }
                 }
 
@@ -356,7 +356,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
     }
 
     public async executeGitCloneScript(
-        containerId: string,
+        serviceId: string,
         hostAlias: string,
         endpoint: string | null | undefined,
         signal?: AbortSignal,
@@ -364,10 +364,10 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const settings = getRemoteSettings();
         const parsedEndpoint = parseContainerEndpoint(endpoint, { allowDebugProxy: settings.debug });
         if (!parsedEndpoint) {
-            throw new InvalidContainerEndpointError(containerId, endpoint);
+            throw new InvalidContainerEndpointError(serviceId, endpoint);
         }
         if (settings.debug) {
-            await this.confirmDebugEnvironmentOnce(containerId);
+            await this.confirmDebugEnvironmentOnce(serviceId);
         }
         if (signal?.aborted) {
             throw new Error('码云初始化脚本执行已取消');

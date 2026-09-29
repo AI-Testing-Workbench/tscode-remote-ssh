@@ -4,7 +4,6 @@ import { GitConfigReader } from './gitConfig';
 import { promptForGitCredentials } from './gitCredentialPrompt';
 
 export interface ContainerInitializationInput {
-    containerId: string;
     serviceId: string;
     operatorUserId: string;
     statusReader?: Pick<UserRestApi, 'getContainer'>;
@@ -14,14 +13,12 @@ export interface ContainerInitializationInput {
 }
 
 export interface GitCredentialPromptContext {
-    containerId: string;
     serviceId: string;
     operatorUserId: string;
     gitStatus: Extract<GitStatus, 'credential_required' | 'credential_rejected'>;
 }
 
 export interface ContainerInitializationResult {
-    containerId: string;
     serviceId: string;
     operatorUserId: string;
     container: ContainerStatusResponse;
@@ -49,7 +46,7 @@ export function getInitializationResultContainer(value: unknown): ContainerStatu
         return undefined;
     }
     const container = value.container;
-    if (typeof container.container_id !== 'string' || typeof container.status !== 'string') {
+    if (typeof container.service_id !== 'string' || typeof container.status !== 'string') {
         return undefined;
     }
     return container as unknown as ContainerStatusResponse;
@@ -148,7 +145,7 @@ export class ContainerInitializationPoller {
         } catch (error) {
             return Promise.reject(error);
         }
-        const key = `${normalizedInput.operatorUserId}\u0000${normalizedInput.serviceId}\u0000${normalizedInput.containerId}`;
+        const key = `${normalizedInput.operatorUserId}\u0000${normalizedInput.serviceId}`;
         const existing = this.inFlight.get(key);
         if (existing) {
             return existing;
@@ -189,7 +186,7 @@ export class ContainerInitializationPoller {
                 this.throwIfCancelled(input);
                 let container: ContainerStatusResponse;
                 try {
-                    container = await statusReader.getContainer(input.containerId);
+                    container = await statusReader.getContainer(input.serviceId);
                     lastContainer = container;
                 } catch (error) {
                     if (attempt >= this.maxAttempts) {
@@ -206,24 +203,23 @@ export class ContainerInitializationPoller {
                     serverFinalFailureObserved = finalGitStatus?.startsWith('failed_') ?? false;
                     throw this.failure(
                         finalGitStatus?.startsWith('failed_') ? finalGitStatus : 'failed_container',
-                        `服务 "${input.containerId}" 初始化失败\n请联系支持团队解决`,
+                        `服务 "${input.serviceId}" 初始化失败\n请联系支持团队解决`,
                     );
                 }
                 if (finalGitStatus?.startsWith('failed_')) {
                     serverFinalFailureObserved = true;
-                    throw this.failure(finalGitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
+                    throw this.failure(finalGitStatus, `服务 "${input.serviceId}" 码云初始化失败\n请联系支持团队解决`);
                 }
                 if (finalGitStatus && finalGitStatus !== 'pending' && finalGitStatus !== 'initialized') {
-                    throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
+                    throw this.failure('failed_unexpected_state', `服务 "${input.serviceId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
                 }
                 if (normalStatus === 'running' && finalGitStatus === 'initialized') {
                     serverInitializationSucceeded = true;
                     const cloneResult = await this.waitForGitClone(gitClonePromise, input);
                     if (gitCloneFailed || cloneResult.error !== undefined) {
-                        throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的码云初始化脚本执行失败`, cloneResult.error);
+                        throw this.failure('git_clone_execution_failed', `服务 "${input.serviceId}" 的码云初始化脚本执行失败`, cloneResult.error);
                     }
                     return {
-                        containerId: input.containerId,
                         serviceId: input.serviceId,
                         operatorUserId: input.operatorUserId,
                         container,
@@ -246,21 +242,21 @@ export class ContainerInitializationPoller {
                     this.throwIfCancelled(input);
 
                     if (!isKnownGitStatus(gitStatus)) {
-                        throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
+                        throw this.failure('failed_unexpected_state', `服务 "${input.serviceId}" 返回了无法识别的码云状态\n请联系支持团队解决`);
                     }
                     if (gitStatus.startsWith('failed_')) {
                         serverFinalFailureObserved = true;
-                        throw this.failure(gitStatus, `服务 "${input.containerId}" 码云初始化失败\n请联系支持团队解决`);
+                        throw this.failure(gitStatus, `服务 "${input.serviceId}" 码云初始化失败\n请联系支持团队解决`);
                     }
                     if (gitCloneFailed) {
-                        throw this.failure('git_clone_execution_failed', `服务 "${input.containerId}" 的码云初始化脚本执行失败`, gitCloneError);
+                        throw this.failure('git_clone_execution_failed', `服务 "${input.serviceId}" 的码云初始化脚本执行失败`, gitCloneError);
                     }
                     if (gitStatus === 'waiting' && !gitClonePromise) {
                         if (!this.runGitClone) {
-                            throw this.failure('git_clone_runner_missing', `服务 "${input.containerId}" 缺少码云初始化脚本执行器`);
+                            throw this.failure('git_clone_runner_missing', `服务 "${input.serviceId}" 缺少码云初始化脚本执行器`);
                         }
                         if (!normalizeOptionalText(container.endpoint)) {
-                            throw this.failure('container_endpoint_missing', `服务 "${input.containerId}" 已就绪但未返回连接地址`);
+                            throw this.failure('container_endpoint_missing', `服务 "${input.serviceId}" 已就绪但未返回连接地址`);
                         }
                         gitClonePromise = Promise.resolve()
                             .then(() => this.runGitClone!(container, gitCloneSignal))
@@ -272,11 +268,10 @@ export class ContainerInitializationPoller {
                     }
 
                     if (!gitClonePromise && !gitStatus.startsWith('failed_') && gitStatus !== 'waiting') {
-                        throw this.failure('failed_unexpected_state', `服务 "${input.containerId}" 在码云初始化脚本启动前返回了异常状态`);
+                        throw this.failure('failed_unexpected_state', `服务 "${input.serviceId}" 在码云初始化脚本启动前返回了异常状态`);
                     }
                     if (gitStatus === 'credential_required' || gitStatus === 'credential_rejected') {
                         const credential = await this.credentialPrompt({
-                            containerId: input.containerId,
                             serviceId: input.serviceId,
                             operatorUserId: input.operatorUserId,
                             gitStatus,
@@ -286,10 +281,10 @@ export class ContainerInitializationPoller {
                             reportFailureStatus = 'failed_user_cancelled';
                             await this.reportUserCancelled(input);
                             pluginFailureReportAttempted = true;
-                            throw this.failure('failed_user_cancelled', `服务 "${input.containerId}" 码云凭证输入已取消`);
+                            throw this.failure('failed_user_cancelled', `服务 "${input.serviceId}" 码云凭证输入已取消`);
                         }
                         if (!isValidCredential(credential)) {
-                            throw this.failure('credential_invalid', `服务 "${input.containerId}" 码云凭证不完整`);
+                            throw this.failure('credential_invalid', `服务 "${input.serviceId}" 码云凭证不完整`);
                         }
                         try {
                             await this.gitApi.submitGitCredential(input.serviceId, input.operatorUserId, credential);
@@ -333,7 +328,7 @@ export class ContainerInitializationPoller {
     ): Promise<{ error?: unknown }> {
         this.throwIfCancelled(input);
         if (!promise) {
-            throw this.failure('git_clone_not_started', `服务 "${input.containerId}" 尚未启动码云初始化脚本`);
+            throw this.failure('git_clone_not_started', `服务 "${input.serviceId}" 尚未启动码云初始化脚本`);
         }
         const result = await promise;
         this.throwIfCancelled(input);
@@ -363,7 +358,7 @@ export class ContainerInitializationPoller {
     private maxAttemptsError(input: ContainerInitializationInput, cause: unknown): ContainerInitializationError {
         return this.failure(
             'failed_max_attempts',
-            `服务 "${input.containerId}" 码云初始化未在规定时间内完成\n请联系支持团队解决`,
+            `服务 "${input.serviceId}" 码云初始化未在规定时间内完成\n请联系支持团队解决`,
             cause,
         );
     }
@@ -374,19 +369,15 @@ export class ContainerInitializationPoller {
 }
 
 function normalizeInput(input: ContainerInitializationInput): ContainerInitializationInput {
-    const containerId = typeof input.containerId === 'string' ? input.containerId.trim() : '';
     const serviceId = typeof input.serviceId === 'string' ? input.serviceId.trim() : '';
     const operatorUserId = typeof input.operatorUserId === 'string' ? input.operatorUserId.trim() : '';
-    if (!containerId) {
-        throw new ContainerInitializationError('container_id_missing', '创建响应中缺少有效的容器编号');
-    }
     if (!serviceId) {
         throw new ContainerInitializationError('service_id_missing', '创建响应中缺少有效的服务编号');
     }
     if (!operatorUserId) {
         throw new ContainerInitializationError('user_id_missing', '创建码云初始化会话时缺少用户编号');
     }
-    return { ...input, containerId, serviceId, operatorUserId };
+    return { ...input, serviceId, operatorUserId };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

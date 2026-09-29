@@ -25,19 +25,19 @@ describe('public user container API', () => {
         });
 
         await api.createContainer({ plugin_id: 'example.plugin', gitee_user: 'Alice' });
-        await api.getActiveContainerIds({ container_type: 'autotest_cloud' });
-        await api.getContainer('container-1');
+        await api.getActiveServiceIds({ container_type: 'autotest_cloud' });
+        await api.getContainer('service-1');
         await api.checkAdmin();
-        await api.startContainer('container-1');
-        await api.stopContainer('container-1');
-        await api.restartContainer('container-1');
-        await api.deleteContainer('container-1');
+        await api.startContainer('service-1');
+        await api.stopContainer('service-1');
+        await api.restartContainer('service-1');
+        await api.deleteContainer('service-1');
 
         expect(Object.keys(api).sort()).toEqual([
             'checkAdmin',
             'createContainer',
             'deleteContainer',
-            'getActiveContainerIds',
+            'getActiveServiceIds',
             'getContainer',
             'restartContainer',
             'startContainer',
@@ -56,32 +56,32 @@ describe('public user container API', () => {
             container_type: 'autotest_cloud',
             user_id: 'user-1',
         });
-        expect(userApi.getContainer).toHaveBeenCalledWith('container-1');
+        expect(userApi.getContainer).toHaveBeenCalledWith('service-1');
         expect(userApi.checkAdmin).toHaveBeenCalledWith({ user_id: 'user-1' });
-        expect(userApi.startContainer).toHaveBeenCalledWith('container-1');
-        expect(userApi.stopContainer).toHaveBeenCalledWith('container-1');
-        expect(userApi.restartContainer).toHaveBeenCalledWith('container-1');
-        expect(userApi.deleteContainer).toHaveBeenCalledWith('container-1');
+        expect(userApi.startContainer).toHaveBeenCalledWith('service-1');
+        expect(userApi.stopContainer).toHaveBeenCalledWith('service-1');
+        expect(userApi.restartContainer).toHaveBeenCalledWith('service-1');
+        expect(userApi.deleteContainer).toHaveBeenCalledWith('service-1');
         expect(userApiFactory).toHaveBeenCalledTimes(8);
         expect(userIdProvider.getCurrentUserId).toHaveBeenCalledTimes(8);
     });
 
-    it('returns only running container IDs and removes duplicate status entries', async () => {
+    it('returns only running service IDs and removes duplicate status entries', async () => {
         const userApi = createUserApi();
         vi.mocked(userApi.getContainerStatuses).mockResolvedValue({
             containers: [
-                containerStatus('running-1', 'running'),
-                containerStatus('stopped-1', 'stopped'),
-                containerStatus('running-1', 'RUNNING'),
-                containerStatus('pending-1', 'pending'),
-                containerStatus('failed-1', 'failed'),
-                containerStatus('unknown-1', 'unknown'),
-            ],
+                { ...containerStatus('service-running-1', 'running'), container_id: 'physical-running-1' },
+                { ...containerStatus('service-stopped-1', 'stopped'), container_id: 'physical-stopped-1' },
+                { ...containerStatus('service-running-1', 'RUNNING'), container_id: 'physical-duplicate-1' },
+                { ...containerStatus('service-pending-1', 'pending'), container_id: 'physical-pending-1' },
+                { ...containerStatus('service-failed-1', 'failed'), container_id: 'physical-failed-1' },
+                { ...containerStatus('service-unknown-1', 'unknown'), container_id: 'physical-unknown-1' },
+            ] as never,
         });
         const api = createApi(userApi);
 
-        await expect(api.getActiveContainerIds()).resolves.toEqual({
-            container_ids: ['running-1'],
+        await expect(api.getActiveServiceIds()).resolves.toEqual({
+            service_ids: ['service-running-1'],
         });
     });
 
@@ -93,7 +93,7 @@ describe('public user container API', () => {
             userApiFactory,
         });
 
-        await expect(api.getActiveContainerIds()).rejects.toMatchObject({
+        await expect(api.getActiveServiceIds()).rejects.toMatchObject({
             name: 'PublicApiError',
             kind: 'configuration',
             code: PUBLIC_API_ERROR_CODES.USER_ID_MISSING,
@@ -107,8 +107,8 @@ describe('public user container API', () => {
         const api = createApi(userApi);
         const callback = vi.fn();
         vi.mocked(userApi.createContainer).mockResolvedValue({
-            container_id: 'container-1',
-            service_id: 'service-1',
+            service_id: 'service-created-1',
+            container_id: 'physical-created-1',
             status: 'pending',
             plugin_id: 'echoed.plugin',
             user_id: 'echoed-user',
@@ -130,9 +130,10 @@ describe('public user container API', () => {
             user_id: 'user-1',
         });
         expect(callback).toHaveBeenCalledOnce();
-        expect(callback).toHaveBeenCalledWith('container-1');
+        expect(callback).toHaveBeenCalledWith('service-created-1');
         expect(created).not.toHaveProperty('plugin_id');
         expect(created).not.toHaveProperty('user_id');
+        expect(created).not.toHaveProperty('container_id');
     });
 
     it('returns the admin limit mode through a zero-argument public method', async () => {
@@ -146,14 +147,19 @@ describe('public user container API', () => {
 
     it('waits for initialization and invokes each creation callback in order', async () => {
         const userApi = createUserApi();
+        vi.mocked(userApi.createContainer).mockResolvedValue({
+            service_id: 'service-created-1',
+            container_id: 'physical-created-1',
+            status: 'pending',
+        } as never);
         const calls: string[] = [];
-        const postCompleted = vi.fn((containerId: string) => { calls.push(`postCompleted:${containerId}`); });
-        const gitInitialized = vi.fn((containerId: string) => { calls.push(`gitInitialized:${containerId}`); });
-        const containerPrepared = vi.fn((containerId: string) => { calls.push(`containerPrepared:${containerId}`); });
+        const postCompleted = vi.fn((serviceId: string) => { calls.push(`postCompleted:${serviceId}`); });
+        const gitInitialized = vi.fn((serviceId: string) => { calls.push(`gitInitialized:${serviceId}`); });
+        const containerPrepared = vi.fn((serviceId: string) => { calls.push(`containerPrepared:${serviceId}`); });
         const initializationPoller = {
             initialize: vi.fn(async () => {
                 calls.push('git-poll-start');
-                return { container: containerStatus('container-1', 'running', 'initialized') };
+                return { container: containerStatus('service-created-1', 'running', 'initialized') };
             }),
         };
         const api = createPublicUserContainerApi({
@@ -173,14 +179,15 @@ describe('public user container API', () => {
         })).resolves.toMatchObject({ status: 'running' });
 
         expect(calls).toEqual([
-            'postCompleted:container-1',
+            'postCompleted:service-created-1',
             'git-poll-start',
-            'gitInitialized:container-1',
-            'containerPrepared:container-1',
+            'gitInitialized:service-created-1',
+            'containerPrepared:service-created-1',
         ]);
-        expect(postCompleted).toHaveBeenCalledWith('container-1');
-        expect(gitInitialized).toHaveBeenCalledWith('container-1');
-        expect(containerPrepared).toHaveBeenCalledWith('container-1');
+        expect(postCompleted).toHaveBeenCalledWith('service-created-1');
+        expect(gitInitialized).toHaveBeenCalledWith('service-created-1');
+        expect(containerPrepared).toHaveBeenCalledWith('service-created-1');
+        expect(initializationPoller.initialize).toHaveBeenCalledWith(expect.objectContaining({ serviceId: 'service-created-1' }));
         expect(initializationPoller.initialize).toHaveBeenCalledOnce();
         expect(userApi.deleteContainer).not.toHaveBeenCalled();
     });
@@ -202,6 +209,11 @@ describe('public user container API', () => {
         const userApi = createUserApi();
         const callbackError = new Error('callback failed');
         const cleanupError = new Error('cleanup failed');
+        vi.mocked(userApi.createContainer).mockResolvedValue({
+            service_id: 'service-callback-failure',
+            container_id: 'physical-callback-failure',
+            status: 'pending',
+        } as never);
         vi.mocked(userApi.deleteContainer).mockRejectedValue(cleanupError);
         vscode.extensions.getExtension.mockReturnValue({
             packageJSON: { displayName: 'Example Plugin' },
@@ -228,7 +240,8 @@ describe('public user container API', () => {
             cleanupError,
         });
         expect(userApi.deleteContainer).toHaveBeenCalledOnce();
-        expect(userApi.deleteContainer).toHaveBeenCalledWith('container-1');
+        expect(userApi.deleteContainer).toHaveBeenCalledWith('service-callback-failure');
+        expect(userApi.deleteContainer).not.toHaveBeenCalledWith('physical-callback-failure');
         expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Example Plugin'), expect.objectContaining({
             originalError: callbackError,
             cleanupError,
@@ -239,13 +252,14 @@ describe('public user container API', () => {
     it('adds the configured Name to public status and falls back to Host for old entries', async () => {
         const userApi = createUserApi();
         vi.mocked(userApi.getContainer).mockResolvedValue({
-            ...containerStatus('container-1', 'running'),
+            ...containerStatus('service-1', 'running'),
+            container_id: 'physical-1',
             name: 'backend-name',
             user_id: 'backend-user',
         } as never);
         const config = {
             read: vi.fn(async () => ({ config: {} as never, originalText: '' })),
-            list: vi.fn(() => [{ containerId: 'container-1', host: 'legacy-host' }]),
+            list: vi.fn(() => [{ serviceId: 'service-1', host: 'legacy-host' }]),
         };
         const api = createPublicUserContainerApi({
             userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
@@ -254,8 +268,9 @@ describe('public user container API', () => {
             containerConfig: config,
         });
 
-        await expect(api.getContainer('container-1')).resolves.toMatchObject({ name: 'legacy-host' });
-        await expect(api.getContainer('container-1')).resolves.not.toHaveProperty('user_id');
+        await expect(api.getContainer('service-1')).resolves.toMatchObject({ name: 'legacy-host' });
+        await expect(api.getContainer('service-1')).resolves.not.toHaveProperty('user_id');
+        await expect(api.getContainer('service-1')).resolves.not.toHaveProperty('container_id');
     });
 
     it('preserves REST errors for callers to identify', async () => {
@@ -278,10 +293,10 @@ function createApi(userApi: UserRestApi) {
 
 function createUserApi(): UserRestApi {
     return {
-        createContainer: vi.fn(async () => ({ container_id: 'container-1', service_id: 'service-1', status: 'pending' })),
-        getContainerIds: vi.fn(async () => ({ container_ids: ['container-1'] })),
+        createContainer: vi.fn(async () => ({ service_id: 'service-1', status: 'pending' })),
+        getServiceIds: vi.fn(async () => ({ service_ids: ['service-1'] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
-        getContainer: vi.fn(async () => containerStatus('container-1', 'running')),
+        getContainer: vi.fn(async () => containerStatus('service-1', 'running')),
         checkAdmin: vi.fn(async () => ({ admin: false, limit: 'user' as const })),
         startContainer: vi.fn(async () => undefined),
         stopContainer: vi.fn(async () => undefined),
@@ -290,9 +305,9 @@ function createUserApi(): UserRestApi {
     };
 }
 
-function containerStatus(containerId: string, status: string, git_fin_status?: string) {
+function containerStatus(serviceId: string, status: string, git_fin_status?: string) {
     return {
-        container_id: containerId,
+        service_id: serviceId,
         status,
         ...(git_fin_status ? { git_fin_status } : {}),
         gitee_user: '',

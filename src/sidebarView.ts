@@ -95,7 +95,7 @@ interface SidebarViewContext {
 
 interface SidebarActionState {
     action: string;
-    containerId?: string;
+    serviceId?: string;
     requestId?: string;
 }
 
@@ -125,7 +125,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
     private readonly stateSubscription: { dispose: () => void };
     private readonly operationSubscription: { dispose: () => void };
-    private readonly optimisticallyRemovedContainerIds = new Set<string>();
+    private readonly optimisticallyRemovedServiceIds = new Set<string>();
     private readonly activeRequestIds = new Set<string>();
     private readonly activeActions = new Map<string, SidebarActionState>();
     private readonly initializationControllers = new Map<AbortController, SidebarViewContext | undefined>();
@@ -165,7 +165,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.stateSubscription = this.state.subscribe(() => this.handleSyncStateUpdated());
         this.operationSubscription = this.operationRegistry?.subscribe(event => {
             if (event.type === 'completed') {
-                this.clearReconciliationTimer(event.operation.containerId, event.operation.operationId);
+                this.clearReconciliationTimer(event.operation.serviceId, event.operation.operationId);
             }
             this.render();
         }) ?? { dispose: () => undefined };
@@ -293,7 +293,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.viewDisposeSubscription = undefined;
         this.viewVisibilitySubscription = undefined;
         this.containerOperationCounts.clear();
-        this.optimisticallyRemovedContainerIds.clear();
+        this.optimisticallyRemovedServiceIds.clear();
         this.activeRequestIds.clear();
         this.activeActions.clear();
         this.clearReconciliationTimers();
@@ -455,11 +455,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
         const result = this.state.getState();
         const containers = result.containers
-            .filter(container => !this.optimisticallyRemovedContainerIds.has(container.containerId))
+            .filter(container => !this.optimisticallyRemovedServiceIds.has(container.serviceId))
             .map(container => this.applyOperationOverlay(container));
         const activeOperationIds = new Set([
             ...this.containerOperationCounts.keys(),
-            ...(this.operationRegistry?.list().map(operation => operation.containerId) ?? []),
+            ...(this.operationRegistry?.list().map(operation => operation.serviceId) ?? []),
         ]);
         const hasActiveOperation = activeOperationIds.size > 0;
         const error = this.pageError ?? result.error;
@@ -491,21 +491,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
     private handleSyncStateUpdated(): void {
         const result = this.state.getState();
-        for (const containerId of this.optimisticallyRemovedContainerIds) {
-            if (!result.containers.some(container => container.containerId === containerId)) {
-                this.optimisticallyRemovedContainerIds.delete(containerId);
+        for (const serviceId of this.optimisticallyRemovedServiceIds) {
+            if (!result.containers.some(container => container.serviceId === serviceId)) {
+                this.optimisticallyRemovedServiceIds.delete(serviceId);
             }
         }
         this.render();
     }
 
-    private optimisticallyRemoveContainer(containerId: string): void {
-        this.optimisticallyRemovedContainerIds.add(containerId);
+    private optimisticallyRemoveContainer(serviceId: string): void {
+        this.optimisticallyRemovedServiceIds.add(serviceId);
         this.render();
     }
 
-    private restoreOptimisticallyRemovedContainer(containerId: string): void {
-        if (this.optimisticallyRemovedContainerIds.delete(containerId)) {
+    private restoreOptimisticallyRemovedContainer(serviceId: string): void {
+        if (this.optimisticallyRemovedServiceIds.delete(serviceId)) {
             this.render();
         }
     }
@@ -522,12 +522,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             : operation();
     }
 
-    private markContainerDeleted(containerId: string): void {
-        this.sync.markContainerDeleted?.(containerId);
+    private markContainerDeleted(serviceId: string): void {
+        this.sync.markContainerDeleted?.(serviceId);
     }
 
-    private clearContainerDeleted(containerId: string): void {
-        this.sync.clearContainerDeleted?.(containerId);
+    private clearContainerDeleted(serviceId: string): void {
+        this.sync.clearContainerDeleted?.(serviceId);
     }
 
     private async reconcileContainerOperation(operation: ContainerOperationState): Promise<boolean> {
@@ -539,33 +539,34 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private scheduleReconciliationTimeout(operation: ContainerOperationState): void {
-        this.clearReconciliationTimer(operation.containerId);
+        const serviceId = operation.serviceId;
+        this.clearReconciliationTimer(serviceId);
         const timer = setTimeout(() => {
-            const entry = this.reconciliationTimers.get(operation.containerId);
+            const entry = this.reconciliationTimers.get(serviceId);
             if (!entry || entry.operationId !== operation.operationId) {
                 return;
             }
-            this.reconciliationTimers.delete(operation.containerId);
-            const current = this.operationRegistry?.get(operation.containerId);
+            this.reconciliationTimers.delete(serviceId);
+            const current = this.operationRegistry?.get(serviceId);
             if (!current || current.operationId !== operation.operationId || current.phase !== 'reconciling') {
                 return;
             }
-            this.operationRegistry?.complete(operation.containerId, 'failed', operation.operationId);
+            this.operationRegistry?.complete(serviceId, 'failed', operation.operationId);
             void vscode.window.showErrorMessage(
-                `服务 "${operation.containerId}" 的${getContainerOperationStatus(operation.action)}状态确认超时，请刷新后重试`,
+                `服务 "${serviceId}" 的${getContainerOperationStatus(operation.action)}状态确认超时，请刷新后重试`,
                 { modal: true },
             );
         }, SIDEBAR_RECONCILIATION_TIMEOUT_MS);
-        this.reconciliationTimers.set(operation.containerId, { operationId: operation.operationId, timer });
+        this.reconciliationTimers.set(serviceId, { operationId: operation.operationId, timer });
     }
 
-    private clearReconciliationTimer(containerId: string, operationId?: number): void {
-        const entry = this.reconciliationTimers.get(containerId);
+    private clearReconciliationTimer(serviceId: string, operationId?: number): void {
+        const entry = this.reconciliationTimers.get(serviceId);
         if (!entry || operationId !== undefined && entry.operationId !== operationId) {
             return;
         }
         clearTimeout(entry.timer);
-        this.reconciliationTimers.delete(containerId);
+        this.reconciliationTimers.delete(serviceId);
     }
 
     private clearReconciliationTimers(): void {
@@ -576,7 +577,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private applyOperationOverlay(container: SyncedContainer): SyncedContainer {
-        const operation = this.operationRegistry?.get(container.containerId);
+        const operation = this.operationRegistry?.get(container.serviceId);
         if (!operation) {
             return container;
         }
@@ -588,9 +589,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         };
     }
 
-    private findActiveActionKey(action: string, containerId?: string): string | undefined {
+    private findActiveActionKey(action: string, serviceId?: string): string | undefined {
         for (const [key, state] of this.activeActions) {
-            if (state.action === action && state.containerId === containerId) {
+            if (state.action === action && state.serviceId === serviceId) {
                 return key;
             }
         }
@@ -613,25 +614,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const action = message.command;
-        const containerId = typeof message.containerId === 'string' ? message.containerId : undefined;
+        const serviceId = typeof message.serviceId === 'string' ? message.serviceId : undefined;
         const requestId = typeof message.requestId === 'string' ? message.requestId.trim() || undefined : undefined;
         const requestKey = requestId
-            ? `${context.generation}:${action}:${containerId ?? ''}:${requestId}`
+            ? `${context.generation}:${action}:${serviceId ?? ''}:${requestId}`
             : undefined;
         if (requestKey && this.activeRequestIds.has(requestKey)) {
-            this.completeWebviewAction(context, action, containerId, requestId, 'busy');
+            this.completeWebviewAction(context, action, serviceId, requestId, 'busy');
             return;
         }
-        if (this.findActiveActionKey(action, containerId)
+        if (this.findActiveActionKey(action, serviceId)
             && !['connect', 'restart', 'delete'].includes(action)) {
-            this.completeWebviewAction(context, action, containerId, requestId, 'busy');
+            this.completeWebviewAction(context, action, serviceId, requestId, 'busy');
             return;
         }
         if (requestKey) {
             this.activeRequestIds.add(requestKey);
         }
         const actionKey = requestKey ?? `${context.generation}:anonymous:${++this.anonymousActionSequence}`;
-        this.activeActions.set(actionKey, { action, containerId, requestId });
+        this.activeActions.set(actionKey, { action, serviceId, requestId });
         this.render();
         let outcome: SidebarActionOutcome = 'succeeded';
         try {
@@ -667,30 +668,30 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     await this.onDisconnect();
                     return;
                 case 'connect':
-                    await this.connectContainer(containerId);
+                    await this.connectContainer(serviceId);
                     return;
-                case 'copyContainerId': {
-                    const container = this.findContainer(containerId);
+                case 'copyServiceId': {
+                    const container = this.findContainer(serviceId);
                     if (!container) {
                         throw new Error('无法复制 ID');
                     }
-                    await vscode.env.clipboard.writeText(container.containerId);
+                    await vscode.env.clipboard.writeText(container.serviceId);
                     if (this.isActiveView(context)) {
-                        void vscode.window.showInformationMessage('ID 已复制，请按需联系支持人员获取帮助');
+                        void vscode.window.showInformationMessage('服务 ID 已复制，请按需联系支持人员获取帮助');
                     }
                     return;
                 }
                 case 'openNovnc':
-                    await this.openNovncUrl(containerId);
+                    await this.openNovncUrl(serviceId);
                     return;
                 case 'restart':
-                    outcome = await this.runContainerAction(containerId, 'restart', id => this.publicApi.restartContainer(id));
+                    outcome = await this.runContainerAction(serviceId, 'restart', id => this.publicApi.restartContainer(id));
                     return;
                 case 'delete':
-                    outcome = await this.deleteContainer(containerId);
+                    outcome = await this.deleteContainer(serviceId);
                     return;
                 case 'removeHistory':
-                    await this.removeHistory(containerId);
+                    await this.removeHistory(serviceId);
                     return;
                 case 'clearExpired':
                     await this.removeExpiredContainers();
@@ -709,45 +710,45 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             }
             this.activeActions.delete(actionKey);
             this.render();
-            this.completeWebviewAction(context, action, containerId, requestId, outcome);
+            this.completeWebviewAction(context, action, serviceId, requestId, outcome);
         }
     }
 
-    private async connectContainer(containerId: string | undefined): Promise<void> {
-        const container = this.findContainer(containerId);
+    private async connectContainer(serviceId: string | undefined): Promise<void> {
+        const container = this.findContainer(serviceId);
         if (!container || !container.remote) {
             throw new Error('服务已被删除，无法连接');
         }
         if (container.error) {
-            throw new Error(`服务 "${container.containerId}" 当前不可连接：${container.error.message}`);
+            throw new Error(`服务 "${container.serviceId}" 当前不可连接：${container.error.message}`);
         }
-        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
-            throw new Error(`服务 "${container.containerId}" 正在执行操作，暂时无法连接`);
+        if ((this.containerOperationCounts.get(container.serviceId) ?? 0) > 0 || this.operationRegistry?.has(container.serviceId)) {
+            throw new Error(`服务 "${container.serviceId}" 正在执行操作，暂时无法连接`);
         }
         if (container.status.toLowerCase() !== 'running') {
-            throw new Error(`服务 "${container.containerId}" 当前状态为“${getStatusLabel(container)}”，仅运行中的服务可以连接`);
+            throw new Error(`服务 "${container.serviceId}" 当前状态为“${getStatusLabel(container)}”，仅运行中的服务可以连接`);
         }
         const document = await this.config.read();
         const configuredEntry = this.config.list(document.config)
-            .find(entry => entry.containerId === container.containerId && !entry.expiresAt);
+            .find(entry => entry.serviceId === container.serviceId && !entry.expiresAt);
         if (!configuredEntry?.host.trim()) {
-            throw new Error(`服务 "${container.containerId}" 没有可用的 Host 配置`);
+            throw new Error(`服务 "${container.serviceId}" 没有可用的 Host 配置`);
         }
 
         const endpoint = configuredEntry.hostName && configuredEntry.port !== undefined
             ? formatContainerEndpoint(configuredEntry.hostName, configuredEntry.port)
             : undefined;
         if (!parseContainerEndpoint(endpoint)) {
-            throw new InvalidContainerEndpointError(container.containerId, endpoint);
+            throw new InvalidContainerEndpointError(container.serviceId, endpoint);
         }
 
-        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
-            throw new Error(`服务 "${container.containerId}" 正在执行操作，暂时无法连接`);
+        if ((this.containerOperationCounts.get(container.serviceId) ?? 0) > 0 || this.operationRegistry?.has(container.serviceId)) {
+            throw new Error(`服务 "${container.serviceId}" 正在执行操作，暂时无法连接`);
         }
         if (!this.onConnect) {
             throw new Error('当前环境没有可用的连接处理器');
         }
-        this.beginContainerOperation(container.containerId);
+        this.beginContainerOperation(container.serviceId);
         try {
             const host = configuredEntry.host.trim();
             const giteeRepository = container.giteeRepository?.trim();
@@ -761,13 +762,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 throw new SidebarActionCancelledError('连接已取消');
             }
         } finally {
-            this.endContainerOperation(container.containerId);
+            this.endContainerOperation(container.serviceId);
             this.render();
         }
     }
 
-    private async openNovncUrl(containerId: string | undefined): Promise<void> {
-        const container = this.findContainer(containerId);
+    private async openNovncUrl(serviceId: string | undefined): Promise<void> {
+        const container = this.findContainer(serviceId);
         if (!container?.remote || !container.novncUrl) {
             throw new Error('当前服务没有可用的沙箱访问链接');
         }
@@ -782,33 +783,33 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private async runContainerAction(
-        containerId: string | undefined,
+        serviceId: string | undefined,
         operationAction: ContainerOperationAction,
-        action: (containerId: string) => Promise<void>,
+        action: (serviceId: string) => Promise<void>,
     ): Promise<'succeeded' | 'pending'> {
-        const container = this.findContainer(containerId);
+        const container = this.findContainer(serviceId);
         if (!container || !container.remote) {
             throw new Error('服务已被删除，无法执行此操作');
         }
-        if (!containerId) {
-            throw new Error('缺少容器 ID');
+        if (!serviceId) {
+            throw new Error('缺少服务 ID');
         }
         if (operationAction === 'restart' && container.status.toLowerCase() === 'failed') {
-            throw new Error(`服务 "${container.containerId}" 处于失败状态，不能重启`);
+            throw new Error(`服务 "${container.serviceId}" 处于失败状态，不能重启`);
         }
-        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
-            throw new Error(`服务 "${container.containerId}" 正在执行操作，请稍后重试`);
+        if ((this.containerOperationCounts.get(container.serviceId) ?? 0) > 0 || this.operationRegistry?.has(container.serviceId)) {
+            throw new Error(`服务 "${container.serviceId}" 正在执行操作，请稍后重试`);
         }
-        const operation = this.claimContainerOperation(containerId, operationAction);
-        this.beginContainerOperation(containerId);
+        const operation = this.claimContainerOperation(serviceId, operationAction);
+        this.beginContainerOperation(serviceId);
         let succeeded = false;
         let reconciling = false;
         try {
             // Lifecycle API requests must not hold the local config mutation gate.
             // Status refreshes are needed to reconcile the operation while it runs.
-            await action(containerId);
+            await action(serviceId);
             if (operation) {
-                const currentOperation = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
+                const currentOperation = this.operationRegistry?.setPhase(serviceId, 'reconciling', operation.operationId);
                 if (currentOperation) {
                     this.scheduleReconciliationTimeout(currentOperation);
                     const confirmed = await this.reconcileContainerOperation(currentOperation);
@@ -821,36 +822,36 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             }
         } finally {
             if (!reconciling) {
-                this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
+                this.releaseContainerOperation(serviceId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
             }
-            this.endContainerOperation(containerId);
+            this.endContainerOperation(serviceId);
             this.render();
         }
         return reconciling ? 'pending' : 'succeeded';
     }
 
-    private async deleteContainer(containerId: string | undefined): Promise<'succeeded' | 'pending'> {
-        if (!containerId) {
-            throw new Error('缺少容器 ID');
+    private async deleteContainer(serviceId: string | undefined): Promise<'succeeded' | 'pending'> {
+        if (!serviceId) {
+            throw new Error('缺少服务 ID');
         }
-        const container = this.findContainer(containerId);
+        const container = this.findContainer(serviceId);
         if (!container || !container.remote) {
             throw new Error('服务已被删除，无法执行此操作');
         }
-        if ((this.containerOperationCounts.get(container.containerId) ?? 0) > 0 || this.operationRegistry?.has(container.containerId)) {
-            throw new Error(`服务 "${container.containerId}" 正在执行操作，请稍后重试`);
+        if ((this.containerOperationCounts.get(container.serviceId) ?? 0) > 0 || this.operationRegistry?.has(container.serviceId)) {
+            throw new Error(`服务 "${container.serviceId}" 正在执行操作，请稍后重试`);
         }
-        const operation = this.claimContainerOperation(containerId, 'delete');
-        this.beginContainerOperation(containerId);
-        this.markContainerDeleted(containerId);
-        this.optimisticallyRemoveContainer(containerId);
+        const operation = this.claimContainerOperation(serviceId, 'delete');
+        this.beginContainerOperation(serviceId);
+        this.markContainerDeleted(serviceId);
+        this.optimisticallyRemoveContainer(serviceId);
         let succeeded = false;
         let reconciling = false;
         try {
-            await this.publicApi.deleteContainer(containerId);
-            await this.runMutation(() => this.removeContainerFromConfig(containerId));
+            await this.publicApi.deleteContainer(serviceId);
+            await this.runMutation(() => this.removeContainerFromConfig(serviceId));
             if (operation) {
-                const currentOperation = this.operationRegistry?.setPhase(containerId, 'reconciling', operation.operationId);
+                const currentOperation = this.operationRegistry?.setPhase(serviceId, 'reconciling', operation.operationId);
                 if (currentOperation) {
                     this.scheduleReconciliationTimeout(currentOperation);
                     const confirmed = await this.reconcileContainerOperation(currentOperation);
@@ -862,30 +863,30 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 succeeded = true;
             }
         } catch (error) {
-            this.clearContainerDeleted(containerId);
-            this.restoreOptimisticallyRemovedContainer(containerId);
+            this.clearContainerDeleted(serviceId);
+            this.restoreOptimisticallyRemovedContainer(serviceId);
             throw error;
         } finally {
             if (!reconciling) {
-                this.releaseContainerOperation(containerId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
+                this.releaseContainerOperation(serviceId, succeeded ? 'succeeded' : 'failed', operation?.operationId);
             }
-            this.endContainerOperation(containerId);
+            this.endContainerOperation(serviceId);
             this.render();
         }
         return reconciling ? 'pending' : 'succeeded';
     }
 
-    private async removeHistory(containerId: string | undefined): Promise<void> {
-        if (!containerId) {
-            throw new Error('缺少容器 ID');
+    private async removeHistory(serviceId: string | undefined): Promise<void> {
+        if (!serviceId) {
+            throw new Error('缺少服务 ID');
         }
-        const container = this.findContainer(containerId);
+        const container = this.findContainer(serviceId);
         if (!container || container.remote || !container.expiresAt) {
             throw new Error('当前条目不是可删除的本地历史条目');
         }
-        const removed = await this.runMutation(() => this.removeContainerFromConfig(containerId));
+        const removed = await this.runMutation(() => this.removeContainerFromConfig(serviceId));
         if (removed) {
-            this.optimisticallyRemoveContainer(containerId);
+            this.optimisticallyRemoveContainer(serviceId);
         }
         await this.refreshAfterMutation();
     }
@@ -893,12 +894,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private async removeExpiredContainers(): Promise<void> {
         await this.runMutation(async () => {
             const document = await this.config.read();
-            const expiredContainerIds = [...new Set(this.config.list(document.config)
+            const expiredServiceIds = [...new Set(this.config.list(document.config)
                 .filter(entry => Boolean(entry.expiresAt))
-                .map(entry => entry.containerId))];
+                .map(entry => entry.serviceId))];
             let changed = false;
-            for (const containerId of expiredContainerIds) {
-                changed = this.config.removeContainer(document.config, containerId) || changed;
+            for (const serviceId of expiredServiceIds) {
+                changed = this.config.removeContainer(document.config, serviceId) || changed;
             }
             if (changed) {
                 await this.config.write(document);
@@ -907,9 +908,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         await this.refreshAfterMutation();
     }
 
-    private async removeContainerFromConfig(containerId: string): Promise<boolean> {
+    private async removeContainerFromConfig(serviceId: string): Promise<boolean> {
         const document = await this.config.read();
-        const removed = this.config.removeContainer(document.config, containerId);
+        const removed = this.config.removeContainer(document.config, serviceId);
         if (removed) {
             await this.config.write(document);
         }
@@ -997,10 +998,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             if (!this.isActiveView(context)) {
                 return false;
             }
-            if (typeof created.container_id !== 'string' || !created.container_id.trim()) {
-                this.showError('响应中缺少有效的 container_id');
-                return false;
-            }
             if (typeof created.service_id !== 'string' || !created.service_id.trim()) {
                 this.showError('响应中缺少有效的 service_id');
                 return false;
@@ -1014,7 +1011,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             const endpoint = parseContainerEndpoint(created.endpoint, { allowDebugProxy: settings.debug });
             if (!endpoint) {
                 if (this.isActiveView(context)) {
-                    this.showError(`服务 "${created.container_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
+                    this.showError(`服务 "${created.service_id}" 的 endpoint 无效，应为 IP:Port 格式：${created.endpoint ?? '(空)'}`);
                 }
                 return false;
             }
@@ -1025,7 +1022,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     return false;
                 }
                 const existingEntries = this.config.list(document.config)
-                    .filter(entry => entry.containerId !== created.container_id);
+                    .filter(entry => entry.serviceId !== created.service_id);
                 const usedNames = new Set(existingEntries.map(entry => entry.host).filter(Boolean));
                 const host = getUniqueHostName(
                     getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
@@ -1035,7 +1032,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     return false;
                 }
                 this.config.upsertContainer(document.config, {
-                    containerId: created.container_id,
+                    serviceId: created.service_id,
                     host,
                     name: getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
                     hostName: endpoint.host,
@@ -1062,42 +1059,42 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
     }
 
-    private findContainer(containerId: string | undefined): SyncedContainer | undefined {
-        if (!containerId) {
+    private findContainer(serviceId: string | undefined): SyncedContainer | undefined {
+        if (!serviceId) {
             return undefined;
         }
-        if (this.optimisticallyRemovedContainerIds.has(containerId)) {
+        if (this.optimisticallyRemovedServiceIds.has(serviceId)) {
             return undefined;
         }
-        return this.state.getState().containers.find(container => container.containerId === containerId);
+        return this.state.getState().containers.find(container => container.serviceId === serviceId);
     }
 
-    private beginContainerOperation(containerId: string): void {
-        this.containerOperationCounts.set(containerId, (this.containerOperationCounts.get(containerId) ?? 0) + 1);
+    private beginContainerOperation(serviceId: string): void {
+        this.containerOperationCounts.set(serviceId, (this.containerOperationCounts.get(serviceId) ?? 0) + 1);
         this.render();
     }
 
-    private claimContainerOperation(containerId: string, action: ContainerOperationAction): ContainerOperationState | undefined {
+    private claimContainerOperation(serviceId: string, action: ContainerOperationAction): ContainerOperationState | undefined {
         if (!this.operationRegistry) {
             return undefined;
         }
-        const operation = this.operationRegistry.begin(containerId, action, 'sidebar');
+        const operation = this.operationRegistry.begin(serviceId, action, 'sidebar');
         if (!operation) {
-            throw new Error(`服务 "${containerId}" 正在执行操作，请稍后重试`);
+            throw new Error(`服务 "${serviceId}" 正在执行操作，请稍后重试`);
         }
         return operation;
     }
 
-    private releaseContainerOperation(containerId: string, outcome: ContainerOperationOutcome, operationId?: number): void {
-        this.operationRegistry?.complete(containerId, outcome, operationId);
+    private releaseContainerOperation(serviceId: string, outcome: ContainerOperationOutcome, operationId?: number): void {
+        this.operationRegistry?.complete(serviceId, outcome, operationId);
     }
 
-    private endContainerOperation(containerId: string): void {
-        const count = this.containerOperationCounts.get(containerId) ?? 0;
+    private endContainerOperation(serviceId: string): void {
+        const count = this.containerOperationCounts.get(serviceId) ?? 0;
         if (count <= 1) {
-            this.containerOperationCounts.delete(containerId);
+            this.containerOperationCounts.delete(serviceId);
         } else {
-            this.containerOperationCounts.set(containerId, count - 1);
+            this.containerOperationCounts.set(serviceId, count - 1);
         }
     }
 
@@ -1123,7 +1120,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private completeWebviewAction(
         context: SidebarViewContext,
         action: string,
-        containerId: string | undefined,
+        serviceId: string | undefined,
         requestId?: string,
         outcome: SidebarActionOutcome = 'succeeded',
     ): void {
@@ -1134,7 +1131,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             command: 'operationComplete',
             action,
             outcome,
-            ...(containerId ? { containerId } : {}),
+            ...(serviceId ? { serviceId } : {}),
             ...(requestId ? { requestId } : {}),
         });
     }
@@ -1213,10 +1210,10 @@ function renderIcon(icon: SidebarIcon): string {
 function findActiveAction(
     activeActions: ReadonlyMap<string, SidebarActionState>,
     action: string,
-    containerId?: string,
+    serviceId?: string,
 ): SidebarActionState | undefined {
     for (const state of activeActions.values()) {
-        if (state.action !== action || state.containerId !== containerId) {
+        if (state.action !== action || state.serviceId !== serviceId) {
             continue;
         }
         return state;
@@ -1232,13 +1229,13 @@ function renderActionStateAttributes(disabled: boolean, activeAction?: SidebarAc
 function renderSidebarHtml(
     containers: SyncedContainer[],
     showAdmin: boolean,
-    inFlightContainerIds: ReadonlySet<string>,
+    inFlightServiceIds: ReadonlySet<string>,
     activeActions: ReadonlyMap<string, SidebarActionState>,
 ): string {
     const cards = containers.length
         ? containers.map(container => renderContainerCard(
             container,
-            inFlightContainerIds.has(container.containerId),
+            inFlightServiceIds.has(container.serviceId),
             activeActions,
         )).join('')
         : `<div class="empty-state">
@@ -1296,13 +1293,13 @@ function renderContainerCard(
     const usage = renderUsage(container);
     const expiration = renderExpirationStatus(container);
     const typeBadge = renderTypeBadge(container.containerType);
-    const copyAction = findActiveAction(activeActions, 'copyContainerId', container.containerId);
-    const connectAction = findActiveAction(activeActions, 'connect', container.containerId);
-    const restartAction = findActiveAction(activeActions, 'restart', container.containerId);
-    const deleteAction = findActiveAction(activeActions, 'delete', container.containerId);
+    const copyAction = findActiveAction(activeActions, 'copyServiceId', container.serviceId);
+    const connectAction = findActiveAction(activeActions, 'connect', container.serviceId);
+    const restartAction = findActiveAction(activeActions, 'restart', container.serviceId);
+    const deleteAction = findActiveAction(activeActions, 'delete', container.serviceId);
     const operationActionInFlight = operationInFlight || Boolean(connectAction || restartAction || deleteAction);
     const sandboxAccess = renderSandboxAccess(container, activeActions);
-    const containerId = escapeHtml(container.containerId);
+    const serviceId = escapeHtml(container.serviceId);
     const host = escapeHtml(container.host || '未配置 Host');
     const canOperate = container.remote;
     const canConnect = canOperate
@@ -1318,15 +1315,15 @@ function renderContainerCard(
     const history = !container.remote && container.expiresAt
         ? `<div class="history-warning">
                 <span>${renderIcon('warning')}此服务已过期并被资源回收，请手动删除此本地条目</span>
-                ${renderHistoryRemoveButton(containerId, findActiveAction(activeActions, 'removeHistory', container.containerId))}
+                ${renderHistoryRemoveButton(serviceId, findActiveAction(activeActions, 'removeHistory', container.serviceId))}
             </div>`
         : '';
     return `
-        <article class="container-card" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}">
-            <div class="service-heading" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}">
+        <article class="container-card" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
+            <div class="service-heading" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
                 <div class="service-name-row">
                     <strong class="service-name">${host}</strong>
-                    <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyContainerId" data-container-id="${containerId}" title="复制 ID" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
+                    <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyServiceId" data-service-id="${serviceId}" title="复制服务 ID" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
                 </div>
                 <div class="service-status">
                     ${typeBadge}
@@ -1337,9 +1334,9 @@ function renderContainerCard(
             </div>
             ${error}
             <div class="card-actions">
-                <button class="action-button action-primary${connectAction ? ' is-loading' : ''}" data-action="connect" data-container-id="${containerId}" data-connectable="${canConnect ? 'true' : 'false'}"${renderActionStateAttributes(!canConnect, connectAction)}>${renderIcon('connect')}连接</button>
-                <button class="action-button${restartAction ? ' is-loading' : ''}" data-action="restart" data-container-id="${containerId}"${renderActionStateAttributes(!canRestart, restartAction)}>${renderIcon('restart')}重启</button>
-                <button class="action-button${deleteAction ? ' is-loading' : ''}" data-action="delete" data-container-id="${containerId}"${renderActionStateAttributes(!canDelete, deleteAction)}>${renderIcon('delete')}销毁</button>
+                <button class="action-button action-primary${connectAction ? ' is-loading' : ''}" data-action="connect" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}"${renderActionStateAttributes(!canConnect, connectAction)}>${renderIcon('connect')}连接</button>
+                <button class="action-button${restartAction ? ' is-loading' : ''}" data-action="restart" data-service-id="${serviceId}"${renderActionStateAttributes(!canRestart, restartAction)}>${renderIcon('restart')}重启</button>
+                <button class="action-button${deleteAction ? ' is-loading' : ''}" data-action="delete" data-service-id="${serviceId}"${renderActionStateAttributes(!canDelete, deleteAction)}>${renderIcon('delete')}销毁</button>
             </div>
             ${sandboxAccess}
             ${expiration}
@@ -1377,10 +1374,10 @@ function renderSandboxAccess(
     if (!container.remote || !container.novncUrl) {
         return '';
     }
-    const activeAction = findActiveAction(activeActions, 'openNovnc', container.containerId);
+    const activeAction = findActiveAction(activeActions, 'openNovnc', container.serviceId);
     return `
         <div class="sandbox-access-row">
-            <button class="sandbox-access-link${activeAction ? ' is-loading' : ''}" data-action="openNovnc" data-container-id="${escapeHtml(container.containerId)}" title="在浏览器中打开沙箱可视化访问链接"${renderActionStateAttributes(false, activeAction)}>
+            <button class="sandbox-access-link${activeAction ? ' is-loading' : ''}" data-action="openNovnc" data-service-id="${escapeHtml(container.serviceId)}" title="在浏览器中打开沙箱可视化访问链接"${renderActionStateAttributes(false, activeAction)}>
                 ${renderIcon('external')}沙箱访问
             </button>
         </div>
@@ -1399,8 +1396,8 @@ function renderCloudHtml(activeActions: ReadonlyMap<string, SidebarActionState>)
     `);
 }
 
-function renderHistoryRemoveButton(containerId: string, activeAction?: SidebarActionState): string {
-    return `<button class="history-remove${activeAction ? ' is-loading' : ''}" data-action="removeHistory" data-container-id="${containerId}" title="从本地条目中删除"${renderActionStateAttributes(false, activeAction)}>${renderIcon('close')}</button>`;
+function renderHistoryRemoveButton(serviceId: string, activeAction?: SidebarActionState): string {
+    return `<button class="history-remove${activeAction ? ' is-loading' : ''}" data-action="removeHistory" data-service-id="${serviceId}" title="从本地条目中删除"${renderActionStateAttributes(false, activeAction)}>${renderIcon('close')}</button>`;
 }
 
 function renderErrorHtml(message: string): string {
