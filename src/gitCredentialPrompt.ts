@@ -46,7 +46,7 @@ export async function promptForGitCredentials(
     const identity = await readIdentity(options.identityReader);
 
     const username = await promptRequired(showInputBox, showErrorMessage, {
-        title: '请输入码云用户名',
+        title: '请输入码云用户名 (请仅输入工号，不要附加姓名)',
         prompt: '',
         value: identity.username,
         ignoreFocusOut: true,
