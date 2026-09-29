@@ -33,7 +33,7 @@ export async function promptForGitCredentials(
             : vscode.window.showErrorMessage(message, messageOptions)
     ));
     if (options.gitStatus === 'credential_rejected') {
-        await showErrorMessage('码云凭证输入错误或缓存过期，请重试', { modal: true });
+        await showErrorMessage('码云凭证输入有误或者缓存过期\n请检查码云用户名是否为工号，以及密码是否正确\n并再次重试', { modal: true });
     }
     const cancel = async (): Promise<undefined> => {
         try {
