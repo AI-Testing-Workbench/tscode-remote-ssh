@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SSHConfig from 'ssh-config';
 import type { SFTPWrapper } from 'ssh2';
+import type { ContainerConfigEntry } from '../src/containerConfig';
 import { FileSyncError, FileSyncService, getRemoteServiceId, parseSyncPath } from '../src/api/fileSync';
 
 const temporaryDirectories: string[] = [];
@@ -77,6 +78,66 @@ describe('FileSyncService', () => {
         expect(getContainerStatus).toHaveBeenNthCalledWith(2, SERVICE_ID);
         expect(getContainerStatus).not.toHaveBeenCalledWith(PHYSICAL_CONTAINER_ID);
         expect(sftpProvider).toHaveBeenCalledWith(expect.objectContaining({ serviceId: SERVICE_ID }));
+        expect(sftpProvider).toHaveBeenCalledWith(expect.objectContaining({
+            serviceId: SERVICE_ID,
+            hostName: '127.0.0.1',
+            port: 22,
+        }));
+    });
+
+    it('uses a matching transient container entry without reading the persisted config', async () => {
+        const directory = await createTemporaryDirectory();
+        const source = path.join(directory, 'source.txt');
+        await fs.writeFile(source, 'callback entry', 'utf8');
+        const remote = new MemorySftp();
+        const { service, configRead, configList, sftpProvider } = createService(remote);
+        const container: ContainerConfigEntry = {
+            serviceId: SERVICE_ID,
+            host: 'callback-host',
+            hostName: 'stale-host',
+            port: 2022,
+        };
+
+        await service.syncFiles(source, `${SERVICE_ID}:/workspace/file.txt`, 'overwrite', false, container);
+
+        expect(remote.readFile('/workspace/file.txt')).toBe('callback entry');
+        expect(configRead).not.toHaveBeenCalled();
+        expect(configList).not.toHaveBeenCalled();
+        expect(sftpProvider).toHaveBeenCalledWith(expect.objectContaining({
+            ...container,
+            hostName: '127.0.0.1',
+            port: 22,
+        }));
+    });
+
+    it('rejects a container entry whose service ID does not match the remote path', async () => {
+        const remote = new MemorySftp();
+        const { service, configRead, getContainerStatus } = createService(remote);
+
+        await expect(service.syncFiles(
+            '/local/file.txt',
+            `${SERVICE_ID}:/workspace/file.txt`,
+            'overwrite',
+            false,
+            { serviceId: 'other-service', host: 'other-host' },
+        )).rejects.toMatchObject({ code: 'container_info_mismatch' });
+
+        expect(configRead).not.toHaveBeenCalled();
+        expect(getContainerStatus).not.toHaveBeenCalled();
+    });
+
+    it('rejects a running container with no usable endpoint', async () => {
+        const remote = new MemorySftp();
+        const { service } = createService(remote, 'running', 'not-an-endpoint');
+
+        await expect(service.syncFiles(
+            '/local/file.txt',
+            `${SERVICE_ID}:/workspace/file.txt`,
+            'overwrite',
+            false,
+            { serviceId: SERVICE_ID, host: 'callback-host' },
+        ))
+            .rejects.toMatchObject({ code: 'service_endpoint_invalid' });
     });
 
     it('recursively syncs directories, supports empty directories, and mirrors extras', async () => {
@@ -159,20 +220,21 @@ describe('FileSyncService', () => {
     });
 });
 
-function createService(remote: MemorySftp, status = 'running') {
+function createService(remote: MemorySftp, status = 'running', endpoint = '127.0.0.1:22') {
     const config = SSHConfig.parse(`Host service-alias\n\tServiceId ${SERVICE_ID}\n\tHostName 127.0.0.1\n\tPort 22\n`);
     const configList = vi.fn(() => [{ serviceId: SERVICE_ID, host: 'service-alias', hostName: '127.0.0.1', port: 22 }]);
-    const getContainerStatus = vi.fn(async () => ({ status }));
+    const configRead = vi.fn(async () => ({ config, originalText: '' }));
+    const getContainerStatus = vi.fn(async () => ({ status, endpoint }));
     const sftpProvider = vi.fn(async () => ({ sftp: remote.asSftp() }));
     const service = new FileSyncService({
         config: {
-            read: vi.fn(async () => ({ config, originalText: '' })),
+            read: configRead,
             list: configList,
         },
         getContainerStatus,
         sftpProvider,
     });
-    return { service, configList, getContainerStatus, sftpProvider };
+    return { service, configRead, configList, getContainerStatus, sftpProvider };
 }
 
 async function createTemporaryDirectory(): Promise<string> {

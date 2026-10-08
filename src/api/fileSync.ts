@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import type { SFTPWrapper } from 'ssh2';
 import type { FileEntry, Stats } from 'ssh2-streams';
 import type { ContainerConfig, ContainerConfigEntry } from '../containerConfig';
+import { parseContainerEndpoint } from '../containerEndpoint';
 import type { ContainerStatusResponse, FileSyncResult, PublicFileSyncConflict, PublicFileSyncDirection } from './models';
 
 export interface FileSyncRunner {
@@ -13,6 +14,7 @@ export interface FileSyncRunner {
         target: string,
         conflict?: PublicFileSyncConflict,
         mirror?: boolean,
+        container?: ContainerConfigEntry,
     ): Promise<FileSyncResult>;
 }
 
@@ -22,12 +24,13 @@ export interface SftpSession {
 }
 
 export type SftpProvider = (entry: ContainerConfigEntry) => Promise<SftpSession>;
-export type ServiceStatusReader = (serviceId: string) => Promise<Pick<ContainerStatusResponse, 'status'>>;
+export type ServiceStatusReader = (serviceId: string) => Promise<Pick<ContainerStatusResponse, 'status' | 'endpoint'>>;
 
 export interface FileSyncServiceOptions {
     config: Pick<ContainerConfig, 'read' | 'list'>;
     getContainerStatus: ServiceStatusReader;
     sftpProvider?: SftpProvider;
+    allowDebugProxy?: boolean;
 }
 
 export type SyncPath = LocalSyncPath | RemoteSyncPath;
@@ -51,6 +54,9 @@ export type FileSyncErrorCode =
     | 'config_read_failed'
     | 'service_status_failed'
     | 'service_not_running'
+    | 'service_endpoint_invalid'
+    | 'container_info_mismatch'
+    | 'sync_stage_invalid'
     | 'sftp_unavailable'
     | 'mirror_requires_directory'
     | 'unsupported_file_type'
@@ -130,11 +136,13 @@ export class FileSyncService implements FileSyncRunner {
     private readonly config: Pick<ContainerConfig, 'read' | 'list'>;
     private readonly getContainerStatus: ServiceStatusReader;
     private readonly sftpProvider: SftpProvider | undefined;
+    private readonly allowDebugProxy: boolean;
 
     public constructor(options: FileSyncServiceOptions) {
         this.config = options.config;
         this.getContainerStatus = options.getContainerStatus;
         this.sftpProvider = options.sftpProvider;
+        this.allowDebugProxy = options.allowDebugProxy ?? false;
     }
 
     public async syncFiles(
@@ -142,6 +150,7 @@ export class FileSyncService implements FileSyncRunner {
         target: string,
         conflict: PublicFileSyncConflict = 'overwrite',
         mirror = false,
+        container?: ContainerConfigEntry,
     ): Promise<FileSyncResult> {
         if (conflict !== 'overwrite' && conflict !== 'skip') {
             throw new FileSyncError('invalid_path', '冲突策略必须是 overwrite 或 skip');
@@ -161,8 +170,18 @@ export class FileSyncService implements FileSyncRunner {
         if (!remotePath) {
             throw new FileSyncError('same_endpoint', '同步源和目标必须分别位于本地与远端');
         }
-        const document = await this.readConfig();
-        const entry = this.config.list(document.config).find(item => item.serviceId === remotePath.serviceId);
+        if (container && container.serviceId !== remotePath.serviceId) {
+            throw new FileSyncError(
+                'container_info_mismatch',
+                `容器信息中的服务 ID "${container.serviceId}" 与同步路径中的服务 ID "${remotePath.serviceId}" 不一致`,
+            );
+        }
+
+        let entry = container;
+        if (!entry) {
+            const document = await this.readConfig();
+            entry = this.config.list(document.config).find(item => item.serviceId === remotePath.serviceId);
+        }
         if (!entry) {
             throw new FileSyncError(
                 'service_not_configured',
@@ -170,7 +189,7 @@ export class FileSyncService implements FileSyncRunner {
             );
         }
 
-        let status: Pick<ContainerStatusResponse, 'status'>;
+        let status: Pick<ContainerStatusResponse, 'status' | 'endpoint'>;
         try {
             status = await this.getContainerStatus(remotePath.serviceId);
         } catch (error) {
@@ -186,13 +205,37 @@ export class FileSyncService implements FileSyncRunner {
                 `服务 "${remotePath.serviceId}" 当前未处于 running 状态`,
             );
         }
+        const parsedEndpoint = parseContainerEndpoint(status.endpoint, { allowDebugProxy: this.allowDebugProxy });
+        const hasLiveEndpoint = typeof status.endpoint === 'string' && Boolean(status.endpoint.trim());
+        if (hasLiveEndpoint && !parsedEndpoint) {
+            throw new FileSyncError(
+                'service_endpoint_invalid',
+                `服务 "${remotePath.serviceId}" 返回了无效的 SSH endpoint`,
+            );
+        }
+        const configuredPort = entry.port;
+        const hasConfiguredEndpoint = typeof entry.hostName === 'string'
+            && Boolean(entry.hostName.trim())
+            && typeof configuredPort === 'number'
+            && Number.isInteger(configuredPort)
+            && configuredPort > 0
+            && configuredPort <= 65535;
+        if (!parsedEndpoint && (container || !hasConfiguredEndpoint)) {
+            throw new FileSyncError(
+                'service_endpoint_invalid',
+                `服务 "${remotePath.serviceId}" 没有有效的 SSH endpoint`,
+            );
+        }
+        const connectionEntry: ContainerConfigEntry = parsedEndpoint
+            ? { ...entry, hostName: parsedEndpoint.host, port: parsedEndpoint.port }
+            : entry;
         if (!this.sftpProvider) {
             throw new FileSyncError('sftp_unavailable', '当前没有可用的 SSH SFTP 连接');
         }
 
         let session: SftpSession;
         try {
-            session = await this.sftpProvider(entry);
+            session = await this.sftpProvider(connectionEntry);
         } catch (error) {
             throw new FileSyncError(
                 'sftp_unavailable',

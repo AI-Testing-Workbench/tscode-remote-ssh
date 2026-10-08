@@ -4,6 +4,8 @@ import {
     PUBLIC_API_ERROR_CODES,
     PublicApiCallbackError,
 } from '../src/api/publicApi';
+import type { ContainerConfigEntry } from '../src/containerConfig';
+import { FileSyncError } from '../src/api/fileSync';
 import { RestClientError, UserRestApi } from '../src/api/restClient';
 import * as vscode from './mocks/vscode';
 
@@ -105,7 +107,7 @@ describe('public user container API', () => {
     it('requires plugin_id and never sends plugin_id, callbacks, or a runtime user_id to REST', async () => {
         const userApi = createUserApi();
         const api = createApi(userApi);
-        const callback = vi.fn();
+        const callback = vi.fn((container: ContainerConfigEntry) => container.serviceId);
         vi.mocked(userApi.createContainer).mockResolvedValue({
             service_id: 'service-created-1',
             container_id: 'physical-created-1',
@@ -130,7 +132,10 @@ describe('public user container API', () => {
             user_id: 'user-1',
         });
         expect(callback).toHaveBeenCalledOnce();
-        expect(callback).toHaveBeenCalledWith('service-created-1');
+        expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+            serviceId: 'service-created-1',
+            host: 'sandbox',
+        }));
         expect(created).not.toHaveProperty('plugin_id');
         expect(created).not.toHaveProperty('user_id');
         expect(created).not.toHaveProperty('container_id');
@@ -153,9 +158,9 @@ describe('public user container API', () => {
             status: 'pending',
         } as never);
         const calls: string[] = [];
-        const postCompleted = vi.fn((serviceId: string) => { calls.push(`postCompleted:${serviceId}`); });
-        const gitInitialized = vi.fn((serviceId: string) => { calls.push(`gitInitialized:${serviceId}`); });
-        const containerPrepared = vi.fn((serviceId: string) => { calls.push(`containerPrepared:${serviceId}`); });
+        const postCompleted = vi.fn((container: ContainerConfigEntry) => { calls.push(`postCompleted:${container.serviceId}`); });
+        const gitInitialized = vi.fn((container: ContainerConfigEntry) => { calls.push(`gitInitialized:${container.serviceId}`); });
+        const containerPrepared = vi.fn((container: ContainerConfigEntry) => { calls.push(`containerPrepared:${container.serviceId}`); });
         const initializationPoller = {
             initialize: vi.fn(async () => {
                 calls.push('git-poll-start');
@@ -184,12 +189,202 @@ describe('public user container API', () => {
             'gitInitialized:service-created-1',
             'containerPrepared:service-created-1',
         ]);
-        expect(postCompleted).toHaveBeenCalledWith('service-created-1');
-        expect(gitInitialized).toHaveBeenCalledWith('service-created-1');
-        expect(containerPrepared).toHaveBeenCalledWith('service-created-1');
+        expect(postCompleted).toHaveBeenCalledWith(expect.objectContaining({ serviceId: 'service-created-1', host: 'sandbox' }));
+        expect(gitInitialized).toHaveBeenCalledWith(expect.objectContaining({
+            serviceId: 'service-created-1',
+            hostName: '127.0.0.1',
+            port: 22,
+        }));
+        expect(containerPrepared).toHaveBeenCalledWith(expect.objectContaining({
+            serviceId: 'service-created-1',
+            hostName: '127.0.0.1',
+            port: 22,
+        }));
         expect(initializationPoller.initialize).toHaveBeenCalledWith(expect.objectContaining({ serviceId: 'service-created-1' }));
         expect(initializationPoller.initialize).toHaveBeenCalledOnce();
         expect(userApi.deleteContainer).not.toHaveBeenCalled();
+    });
+
+    it('uses the same config-shaped callback entry and refreshes it from the create endpoint', async () => {
+        const userApi = createUserApi();
+        vi.mocked(userApi.createContainer).mockResolvedValue({
+            service_id: 'service-created-1',
+            status: 'running',
+            endpoint: '10.1.2.3:3022',
+            expires_at: '2030-01-01T00:00:00Z',
+        });
+        const configuredEntry: ContainerConfigEntry = {
+            serviceId: 'service-created-1',
+            host: 'configured-alias',
+            name: 'Friendly container',
+            hostName: 'old-address',
+            port: 22,
+            expiresAt: '2029-01-01T00:00:00Z',
+        };
+        const containerConfig = {
+            read: vi.fn(async () => ({ config: {} as never, originalText: '' })),
+            list: vi.fn(() => [configuredEntry]),
+        };
+        const containerPrepared = vi.fn();
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            containerConfig,
+        });
+
+        await api.createContainer({
+            plugin_id: 'example.plugin',
+            callbacks: { containerPrepared },
+        });
+
+        expect(containerPrepared).toHaveBeenCalledWith({
+            ...configuredEntry,
+            hostName: '10.1.2.3',
+            port: 3022,
+            expiresAt: '2030-01-01T00:00:00Z',
+        });
+    });
+
+    it('allows callback-context sync only from containerPrepared', async () => {
+        const userApi = createUserApi();
+        const fileSync = { syncFiles: vi.fn(async () => ({
+            direction: 'upload' as const,
+            copied: 1,
+            skipped: 0,
+            deleted: 0,
+            bytesTransferred: 12,
+            complete: true,
+        })) };
+        const initializationPoller = {
+            initialize: vi.fn(async () => ({ container: containerStatus('service-1', 'running', 'initialized') })),
+        };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+            fileSync,
+        });
+
+        await api.createContainer({
+            plugin_id: 'example.plugin',
+            callbacks: {
+                containerPrepared: async container => {
+                    await api.syncFiles('/workspace/local.txt', `${container.serviceId}:/workspace/remote.txt`);
+                },
+            },
+        });
+
+        expect(fileSync.syncFiles).toHaveBeenCalledWith(
+            '/workspace/local.txt',
+            'service-1:/workspace/remote.txt',
+            undefined,
+            undefined,
+            expect.objectContaining({
+                serviceId: 'service-1',
+                hostName: '127.0.0.1',
+                port: 22,
+            }),
+        );
+        expect(userApi.deleteContainer).not.toHaveBeenCalled();
+    });
+
+    it('rejects sync from earlier callbacks and applies callback cleanup', async () => {
+        const userApi = createUserApi();
+        const initializationPoller = { initialize: vi.fn() };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+
+        await expect(api.createContainer({
+            plugin_id: 'example.plugin',
+            callbacks: {
+                postCompleted: async container => {
+                    await api.syncFiles('/workspace/local.txt', `${container.serviceId}:/workspace/remote.txt`);
+                },
+            },
+        })).rejects.toMatchObject({
+            name: 'PublicApiCallbackError',
+            stage: 'postCompleted',
+            serviceId: 'service-1',
+            originalError: expect.objectContaining({ code: PUBLIC_API_ERROR_CODES.SYNC_STAGE_INVALID }),
+        });
+
+        expect(initializationPoller.initialize).not.toHaveBeenCalled();
+        expect(userApi.deleteContainer).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('sync_stage_invalid'),
+            { modal: true },
+        );
+    });
+
+    it('also rejects callback-context sync from gitInitialized', async () => {
+        const userApi = createUserApi();
+        const initializationPoller = {
+            initialize: vi.fn(async () => ({ container: containerStatus('service-1', 'running', 'initialized') })),
+        };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+
+        await expect(api.createContainer({
+            plugin_id: 'example.plugin',
+            callbacks: {
+                gitInitialized: async container => {
+                    await api.syncFiles('/workspace/local.txt', `${container.serviceId}:/workspace/remote.txt`);
+                },
+                containerPrepared: vi.fn(),
+            },
+        })).rejects.toMatchObject({
+            name: 'PublicApiCallbackError',
+            stage: 'gitInitialized',
+            originalError: expect.objectContaining({ code: PUBLIC_API_ERROR_CODES.SYNC_STAGE_INVALID }),
+        });
+
+        expect(userApi.deleteContainer).toHaveBeenCalledOnce();
+    });
+
+    it('displays an awaited prepared sync failure before deleting', async () => {
+        const userApi = createUserApi();
+        const syncError = new FileSyncError('sftp_unavailable', 'SSH 身份验证失败');
+        const fileSync = { syncFiles: vi.fn(async () => { throw syncError; }) };
+        const initializationPoller = {
+            initialize: vi.fn(async () => ({ container: containerStatus('service-1', 'running', 'initialized') })),
+        };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+            fileSync,
+        });
+
+        await expect(api.createContainer({
+            plugin_id: 'example.plugin',
+            callbacks: {
+                containerPrepared: async container => {
+                    await api.syncFiles('/workspace/local.txt', `${container.serviceId}:/workspace/remote.txt`);
+                },
+            },
+        })).rejects.toMatchObject({
+            name: 'PublicApiCallbackError',
+            stage: 'containerPrepared',
+            serviceId: 'service-1',
+            originalError: syncError,
+        });
+
+        expect(userApi.deleteContainer).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('[sftp_unavailable] FileSyncError: SSH 身份验证失败'),
+            { modal: true },
+        );
     });
 
     it('ignores the removed pre-response callback stage', async () => {
@@ -235,6 +430,7 @@ describe('public user container API', () => {
             pluginId: 'example.plugin',
             pluginName: 'Example Plugin',
             stage: 'postCompleted',
+            serviceId: 'service-callback-failure',
             originalError: callbackError,
             cause: callbackError,
             cleanupError,
@@ -247,6 +443,8 @@ describe('public user container API', () => {
             cleanupError,
         }));
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('example.plugin'), { modal: true });
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('callback failed'), { modal: true });
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('cleanup failed'), { modal: true });
     });
 
     it('adds the configured Name to public status and falls back to Host for old entries', async () => {
@@ -309,6 +507,7 @@ function containerStatus(serviceId: string, status: string, git_fin_status?: str
     return {
         service_id: serviceId,
         status,
+        endpoint: '127.0.0.1:22',
         ...(git_fin_status ? { git_fin_status } : {}),
         gitee_user: '',
         gitee_repository: '',

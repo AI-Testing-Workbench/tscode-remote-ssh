@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
-import { ContainerConfig } from '../containerConfig';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { ContainerConfig, type ContainerConfigEntry } from '../containerConfig';
+import { getContainerHostName, getUniqueHostName } from '../containerSync';
 import { ContainerInitializationRunner, combineAbortSignals, getInitializationResultContainer } from '../containerInitializationPoller';
 import { Log } from '../common/logger';
 import { getRemoteSettings, RemoteSettings } from '../settings';
 import { UserIdProvider } from '../user';
+import { parseContainerEndpoint } from '../containerEndpoint';
 import {
     ContainerStatusResponse,
     CreateContainerResponse,
@@ -16,7 +19,7 @@ import {
     UserContainerQuery,
     UserCreateContainerRequest,
 } from './models';
-import { FileSyncRunner, FileSyncService, SftpProvider } from './fileSync';
+import { FileSyncError, FileSyncRunner, FileSyncService, getRemoteServiceId, SftpProvider } from './fileSync';
 import {
     RestClient,
     RestClientError,
@@ -30,6 +33,7 @@ export const PUBLIC_API_ERROR_CODES = {
     INVALID_ARGUMENT: 'invalid_argument',
     USER_ID_MISSING: 'user_id_missing',
     CALLBACK_FAILED: 'callback_failed',
+    SYNC_STAGE_INVALID: 'sync_stage_invalid',
 } as const;
 
 export type PublicCreateContainerRequest = Omit<UserCreateContainerRequest, 'user_id'> & {
@@ -51,11 +55,13 @@ export interface PublicUserContainerApi {
     getActiveServiceIds(query?: PublicContainerQuery): Promise<ServiceIdsResponse>;
     getContainer(serviceId: string): Promise<PublicContainerStatusResponse>;
     checkAdmin(): Promise<AdminCheckResponse>;
+    /** During create callbacks, this is allowed only in containerPrepared. */
     syncFiles(
         source: string,
         target: string,
         conflict?: PublicFileSyncConflict,
         mirror?: boolean,
+        container?: ContainerConfigEntry,
     ): Promise<FileSyncResult>;
     startContainer(serviceId: string): Promise<void>;
     stopContainer(serviceId: string): Promise<void>;
@@ -85,17 +91,30 @@ export class PublicApiCallbackError extends Error {
         public readonly pluginId: string,
         public readonly pluginName: string,
         public readonly stage: keyof PublicCreateContainerCallbacks,
+        public readonly serviceId: string,
         public readonly originalError: unknown,
         public readonly cleanupError?: unknown,
     ) {
         const cleanupMessage = cleanupError === undefined
-            ? '创建的容器已提交业务删除'
-            : '业务删除也失败，请检查后端服务状态';
-        super(`插件 "${pluginName}" (${pluginId}) 的 ${stage} 回调失败，${cleanupMessage}`);
+            ? `服务 "${serviceId}" 已提交业务删除请求`
+            : `服务 "${serviceId}" 的业务删除失败：${formatErrorDetails(cleanupError)}`;
+        super(
+            `插件 "${pluginName}" (${pluginId}) 的 ${stage} 回调失败，服务 "${serviceId}"。`
+            + `回调错误：${formatErrorDetails(originalError)}。${cleanupMessage}`,
+        );
         this.name = 'PublicApiCallbackError';
         this.cause = originalError;
     }
 }
+
+interface CallbackExecutionScope {
+    stage: keyof PublicCreateContainerCallbacks;
+    serviceId: string;
+    container: ContainerConfigEntry;
+    active: boolean;
+}
+
+const callbackExecution = new AsyncLocalStorage<CallbackExecutionScope>();
 
 export interface PublicUserContainerApiOptions {
     userIdProvider?: Pick<UserIdProvider, 'getCurrentUserId'>;
@@ -156,6 +175,7 @@ export function createPublicUserContainerApi(
             return userApi.getContainer(serviceId);
         },
         sftpProvider: options.sftpProvider,
+        allowDebugProxy: getSettings().debug,
     });
 
     return {
@@ -170,10 +190,38 @@ export function createPublicUserContainerApi(
                 user_id: userId,
             }));
 
-            await runCreateCallback('postCompleted', callbacks.postCompleted, {
-                pluginId,
-                userApi,
-                serviceId: created.service_id,
+            let callbackContainer: ContainerConfigEntry | undefined;
+            const invokeCallback = async (
+                stage: keyof PublicCreateContainerCallbacks,
+                callback: PublicContainerCallback | undefined,
+                container: Pick<ContainerStatusResponse, 'endpoint' | 'expires_at' | 'gitee_user' | 'gitee_repository'>,
+            ): Promise<void> => {
+                if (!callback) {
+                    return;
+                }
+                callbackContainer = await getCreateContainerEntry(
+                    options.containerConfig,
+                    created.service_id,
+                    container.endpoint,
+                    container.gitee_user,
+                    container.gitee_repository,
+                    container.expires_at,
+                    callbackContainer,
+                    getSettings().debug,
+                );
+                await runCreateCallback(stage, callback, {
+                    pluginId,
+                    userApi,
+                    serviceId: created.service_id,
+                    container: callbackContainer,
+                });
+            };
+
+            await invokeCallback('postCompleted', callbacks.postCompleted, {
+                endpoint: created.endpoint,
+                expires_at: created.expires_at,
+                gitee_user: typeof requestFields['gitee_user'] === 'string' ? requestFields['gitee_user'] : '',
+                gitee_repository: typeof requestFields['gitee_repository'] === 'string' ? requestFields['gitee_repository'] : '',
             });
 
             let result: CreateContainerResponse = created;
@@ -190,21 +238,18 @@ export function createPublicUserContainerApi(
                 const initializedContainer = getInitializationResultContainer(initialization);
                 finalContainer = initializedContainer ? stripUserId(initializedContainer) : undefined;
                 if (finalContainer) {
-                    await runCreateCallback('gitInitialized', callbacks.gitInitialized, {
-                        pluginId,
-                        userApi,
-                        serviceId: created.service_id,
-                    });
+                    await invokeCallback('gitInitialized', callbacks.gitInitialized, finalContainer);
                     result = mergeFinalContainerStatus(created, finalContainer);
                 }
             }
 
             if (finalContainer?.status?.trim().toLowerCase() === 'running'
                 || (!initializationPoller && created.status?.trim().toLowerCase() === 'running')) {
-                await runCreateCallback('containerPrepared', callbacks.containerPrepared, {
-                    pluginId,
-                    userApi,
-                    serviceId: created.service_id,
+                await invokeCallback('containerPrepared', callbacks.containerPrepared, finalContainer ?? {
+                    endpoint: created.endpoint,
+                    expires_at: created.expires_at,
+                    gitee_user: typeof requestFields['gitee_user'] === 'string' ? requestFields['gitee_user'] : '',
+                    gitee_repository: typeof requestFields['gitee_repository'] === 'string' ? requestFields['gitee_repository'] : '',
                 });
             }
             return result;
@@ -239,7 +284,35 @@ export function createPublicUserContainerApi(
             const { userId, userApi } = await prepareUserRequest();
             return stripUserId(await userApi.checkAdmin({ user_id: userId }));
         },
-        syncFiles: (source, target, conflict, mirror) => fileSync.syncFiles(source, target, conflict, mirror),
+        syncFiles: (source, target, conflict, mirror, container) => {
+            const scope = callbackExecution.getStore();
+            if (scope && (!scope.active || scope.stage !== 'containerPrepared')) {
+                return Promise.reject(new FileSyncError(
+                    'sync_stage_invalid',
+                    '创建流程中的文件同步仅允许在 containerPrepared 回调中调用',
+                ));
+            }
+
+            let effectiveContainer = container;
+            if (scope) {
+                let serviceId: string;
+                try {
+                    serviceId = getRemoteServiceId(source, target);
+                } catch (error) {
+                    return Promise.reject(error);
+                }
+                if (serviceId !== scope.serviceId
+                    || (container && (container.serviceId !== scope.serviceId || container.host !== scope.container.host))) {
+                    return Promise.reject(new FileSyncError(
+                        'container_info_mismatch',
+                        `containerPrepared 回调只能使用服务 "${scope.serviceId}" 的 SSH 配置项同步`,
+                    ));
+                }
+                effectiveContainer ??= scope.container;
+            }
+
+            return fileSync.syncFiles(source, target, conflict, mirror, effectiveContainer);
+        },
         startContainer: async serviceId => {
             const { userApi } = await prepareUserRequest();
             await userApi.startContainer(serviceId);
@@ -261,14 +334,22 @@ export function createPublicUserContainerApi(
     async function runCreateCallback(
         stage: keyof PublicCreateContainerCallbacks,
         callback: PublicContainerCallback | undefined,
-        context: { pluginId: string; userApi: UserRestApi; serviceId: string },
+        context: { pluginId: string; userApi: UserRestApi; serviceId: string; container: ContainerConfigEntry },
     ): Promise<void> {
         if (!callback) {
             return;
         }
+        const scope: CallbackExecutionScope = {
+            stage,
+            serviceId: context.serviceId,
+            container: { ...context.container },
+            active: true,
+        };
+        const callbackContainer = { ...context.container };
         try {
-            await callback(context.serviceId);
-        } catch (originalError) {
+            await callbackExecution.run(scope, () => callback(callbackContainer));
+        } catch (error) {
+            scope.active = false;
             let cleanupError: unknown;
             try {
                 await context.userApi.deleteContainer(context.serviceId);
@@ -279,13 +360,15 @@ export function createPublicUserContainerApi(
                 context.pluginId,
                 getPluginDisplayName(context.pluginId),
                 stage,
-                originalError,
+                context.serviceId,
+                error,
                 cleanupError,
             );
             const logData = {
                 pluginId: callbackError.pluginId,
                 pluginName: callbackError.pluginName,
                 stage: callbackError.stage,
+                serviceId: callbackError.serviceId,
                 originalError: callbackError.originalError,
                 cleanupError: callbackError.cleanupError,
             };
@@ -300,6 +383,8 @@ export function createPublicUserContainerApi(
                 // A UI notification must not hide the callback failure.
             }
             throw callbackError;
+        } finally {
+            scope.active = false;
         }
     }
 }
@@ -360,6 +445,81 @@ async function getConfiguredContainerName(
         return undefined;
     }
     return entry.name?.trim() || entry.host.trim() || undefined;
+}
+
+async function getCreateContainerEntry(
+    config: Pick<ContainerConfig, 'read' | 'list'> | undefined,
+    serviceId: string,
+    endpoint: string | null | undefined,
+    giteeUser: string | null | undefined,
+    giteeRepository: string | null | undefined,
+    expiresAt: string | null | undefined,
+    previous: ContainerConfigEntry | undefined,
+    allowDebugProxy: boolean,
+): Promise<ContainerConfigEntry> {
+    let entries: ContainerConfigEntry[] = [];
+    if (config) {
+        try {
+            const document = await config.read();
+            entries = config.list(document.config);
+        } catch {
+            // The callback gets a transient entry even when the local config is unavailable.
+        }
+    }
+
+    const existing = entries.find(entry => entry.serviceId === serviceId);
+    const usedHosts = new Set(entries
+        .filter(entry => entry.serviceId !== serviceId)
+        .map(entry => entry.host.trim())
+        .filter(Boolean));
+    const baseName = getContainerHostName(giteeUser, giteeRepository);
+    const host = previous?.host
+        || existing?.host
+        || getUniqueHostName(baseName, usedHosts);
+    const parsedEndpoint = parseContainerEndpoint(endpoint, { allowDebugProxy });
+    const entry: ContainerConfigEntry = {
+        serviceId,
+        host,
+        name: existing?.name?.trim() || previous?.name?.trim() || host,
+    };
+    const hostName = parsedEndpoint?.host || previous?.hostName || existing?.hostName;
+    const port = parsedEndpoint?.port || previous?.port || existing?.port;
+    const resolvedExpiration = expiresAt?.trim() || previous?.expiresAt || existing?.expiresAt;
+    if (hostName) {
+        entry.hostName = hostName;
+    }
+    if (port) {
+        entry.port = port;
+    }
+    if (resolvedExpiration) {
+        entry.expiresAt = resolvedExpiration;
+    }
+    return entry;
+}
+
+function formatErrorDetails(error: unknown): string {
+    const details: string[] = [];
+    const seen = new Set<object>();
+    let current: unknown = error;
+    for (let depth = 0; depth < 3 && current !== undefined; depth += 1) {
+        if (typeof current === 'object' && current !== null) {
+            if (seen.has(current)) {
+                break;
+            }
+            seen.add(current);
+            const value = current as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown };
+            const message = typeof value.message === 'string' ? value.message : String(current);
+            const code = typeof value.code === 'string' && value.code ? `[${value.code}] ` : '';
+            const name = typeof value.name === 'string' && value.name !== 'Error' ? `${value.name}: ` : '';
+            details.push(`${code}${name}${message}`);
+            current = value.cause;
+            continue;
+        }
+        details.push(String(current));
+        break;
+    }
+    const formatted = details.join(' <- ') || '未知错误';
+    return formatted.length > 800 ? `${formatted.slice(0, 797)}...` : formatted;
 }
 
 function mergeFinalContainerStatus(created: CreateContainerResponse, finalContainer: ContainerStatusResponse): CreateContainerResponse {

@@ -1,3 +1,5 @@
+import type { ContainerConfigEntry } from '../containerConfig';
+
 export type ContainerTypeValue = 'testagent_cloud' | 'autotest_cloud';
 
 export type GitFailureStatus =
@@ -72,11 +74,13 @@ export interface CreateContainerResponse {
     expires_at?: string | null;
 }
 
-export type PublicContainerCallback = (serviceId: string) => void | Promise<void>;
+/** Receives the same SSH entry shape used by ContainerConfig; async work must be awaited or returned. */
+export type PublicContainerCallback = (container: ContainerConfigEntry) => void | Promise<unknown>;
 
 export interface PublicCreateContainerCallbacks {
     postCompleted?: PublicContainerCallback;
     gitInitialized?: PublicContainerCallback;
+    /** This is the only create callback stage where syncFiles is allowed. */
     containerPrepared?: PublicContainerCallback;
 }
 

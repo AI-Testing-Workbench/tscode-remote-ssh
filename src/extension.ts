@@ -57,9 +57,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         initializationPoller,
         initializationSignal: initializationController.signal,
         containerConfig: config,
-        sftpProvider: async entry => ({
-            sftp: await remoteSSHResolver.getSftp(entry.host),
-        }),
+        sftpProvider: entry => remoteSSHResolver.openSftpSession(entry),
     });
     const operationRegistry = new ContainerOperationRegistry();
     const getCloudMode = async (): Promise<boolean> => {

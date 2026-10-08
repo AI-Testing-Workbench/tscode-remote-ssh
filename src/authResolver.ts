@@ -27,6 +27,7 @@ import { getEffectiveRemoteUserName, getRemoteSettings } from './settings';
 import { GIT_CLONE_COMMAND } from './ssh/gitCloneCommand';
 import { copyTestagentConfigToRemote, TESTAGENT_CONFIG_FILE_NAMES } from './testagentConfigSync';
 import * as os from 'os';
+import type { ContainerConfigEntry } from './containerConfig';
 
 const PASSWORD_RETRY_COUNT = 3;
 const PASSPHRASE_RETRY_COUNT = 3;
@@ -355,6 +356,96 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         return this.sshConnection.sftp();
     }
 
+    public async openSftpSession(
+        entry: ContainerConfigEntry,
+        signal?: AbortSignal,
+    ): Promise<{ sftp: ssh2.SFTPWrapper; dispose: () => Promise<void> }> {
+        const hostName = entry.hostName?.trim();
+        const port = entry.port;
+        if (!entry.host.trim() || !hostName || !Number.isInteger(port) || !port || port < 1 || port > 65535) {
+            throw new Error(`服务 "${entry.serviceId}" 的 SSH 配置项不完整`);
+        }
+        if (signal?.aborted) {
+            throw new Error('SFTP 连接已取消');
+        }
+
+        const settings = getRemoteSettings();
+        if (settings.debug) {
+            await this.confirmDebugEnvironmentOnce(entry.serviceId);
+        }
+        const sshconfig = await SSHConfiguration.loadFromFS();
+        const sshHostConfig = sshconfig.getHostConfiguration(entry.host);
+        const sshUser = sshHostConfig['User'] || getEffectiveRemoteUserName(settings.userName);
+        const remoteSSHconfig = vscode.workspace.getConfiguration('tscode.remote');
+        const enableAgentForwarding = remoteSSHconfig.get<boolean>('enableAgentForwarding', true)!;
+        const connectTimeout = remoteSSHconfig.get<number>('connectTimeout', 60)!;
+        const readinessConnectTimeout = Math.max(1, Math.min(connectTimeout, 10));
+        const sessionResolver = new RemoteSSHResolver(this.context, this.logger);
+        sessionResolver.sshAgentSock = sshHostConfig['IdentityAgent']
+            || process.env['SSH_AUTH_SOCK']
+            || (isWindows ? '\\\\.\\pipe\\openssh-ssh-agent' : undefined);
+        sessionResolver.sshAgentSock = sessionResolver.sshAgentSock
+            ? untildify(sessionResolver.sshAgentSock)
+            : undefined;
+
+        let closeConnectionPromise: Promise<void> | undefined;
+        const closeConnection = () => closeConnectionPromise ??= sessionResolver.closeCommandConnection();
+        let connected = false;
+        try {
+            for (let attempt = 1; attempt <= GIT_CLONE_SSH_CONNECT_ATTEMPTS; attempt += 1) {
+                try {
+                    await sessionResolver.connectSSH(
+                        sshconfig,
+                        new SSHDestination(entry.host, sshUser, port),
+                        sshHostConfig,
+                        hostName,
+                        sshUser,
+                        port,
+                        readinessConnectTimeout,
+                        enableAgentForwarding,
+                        signal,
+                    );
+                    connected = true;
+                    break;
+                } catch (error) {
+                    await closeConnection();
+                    closeConnectionPromise = undefined;
+                    if (signal?.aborted || attempt === GIT_CLONE_SSH_CONNECT_ATTEMPTS || !isSSHReadinessError(error)) {
+                        throw error;
+                    }
+                    this.logger.trace(`服务连接尚未就绪，正在进行第 ${attempt}/${GIT_CLONE_SSH_CONNECT_ATTEMPTS - 1} 次 SFTP 重试`);
+                    await waitWithAbort(GIT_CLONE_SSH_RETRY_DELAY_MS, signal);
+                }
+            }
+            if (!connected || !sessionResolver.sshConnection) {
+                throw new Error('SFTP 的 SSH 连接未能就绪');
+            }
+
+            const sftp = await sessionResolver.sshConnection.sftp();
+            let disposed = false;
+            return {
+                sftp,
+                dispose: async () => {
+                    if (disposed) {
+                        return;
+                    }
+                    disposed = true;
+                    try {
+                        sftp.end();
+                    } finally {
+                        await closeConnection();
+                    }
+                },
+            };
+        } catch (error) {
+            await closeConnection();
+            if (signal?.aborted) {
+                throw errorWithCause('SFTP 连接已取消', error);
+            }
+            throw error;
+        }
+    }
+
     public async executeGitCloneScript(
         serviceId: string,
         hostAlias: string,
@@ -593,9 +684,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         if (this.sshConnection) {
             closeTargets.push(this.sshConnection.close());
         }
-        if (this.proxyConnections.length) {
-            closeTargets.push(this.proxyConnections[0].close());
-        }
+        closeTargets.push(...this.proxyConnections.map(connection => connection.close()));
         await Promise.allSettled(closeTargets);
         if (this.proxyCommandProcess && !this.proxyCommandProcess.killed) {
             this.proxyCommandProcess.kill();

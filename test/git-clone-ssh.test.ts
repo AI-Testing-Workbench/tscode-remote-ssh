@@ -8,6 +8,7 @@ import * as vscode from './mocks/vscode';
 import type { Log as SourceLog } from '../src/common/logger';
 import { GIT_CLONE_COMMAND } from '../src/ssh/gitCloneCommand';
 import SSHDestination from '../src/ssh/sshDestination';
+import type { ContainerConfigEntry } from '../src/containerConfig';
 
 describe('码云初始化脚本执行', () => {
     afterEach(() => {
@@ -132,6 +133,70 @@ describe('码云初始化脚本执行', () => {
         controller.abort();
         await expect(execution).rejects.toThrow('码云初始化脚本执行已取消');
         expect(channel.close).toHaveBeenCalledOnce();
+        expect(close).toHaveBeenCalledOnce();
+    });
+});
+
+describe('按需建立 SFTP 会话', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vscode.resetConfiguration();
+    });
+
+    it('按配置别名和当前 endpoint 建立独立 SSH transport，并在 dispose 时关闭全部资源', async () => {
+        const sftp = { end: vi.fn() } as unknown as import('ssh2').SFTPWrapper;
+        const connect = vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
+            return Promise.resolve(this);
+        });
+        const openSftp = vi.spyOn(SSHConnection.prototype, 'sftp').mockResolvedValue(sftp);
+        const close = vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
+        const getHostConfiguration = mockSSHConfig({ User: 'configured-user' });
+        const resolver = createResolver();
+        const entry: ContainerConfigEntry = {
+            serviceId: 'service-1',
+            host: 'callback-alias',
+            hostName: '10.20.30.40',
+            port: 2222,
+        };
+
+        const session = await resolver.openSftpSession(entry);
+
+        expect(connect).toHaveBeenCalledOnce();
+        expect(connect.mock.contexts[0]).toMatchObject({
+            config: {
+                host: '10.20.30.40',
+                port: 2222,
+                username: 'configured-user',
+            },
+        });
+        expect(getHostConfiguration).toHaveBeenCalledWith('callback-alias');
+        expect(openSftp).toHaveBeenCalledOnce();
+        expect(session.sftp).toBe(sftp);
+
+        await session.dispose();
+        await session.dispose();
+
+        expect(sftp.end).toHaveBeenCalledOnce();
+        expect(close).toHaveBeenCalledOnce();
+    });
+
+    it('在 SFTP subsystem 建立失败时关闭独立 SSH transport', async () => {
+        const error = new Error('SFTP subsystem unavailable');
+        const connect = vi.spyOn(SSHConnection.prototype, 'connect').mockImplementation(function (this: SSHConnectionType) {
+            return Promise.resolve(this);
+        });
+        vi.spyOn(SSHConnection.prototype, 'sftp').mockRejectedValue(error);
+        const close = vi.spyOn(SSHConnection.prototype, 'close').mockResolvedValue(undefined);
+        mockSSHConfig();
+
+        await expect(createResolver().openSftpSession({
+            serviceId: 'service-1',
+            host: 'callback-alias',
+            hostName: '10.20.30.40',
+            port: 2222,
+        })).rejects.toBe(error);
+
+        expect(connect).toHaveBeenCalledOnce();
         expect(close).toHaveBeenCalledOnce();
     });
 });
