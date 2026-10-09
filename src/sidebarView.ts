@@ -22,9 +22,14 @@ import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } fr
 import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
 import { PUBLIC_EXTENSION_ID, type PublicUserContainerApi } from './api/publicApi';
+import type { ContainerTypeValue } from './api/models';
 import { formatContainerInitializationError } from './containerInitializationPoller';
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
+
+interface ContainerTypeQuickPickItem extends vscode.QuickPickItem {
+    type: ContainerTypeValue;
+}
 
 export class SidebarSyncState {
     private currentResult: ContainerSyncResult = {
@@ -85,6 +90,10 @@ export interface SidebarViewOptions {
     onDisconnect?: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox?: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
+    showQuickPick?: (
+        items: readonly ContainerTypeQuickPickItem[],
+        options: vscode.QuickPickOptions,
+    ) => Thenable<ContainerTypeQuickPickItem | undefined>;
 }
 
 interface SidebarViewContext {
@@ -123,6 +132,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly onDisconnect: (() => void | Promise<void>) | undefined;
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
+    private readonly showQuickPick: (
+        items: readonly ContainerTypeQuickPickItem[],
+        options: vscode.QuickPickOptions,
+    ) => Thenable<ContainerTypeQuickPickItem | undefined>;
     private readonly stateSubscription: { dispose: () => void };
     private readonly operationSubscription: { dispose: () => void };
     private readonly optimisticallyRemovedServiceIds = new Set<string>();
@@ -162,6 +175,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.onDisconnect = options.onDisconnect;
         this.operationRegistry = options.operationRegistry;
         this.showInputBox = options.showInputBox ?? (inputOptions => vscode.window.showInputBox(inputOptions));
+        this.showQuickPick = options.showQuickPick ?? ((items, pickOptions) => vscode.window.showQuickPick(items, pickOptions));
         this.stateSubscription = this.state.subscribe(() => this.handleSyncStateUpdated());
         this.operationSubscription = this.operationRegistry?.subscribe(event => {
             if (event.type === 'completed') {
@@ -938,6 +952,27 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const title = '创建新 云端沙箱 服务';
+        const containerTypeOptions: ContainerTypeQuickPickItem[] = [
+            {
+                label: '默认镜像',
+                description: '内置 Node、Python3.12、Java8',
+                type: 'testagent_cloud',
+            },
+            {
+                label: '自动化执行镜像',
+                description: '在默认镜像基础上内置浏览器与自动化Agent',
+                type: 'autotest_cloud',
+            },
+        ];
+        const selectedContainerType = await this.showQuickPick(containerTypeOptions, {
+            title,
+            placeHolder: '如无特殊需求请选择默认镜像',
+            canPickMany: false,
+            ignoreFocusOut: true,
+        });
+        if (!selectedContainerType || !this.isActiveView(context)) {
+            return;
+        }
         const giteeInput = await this.showInputBox({
             title,
             prompt: '码云仓库地址 (HTTP协议)',
@@ -990,6 +1025,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }, async () => {
             const created = await this.publicApi.createContainer({
                 plugin_id: PUBLIC_EXTENSION_ID,
+                type: selectedContainerType.type,
                 ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
                 ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
                 ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),

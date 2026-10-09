@@ -4,11 +4,14 @@ import { ContainerConfig, ContainerConfigEntry } from '../src/containerConfig';
 import { ContainerSyncResult, DEFAULT_CONTAINER_HOST_NAME, SyncedContainer } from '../src/containerSync';
 import { ContainerOperationRegistry } from '../src/containerOperations';
 import { createPublicUserContainerApi, PublicUserContainerApi } from '../src/api/publicApi';
+import type { ContainerTypeValue } from '../src/api/models';
 import { UserRestApi } from '../src/api/restClient';
 import { SidebarSyncState, SidebarViewProvider } from '../src/sidebarView';
 import { WEBVIEW_SCRIPT } from '../src/webviewScript';
 import { ContainerInitializationError } from '../src/containerInitializationPoller';
 import * as vscode from './mocks/vscode';
+
+type ContainerTypeChoice = import('vscode').QuickPickItem & { type: ContainerTypeValue };
 
 describe('SidebarSyncState', () => {
     it('publishes the latest sync result and stops after disposal', () => {
@@ -1145,8 +1148,9 @@ describe('SidebarViewProvider', () => {
         } as never));
         const values = ['https://gitee.com/alice/repo.git', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
+        const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[0]);
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
-        const provider = createProvider({ state, config, publicApi, sync, showInputBox });
+        const provider = createProvider({ state, config, publicApi, sync, showInputBox, showQuickPick });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -1154,6 +1158,7 @@ describe('SidebarViewProvider', () => {
 
         expect(publicApi.createContainer).toHaveBeenCalledWith({
             plugin_id: 'test-tech.tscode-remote-ssh',
+            type: 'testagent_cloud',
             gitee_url: 'https://gitee.com',
             gitee_user: 'alice',
             gitee_repository: 'repo',
@@ -1167,6 +1172,24 @@ describe('SidebarViewProvider', () => {
             prompt: '码云分支 (可选)',
             ignoreFocusOut: true,
         }));
+        expect(showQuickPick).toHaveBeenCalledWith([
+            {
+                label: '默认镜像',
+                description: '内置 Node、Python3.12、Java8',
+                type: 'testagent_cloud',
+            },
+            {
+                label: '自动化执行镜像',
+                description: '在默认镜像基础上内置浏览器与自动化Agent',
+                type: 'autotest_cloud',
+            },
+        ], expect.objectContaining({
+            title: '创建新 云端沙箱 服务',
+            placeHolder: '如无特殊需求请选择默认镜像',
+            canPickMany: false,
+            ignoreFocusOut: true,
+        }));
+        expect(showQuickPick.mock.invocationCallOrder[0]).toBeLessThan(showInputBox.mock.invocationCallOrder[0]);
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             serviceId: 'service-created-1',
             host: 'alice/repo',
@@ -1185,6 +1208,40 @@ describe('SidebarViewProvider', () => {
             expect.any(Function),
         );
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('云端沙箱 服务创建成功');
+    });
+
+    it('creates an automation container when the automation image is selected', async () => {
+        const publicApi = createPublicApi();
+        publicApi.createContainer = vi.fn(async () => ({
+            service_id: 'service-created-automation',
+            status: 'pending',
+            endpoint: '10.0.0.11:2222',
+        }));
+        const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[1]);
+        const provider = createProvider({
+            publicApi,
+            showInputBox: vi.fn(async () => ''),
+            showQuickPick,
+        });
+
+        await provider.createContainerFromPrompt();
+
+        expect(publicApi.createContainer).toHaveBeenCalledWith({
+            plugin_id: 'test-tech.tscode-remote-ssh',
+            type: 'autotest_cloud',
+        }, { initializationSignal: expect.any(AbortSignal) });
+    });
+
+    it('cancels creation when no image type is selected', async () => {
+        const publicApi = createPublicApi();
+        const showInputBox = vi.fn(async () => 'https://gitee.com/alice/repo');
+        const showQuickPick = vi.fn(async () => undefined);
+        const provider = createProvider({ publicApi, showInputBox, showQuickPick });
+
+        await provider.createContainerFromPrompt();
+
+        expect(showInputBox).not.toHaveBeenCalled();
+        expect(publicApi.createContainer).not.toHaveBeenCalled();
     });
 
     it('extracts 码云 fields from a repository URL and only asks for the branch', async () => {
@@ -1206,6 +1263,7 @@ describe('SidebarViewProvider', () => {
         expect(showInputBox).toHaveBeenCalledTimes(2);
         expect(publicApi.createContainer).toHaveBeenCalledWith({
             plugin_id: 'test-tech.tscode-remote-ssh',
+            type: 'testagent_cloud',
             gitee_url: 'https://github.com',
             gitee_user: 'JustWorkingAndWorking',
             gitee_repository: 'testagent-cloud-remote-ssh',
@@ -1229,7 +1287,7 @@ describe('SidebarViewProvider', () => {
 
         expect(showInputBox).toHaveBeenCalledOnce();
         expect(publicApi.createContainer).toHaveBeenCalledWith(
-            { plugin_id: 'test-tech.tscode-remote-ssh' },
+            { plugin_id: 'test-tech.tscode-remote-ssh', type: 'testagent_cloud' },
             { initializationSignal: expect.any(AbortSignal) },
         );
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
@@ -1889,6 +1947,7 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
         onDisconnect: options.onDisconnect,
         operationRegistry: options.operationRegistry,
         showInputBox: options.showInputBox,
+        showQuickPick: options.showQuickPick ?? (async items => items[0]),
     });
 }
 
@@ -1918,6 +1977,10 @@ interface ProviderTestOptions {
     onDisconnect: () => void | Promise<void>;
     operationRegistry?: ContainerOperationRegistry;
     showInputBox: (options: import('vscode').InputBoxOptions) => Thenable<string | undefined>;
+    showQuickPick: (
+        items: readonly ContainerTypeChoice[],
+        options: import('vscode').QuickPickOptions,
+    ) => Thenable<ContainerTypeChoice | undefined>;
     view: ReturnType<typeof createWebviewView>;
 }
 
