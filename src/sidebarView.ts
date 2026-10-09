@@ -1001,7 +1001,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             const giteeInput = await this.showInputBox({
                 title,
                 prompt: '码云仓库地址 (HTTP协议)',
-                placeHolder: '',
+                placeHolder: '请勿直接粘贴码云仓库的地址，请使用 克隆/下载 按钮提供的 URL',
                 ignoreFocusOut: true,
                 validateInput: value => value.trim() ? undefined : '码云仓库地址不能为空',
             });

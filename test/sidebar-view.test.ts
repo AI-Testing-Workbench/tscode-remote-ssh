@@ -1165,7 +1165,7 @@ describe('SidebarViewProvider', () => {
             gitee_branch: 'main',
         }, { initializationSignal: expect.any(AbortSignal) });
         expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({
-            prompt: '码云仓库地址 (HTTP协议，必填)',
+            prompt: '码云仓库地址 (HTTP协议)',
             ignoreFocusOut: true,
         }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({
@@ -1194,7 +1194,6 @@ describe('SidebarViewProvider', () => {
             { label: '否', description: '不拉取码云仓库', type: 'no' },
         ], expect.objectContaining({
             title: '创建新 云端沙箱 服务',
-            placeHolder: '默认选择：是',
             canPickMany: false,
             ignoreFocusOut: true,
         }));
@@ -1327,7 +1326,7 @@ describe('SidebarViewProvider', () => {
 
         expect(showInputBox).toHaveBeenCalledOnce();
         expect(showInputBox).toHaveBeenCalledWith(expect.objectContaining({
-            prompt: '码云仓库地址 (HTTP协议，必填)',
+            prompt: '码云仓库地址 (HTTP协议)',
             validateInput: expect.any(Function),
         }));
         expect(inputBoxOptions?.validateInput?.('  ')).toBe('码云仓库地址不能为空');
