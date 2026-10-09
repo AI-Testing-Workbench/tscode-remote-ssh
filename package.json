@@ -282,16 +282,6 @@
 		"menus": {
 			"statusBar/remoteIndicator": [
 				{
-					"command": "openremotessh.openEmptyWindow",
-					"when": "remoteConnectionState == disconnected",
-					"group": "remote_20_ssh_3local@1"
-				},
-				{
-					"command": "openremotessh.openEmptyWindowInCurrentWindow",
-					"when": "remoteConnectionState == disconnected",
-					"group": "remote_20_ssh_3local@2"
-				},
-				{
 					"command": "openremotessh.openConfigFile",
 					"when": "remoteConnectionState == disconnected",
 					"group": "remote_20_ssh_3local@3"
@@ -300,16 +290,6 @@
 					"command": "openremotessh.createContainer",
 					"when": "!remoteName && !virtualWorkspace",
 					"group": "remote_20_ssh_3local@4"
-				},
-				{
-					"command": "openremotessh.openEmptyWindow",
-					"when": "!remoteName && !virtualWorkspace",
-					"group": "remote_20_ssh_3local@5"
-				},
-				{
-					"command": "openremotessh.openEmptyWindowInCurrentWindow",
-					"when": "!remoteName && !virtualWorkspace",
-					"group": "remote_20_ssh_3local@6"
 				}
 			],
 			"commandPalette": [

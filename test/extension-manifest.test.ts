@@ -6,7 +6,7 @@ type ExtensionManifest = {
     activationEvents: string[];
     contributes: {
         commands: Array<{ command: string }>;
-        menus: Record<string, Array<{ command: string }>>;
+        menus: Record<string, Array<{ command: string; when?: string }>>;
         views: {
             remote: Array<{ id: string; type?: string }>;
         };
@@ -36,6 +36,22 @@ describe('extension manifest', () => {
             .map(({ command }) => command);
 
         expect(menuCommandIds.filter(command => !commandIds.has(command))).toEqual([]);
+    });
+
+    it('hides the direct-connect commands from the remote indicator popup but keeps them contributed', () => {
+        const directConnectCommands = [
+            'openremotessh.openEmptyWindow',
+            'openremotessh.openEmptyWindowInCurrentWindow',
+        ];
+        const commandPalette = manifest.contributes.menus.commandPalette;
+        const statusBarMenu = manifest.contributes.menus['statusBar/remoteIndicator'];
+        const commandIds = manifest.contributes.commands.map(({ command }) => command);
+
+        for (const command of directConnectCommands) {
+            expect(commandIds).toContain(command);
+            expect(commandPalette).not.toContainEqual(expect.objectContaining({ command, when: 'false' }));
+            expect(statusBarMenu).not.toContainEqual(expect.objectContaining({ command }));
+        }
     });
 
     it('declares the cloud settings with their required defaults and types', () => {
