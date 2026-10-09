@@ -11,7 +11,7 @@ import { WEBVIEW_SCRIPT } from '../src/webviewScript';
 import { ContainerInitializationError } from '../src/containerInitializationPoller';
 import * as vscode from './mocks/vscode';
 
-type ContainerTypeChoice = import('vscode').QuickPickItem & { type: ContainerTypeValue };
+type ContainerTypeChoice = import('vscode').QuickPickItem & { type: ContainerTypeValue | 'yes' | 'no' };
 
 describe('SidebarSyncState', () => {
     it('publishes the latest sync result and stops after disposal', () => {
@@ -1165,7 +1165,7 @@ describe('SidebarViewProvider', () => {
             gitee_branch: 'main',
         }, { initializationSignal: expect.any(AbortSignal) });
         expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({
-            prompt: '码云仓库地址 (HTTP协议)',
+            prompt: '码云仓库地址 (HTTP协议，必填)',
             ignoreFocusOut: true,
         }));
         expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({
@@ -1189,7 +1189,17 @@ describe('SidebarViewProvider', () => {
             canPickMany: false,
             ignoreFocusOut: true,
         }));
+        expect(showQuickPick).toHaveBeenNthCalledWith(2, [
+            { label: '是', description: '拉取码云仓库', type: 'yes' },
+            { label: '否', description: '不拉取码云仓库', type: 'no' },
+        ], expect.objectContaining({
+            title: '创建新 云端沙箱 服务',
+            placeHolder: '默认选择：是',
+            canPickMany: false,
+            ignoreFocusOut: true,
+        }));
         expect(showQuickPick.mock.invocationCallOrder[0]).toBeLessThan(showInputBox.mock.invocationCallOrder[0]);
+        expect(showQuickPick.mock.invocationCallOrder[1]).toBeLessThan(showInputBox.mock.invocationCallOrder[0]);
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             serviceId: 'service-created-1',
             host: 'alice/repo',
@@ -1218,9 +1228,10 @@ describe('SidebarViewProvider', () => {
             endpoint: '10.0.0.11:2222',
         }));
         const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[1]);
+        const showInputBox = vi.fn(async () => 'unused');
         const provider = createProvider({
             publicApi,
-            showInputBox: vi.fn(async () => ''),
+            showInputBox,
             showQuickPick,
         });
 
@@ -1230,6 +1241,7 @@ describe('SidebarViewProvider', () => {
             plugin_id: 'test-tech.tscode-remote-ssh',
             type: 'autotest_cloud',
         }, { initializationSignal: expect.any(AbortSignal) });
+        expect(showInputBox).not.toHaveBeenCalled();
     });
 
     it('cancels creation when no image type is selected', async () => {
@@ -1271,7 +1283,7 @@ describe('SidebarViewProvider', () => {
         }, { initializationSignal: expect.any(AbortSignal) });
     });
 
-    it('keeps the existing flow when the 码云 input is blank', async () => {
+    it('skips the 码云 input and creates without repository fields when No is selected', async () => {
         const config = createConfig();
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
@@ -1279,13 +1291,16 @@ describe('SidebarViewProvider', () => {
             status: 'pending',
             endpoint: '10.0.0.6:2222',
         }));
-        const values = ['   '];
-        const showInputBox = vi.fn(async () => values.shift());
-        const provider = createProvider({ config, publicApi, showInputBox });
+        const showInputBox = vi.fn(async () => 'unused');
+        const showQuickPick = vi.fn()
+            .mockImplementationOnce(async (items: readonly ContainerTypeChoice[]) => items[0])
+            .mockImplementationOnce(async (items: readonly ContainerTypeChoice[]) => items[1]);
+        const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
 
         await provider.createContainerFromPrompt();
 
-        expect(showInputBox).toHaveBeenCalledOnce();
+        expect(showQuickPick).toHaveBeenCalledTimes(2);
+        expect(showInputBox).not.toHaveBeenCalled();
         expect(publicApi.createContainer).toHaveBeenCalledWith(
             { plugin_id: 'test-tech.tscode-remote-ssh', type: 'testagent_cloud' },
             { initializationSignal: expect.any(AbortSignal) },
@@ -1297,6 +1312,28 @@ describe('SidebarViewProvider', () => {
             hostName: '10.0.0.6',
             port: 2222,
         }, { skipKnownHostsCheck: true, userName: 'root' });
+    });
+
+    it('requires a nonempty 码云 URL when Yes is selected', async () => {
+        const publicApi = createPublicApi();
+        let inputBoxOptions: import('vscode').InputBoxOptions | undefined;
+        const showInputBox = vi.fn(async (options: import('vscode').InputBoxOptions) => {
+            inputBoxOptions = options;
+            return '   ';
+        });
+        const provider = createProvider({ publicApi, showInputBox });
+
+        await provider.createContainerFromPrompt();
+
+        expect(showInputBox).toHaveBeenCalledOnce();
+        expect(showInputBox).toHaveBeenCalledWith(expect.objectContaining({
+            prompt: '码云仓库地址 (HTTP协议，必填)',
+            validateInput: expect.any(Function),
+        }));
+        expect(inputBoxOptions?.validateInput?.('  ')).toBe('码云仓库地址不能为空');
+        expect(inputBoxOptions?.validateInput?.('https://gitee.com/alice/repo')).toBeUndefined();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云仓库地址不能为空', { modal: true });
+        expect(publicApi.createContainer).not.toHaveBeenCalled();
     });
 
     it('rejects a manually entered 码云 username', async () => {
@@ -1345,6 +1382,7 @@ describe('SidebarViewProvider', () => {
         const provider = createProvider({
             publicApi,
             showInputBox: vi.fn(async () => ''),
+            showQuickPick: selectDefaultImageWithoutGitee(),
         });
 
         await provider.createContainerFromPrompt();
@@ -1377,6 +1415,7 @@ describe('SidebarViewProvider', () => {
             publicApi,
             config,
             showInputBox: vi.fn(async () => values.shift()),
+            showQuickPick: selectDefaultImageWithoutGitee(),
         });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
@@ -1412,6 +1451,7 @@ describe('SidebarViewProvider', () => {
             config,
             sync,
             showInputBox: vi.fn(async () => ''),
+            showQuickPick: selectDefaultImageWithoutGitee(),
         });
 
         const creating = provider.createContainerFromPrompt();
@@ -1451,6 +1491,7 @@ describe('SidebarViewProvider', () => {
             publicApi,
             config,
             showInputBox: vi.fn(async () => ''),
+            showQuickPick: selectDefaultImageWithoutGitee(),
         });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
@@ -1495,6 +1536,7 @@ describe('SidebarViewProvider', () => {
             publicApi,
             config,
             showInputBox: vi.fn(async () => ''),
+            showQuickPick: selectDefaultImageWithoutGitee(),
         });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
@@ -1949,6 +1991,11 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
         showInputBox: options.showInputBox,
         showQuickPick: options.showQuickPick ?? (async items => items[0]),
     });
+}
+
+function selectDefaultImageWithoutGitee(): ProviderTestOptions['showQuickPick'] {
+    let quickPickIndex = 0;
+    return async items => items[quickPickIndex++ === 0 ? 0 : 1];
 }
 
 interface ProviderTestOptions {

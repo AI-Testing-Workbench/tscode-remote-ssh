@@ -27,8 +27,8 @@ import { formatContainerInitializationError } from './containerInitializationPol
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
 
-interface ContainerTypeQuickPickItem extends vscode.QuickPickItem {
-    type: ContainerTypeValue;
+interface CreateContainerQuickPickItem extends vscode.QuickPickItem {
+    type: ContainerTypeValue | 'yes' | 'no';
 }
 
 export class SidebarSyncState {
@@ -91,9 +91,9 @@ export interface SidebarViewOptions {
     operationRegistry?: ContainerOperationRegistry;
     showInputBox?: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
     showQuickPick?: (
-        items: readonly ContainerTypeQuickPickItem[],
+        items: readonly CreateContainerQuickPickItem[],
         options: vscode.QuickPickOptions,
-    ) => Thenable<ContainerTypeQuickPickItem | undefined>;
+    ) => Thenable<CreateContainerQuickPickItem | undefined>;
 }
 
 interface SidebarViewContext {
@@ -133,9 +133,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly operationRegistry: ContainerOperationRegistry | undefined;
     private readonly showInputBox: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
     private readonly showQuickPick: (
-        items: readonly ContainerTypeQuickPickItem[],
+        items: readonly CreateContainerQuickPickItem[],
         options: vscode.QuickPickOptions,
-    ) => Thenable<ContainerTypeQuickPickItem | undefined>;
+    ) => Thenable<CreateContainerQuickPickItem | undefined>;
     private readonly stateSubscription: { dispose: () => void };
     private readonly operationSubscription: { dispose: () => void };
     private readonly optimisticallyRemovedServiceIds = new Set<string>();
@@ -952,7 +952,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
 
         const title = '创建新 云端沙箱 服务';
-        const containerTypeOptions: ContainerTypeQuickPickItem[] = [
+        const containerTypeOptions: CreateContainerQuickPickItem[] = [
             {
                 label: '默认镜像',
                 description: '内置 Node、Python3.12、Java8',
@@ -970,22 +970,53 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             canPickMany: false,
             ignoreFocusOut: true,
         });
-        if (!selectedContainerType || !this.isActiveView(context)) {
+        if (
+            !selectedContainerType
+            || (selectedContainerType.type !== 'testagent_cloud' && selectedContainerType.type !== 'autotest_cloud')
+            || !this.isActiveView(context)
+        ) {
             return;
         }
-        const giteeInput = await this.showInputBox({
+        const containerType = selectedContainerType.type;
+        const giteePullOptions: CreateContainerQuickPickItem[] = [
+            { label: '是', description: '拉取码云仓库', type: 'yes' },
+            { label: '否', description: '不拉取码云仓库', type: 'no' },
+        ];
+        const selectedGiteePull = await this.showQuickPick(giteePullOptions, {
             title,
-            prompt: '码云仓库地址 (HTTP协议)',
-            placeHolder: '',
+            placeHolder: '请选择是否同时拉取指定的码云仓库',
+            canPickMany: false,
             ignoreFocusOut: true,
         });
-        if (giteeInput === undefined) {
+        if (
+            !selectedGiteePull
+            || (selectedGiteePull.type !== 'yes' && selectedGiteePull.type !== 'no')
+            || !this.isActiveView(context)
+        ) {
             return;
         }
-        if (!this.isActiveView(context)) {
-            return;
+
+        let normalizedGiteeInput = '';
+        if (selectedGiteePull.type === 'yes') {
+            const giteeInput = await this.showInputBox({
+                title,
+                prompt: '码云仓库地址 (HTTP协议)',
+                placeHolder: '',
+                ignoreFocusOut: true,
+                validateInput: value => value.trim() ? undefined : '码云仓库地址不能为空',
+            });
+            if (giteeInput === undefined) {
+                return;
+            }
+            if (!this.isActiveView(context)) {
+                return;
+            }
+            normalizedGiteeInput = giteeInput.trim();
+            if (!normalizedGiteeInput) {
+                this.showError('码云仓库地址不能为空');
+                return;
+            }
         }
-        const normalizedGiteeInput = giteeInput.trim();
         let normalizedGiteeUser = '';
         let normalizedGiteeRepository = '';
         let normalizedGiteeBranch = '';
@@ -1025,7 +1056,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }, async () => {
             const created = await this.publicApi.createContainer({
                 plugin_id: PUBLIC_EXTENSION_ID,
-                type: selectedContainerType.type,
+                type: containerType,
                 ...(normalizedGiteeUrl ? { gitee_url: normalizedGiteeUrl } : {}),
                 ...(normalizedGiteeUser ? { gitee_user: normalizedGiteeUser } : {}),
                 ...(normalizedGiteeRepository ? { gitee_repository: normalizedGiteeRepository } : {}),
