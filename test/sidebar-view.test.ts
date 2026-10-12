@@ -109,6 +109,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(view.webview.html).toContain('data-action="create"');
         expect(view.webview.html).toContain('title="创建新的服务" aria-label="创建新的服务"');
+        expect(view.webview.html).toContain('<g transform="translate(2 0)"><path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/><path d="M12 11.5v5m-2.5-2.5h5"/></g>');
         expect(view.webview.html).toMatch(/<div class="toolbar-actions" role="toolbar">[\s\S]*?data-action="create"[\s\S]*?data-action="clearExpired"/);
         expect(view.webview.html).toContain('data-action="clearExpired"');
         expect(view.webview.html.indexOf('data-action="clearExpired"')).toBeLessThan(view.webview.html.indexOf('data-action="refresh"'));
@@ -131,8 +132,8 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('.app-bar { display: flex; align-items: center;');
         expect(view.webview.html).toContain('.sidebar { width: 100%; max-width: none; margin: 0; }');
         expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px;');
-        expect(view.webview.html).toContain('.icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px;');
-        expect(view.webview.html).toContain('.icon-button[data-action="clearExpired"] .icon { width: 22px; height: 22px; }');
+        expect(view.webview.html).toContain('.icon-button-create, .icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 0; }');
+        expect(view.webview.html).toContain('.icon-button-create .icon, .icon-button[data-action="clearExpired"] .icon { width: 22px; height: 22px; }');
         expect(view.webview.html).toContain('.empty-state .cloud-icon { margin-bottom: 7px; color: var(--primary); }');
         expect(view.webview.html).toContain('border: 1px solid var(--outline)');
         expect(view.webview.html).toContain('font-family: var(--vscode-font-family,');
