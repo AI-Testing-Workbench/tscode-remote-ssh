@@ -107,6 +107,9 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toMatch(/data-action="restart" data-service-id="stopped-1">/);
         expect(view.webview.html).not.toContain('data-action="openConfig"');
         expect(view.webview.html).toContain('data-action="refresh"');
+        expect(view.webview.html).toContain('data-action="create"');
+        expect(view.webview.html).toContain('title="创建新的服务" aria-label="创建新的服务"');
+        expect(view.webview.html).toMatch(/<div class="toolbar-actions" role="toolbar">[\s\S]*?data-action="create"[\s\S]*?data-action="clearExpired"/);
         expect(view.webview.html).toContain('data-action="clearExpired"');
         expect(view.webview.html.indexOf('data-action="clearExpired"')).toBeLessThan(view.webview.html.indexOf('data-action="refresh"'));
         expect(view.webview.html).not.toContain('<h1 class="page-title">');
@@ -115,7 +118,6 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('>TC<');
         expect(view.webview.html).toContain('<section class="container-list">');
         expect(view.webview.html).toContain('此服务已过期并被资源回收');
-        expect(view.webview.html).not.toContain('data-action="create"');
         expect(view.webview.html).not.toContain('10.0.0.1:22');
         expect(view.webview.html).toContain('service-status');
         expect(view.webview.html).not.toContain('service-glyph');
@@ -191,6 +193,15 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('当前没有可用的容器');
         expect(view.webview.html).toContain('<div class="cloud-icon empty-cloud-icon" aria-hidden="true">');
         expect(view.webview.html).not.toContain('请使用 测小智TestAgent 插件进行创建');
+    });
+
+    it('hides the create button while connected', async () => {
+        const view = createWebviewView();
+        const provider = createProvider({ view, isDisconnected: () => false });
+
+        await provider.resolveWebviewView(view as never);
+
+        expect(view.webview.html).not.toContain('data-action="create"');
     });
 
     it('renders local syncing cards before user initialization completes', async () => {
@@ -315,6 +326,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('.cloud-card p { margin: 0 0 6px; color: var(--warning);');
         expect(view.webview.html).toContain('.cloud-card .action-button { width: 100%; max-width: 160px; max-height: 28px; padding: 0 12px; }');
         expect(view.webview.html).toContain('data-action="disconnect"');
+        expect(view.webview.html).not.toContain('data-action="create"');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(view.webview.html).not.toContain('data-action="openConfig"');
     });
@@ -1154,7 +1166,9 @@ describe('SidebarViewProvider', () => {
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
-        await provider.createContainerFromPrompt();
+        expect(view.webview.html).toContain('data-action="create"');
+        view.fireMessage({ command: 'create', requestId: 'create-1' });
+        await flushMessages();
 
         expect(publicApi.createContainer).toHaveBeenCalledWith({
             plugin_id: 'test-tech.tscode-remote-ssh',

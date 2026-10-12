@@ -486,6 +486,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 this.setWebviewHtml(renderSidebarHtml(
                     containers,
                     this.adminAllowed,
+                    this.safeIsDisconnected(),
                     activeOperationIds,
                     this.activeActions,
                 ));
@@ -498,6 +499,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.setWebviewHtml(renderSidebarHtml(
             containers,
             this.adminAllowed,
+            this.safeIsDisconnected(),
             activeOperationIds,
             this.activeActions,
         ));
@@ -1253,9 +1255,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 }
 
-type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'warning';
+type SidebarIcon = 'add' | 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'warning';
 
 const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
+    add: '<path d="M12 5v14M5 12h14"/>',
     admin: '<path d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 3.5v3M17 5h3"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     config: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
@@ -1296,6 +1299,7 @@ function renderActionStateAttributes(disabled: boolean, activeAction?: SidebarAc
 function renderSidebarHtml(
     containers: SyncedContainer[],
     showAdmin: boolean,
+    showCreate: boolean,
     inFlightServiceIds: ReadonlySet<string>,
     activeActions: ReadonlyMap<string, SidebarActionState>,
 ): string {
@@ -1316,6 +1320,9 @@ function renderSidebarHtml(
     const configButton = showAdmin
         ? renderToolbarButton('openConfig', '打开配置文件', 'config', false, findActiveAction(activeActions, 'openConfig'))
         : '';
+    const createButton = showCreate
+        ? renderToolbarButton('create', '创建新的服务', 'add', false, findActiveAction(activeActions, 'create'))
+        : '';
     const clearExpiredAction = findActiveAction(activeActions, 'clearExpired');
     const clearExpiredButton = renderToolbarButton(
         'clearExpired',
@@ -1330,6 +1337,7 @@ function renderSidebarHtml(
                 <div class="toolbar-actions" role="toolbar">
                     ${adminButton}
                     ${configButton}
+                    ${createButton}
                     ${clearExpiredButton}
                     ${renderToolbarButton('refresh', '刷新页面', 'refresh', false, findActiveAction(activeActions, 'refresh'))}
                 </div>
@@ -1347,7 +1355,7 @@ function renderToolbarButton(
     activeAction?: SidebarActionState,
 ): string {
     const loading = activeAction ? ' is-loading' : '';
-    return `<button class="icon-button${loading}" data-action="${action}" title="${escapeHtml(label)}"${renderActionStateAttributes(disabled, activeAction)}>${renderIcon(icon)}</button>`;
+    return `<button class="icon-button${loading}" data-action="${action}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"${renderActionStateAttributes(disabled, activeAction)}>${renderIcon(icon)}</button>`;
 }
 
 function renderContainerCard(
