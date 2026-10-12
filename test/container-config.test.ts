@@ -57,17 +57,17 @@ describe('ContainerConfig', () => {
         expect(text).toContain('StrictHostKeyChecking no');
         expect(text).toContain(`${USER_KNOWN_HOSTS_FILE_DIRECTIVE} ${NULL_KNOWN_HOSTS_FILE}`);
         expect(getServiceFields(text)).toEqual([
+            'IgnoreUnknown ServiceId,ExpiresAt,Name',
             'HostName 10.0.0.1',
             'Name alice/repo',
             'User root',
             'Port 22',
             'StrictHostKeyChecking no',
             'UserKnownHostsFile /dev/null',
-            'IgnoreUnknown ServiceId,ExpiresAt,Name',
             'ServiceId container-1',
         ]);
+        expect(text.indexOf('IgnoreUnknown')).toBeLessThan(text.indexOf('HostName'));
         expect(text.indexOf('IgnoreUnknown')).toBeLessThan(text.indexOf('ServiceId'));
-        expect(text.indexOf('StrictHostKeyChecking')).toBeLessThan(text.indexOf('ServiceId'));
         expect(store.list(SSHConfig.parse(text))).toEqual([{
             serviceId: 'container-1',
             host: 'alice/repo',
@@ -195,13 +195,13 @@ describe('ContainerConfig', () => {
         expect(await store.write(document)).toBe(true);
 
         expect(getServiceFields(await fs.readFile(store.filePath, 'utf8'))).toEqual([
+            'IgnoreUnknown ServiceId,ExpiresAt,Name',
             'HostName 127.0.0.1',
             'Name test/test',
             'User root',
             'Port 59194',
             'StrictHostKeyChecking no',
             'UserKnownHostsFile /dev/null',
-            'IgnoreUnknown ServiceId,ExpiresAt,Name',
             'ServiceId container-order',
             'ExpiresAt 2026-09-02T00:47:16.734Z',
         ]);

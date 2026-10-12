@@ -781,13 +781,13 @@ function isSkipKnownHostsDirective(line: Directive): boolean {
 }
 
 const ORDERED_CONTAINER_DIRECTIVES: Array<(line: Directive) => boolean> = [
+    isIgnoreUnknownDirective,
     isHostNameDirective,
     isNameDirective,
     isUserDirective,
     isPortDirective,
     isSkipKnownHostsDirective,
     isUserKnownHostsFileDirective,
-    isIgnoreUnknownDirective,
     isServiceIdDirective,
     isExpiresAtDirective,
 ];
