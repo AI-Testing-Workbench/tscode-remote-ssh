@@ -13,7 +13,53 @@ describe('public user container API', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
         vscode.window.showErrorMessage.mockReset();
+        vscode.window.showInformationMessage.mockReset();
+        vscode.window.withProgress.mockReset().mockImplementation((_options, task) => (
+            task({ report: vi.fn() }, {} as never) as Promise<unknown>
+        ));
         vscode.extensions.getExtension.mockReset();
+    });
+
+    it('keeps creation notifications disabled by default', async () => {
+        const api = createApi(createUserApi());
+
+        await api.createContainer({ plugin_id: 'example.plugin' });
+
+        expect(vscode.window.withProgress).not.toHaveBeenCalled();
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    });
+
+    it('shows progress and success notifications when requested', async () => {
+        const api = createApi(createUserApi());
+
+        await api.createContainer({ plugin_id: 'example.plugin' }, { showNotifications: true });
+
+        expect(vscode.window.withProgress).toHaveBeenCalledWith({
+            title: '正在创建云端沙箱 服务...',
+            location: vscode.ProgressLocation.Notification,
+            cancellable: false,
+        }, expect.any(Function));
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('云端沙箱 服务创建成功');
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    });
+
+    it('shows a failure notification and preserves the original error when requested', async () => {
+        const userApi = createUserApi();
+        const error = new RestClientError('http', 'container_conflict', '云端沙箱 服务冲突', 409);
+        vi.mocked(userApi.createContainer).mockRejectedValue(error);
+        const api = createApi(userApi);
+
+        await expect(api.createContainer(
+            { plugin_id: 'example.plugin' },
+            { showNotifications: true },
+        )).rejects.toBe(error);
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('云端沙箱 服务冲突'),
+            { modal: true },
+        );
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     });
 
     it('exposes only the versioned user API methods and fills the current user ID internally', async () => {
@@ -307,7 +353,7 @@ describe('public user container API', () => {
                     await api.syncFiles('/workspace/local.txt', `${container.serviceId}:/workspace/remote.txt`);
                 },
             },
-        })).rejects.toMatchObject({
+        }, { showNotifications: true })).rejects.toMatchObject({
             name: 'PublicApiCallbackError',
             stage: 'postCompleted',
             serviceId: 'service-1',
@@ -373,7 +419,7 @@ describe('public user container API', () => {
                     await api.syncFiles('/workspace/local.txt', `${container.serviceId}:/workspace/remote.txt`);
                 },
             },
-        })).rejects.toMatchObject({
+        }, { showNotifications: true })).rejects.toMatchObject({
             name: 'PublicApiCallbackError',
             stage: 'containerPrepared',
             serviceId: 'service-1',
@@ -442,9 +488,23 @@ describe('public user container API', () => {
             originalError: callbackError,
             cleanupError,
         }));
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('example.plugin'), { modal: true });
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('callback failed'), { modal: true });
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('cleanup failed'), { modal: true });
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    });
+
+    it('shows one detailed callback failure notification when requested', async () => {
+        const userApi = createUserApi();
+        const api = createApi(userApi);
+
+        await expect(api.createContainer({
+            plugin_id: 'example.plugin',
+            callbacks: { postCompleted: () => { throw new Error('callback failed'); } },
+        }, { showNotifications: true })).rejects.toBeInstanceOf(PublicApiCallbackError);
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('callback failed'),
+            { modal: true },
+        );
     });
 
     it('adds the configured Name to public status and falls back to Host for old entries', async () => {

@@ -23,7 +23,11 @@ import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
 import { PUBLIC_EXTENSION_ID, type PublicUserContainerApi } from './api/publicApi';
 import type { ContainerTypeValue } from './api/models';
-import { formatContainerInitializationError } from './containerInitializationPoller';
+import {
+    showContainerCreationError,
+    showContainerCreationSuccess,
+    withContainerCreationProgress,
+} from './containerCreationNotifications';
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
 
@@ -1051,11 +1055,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
         const initializationController = new AbortController();
         this.initializationControllers.set(initializationController, context);
-        const createdSuccessfully = await Promise.resolve(vscode.window.withProgress({
-            title: '正在创建云端沙箱 服务...',
-            location: vscode.ProgressLocation.Notification,
-            cancellable: false,
-        }, async () => {
+        const createdSuccessfully = await withContainerCreationProgress(async () => {
             const created = await this.publicApi.createContainer({
                 plugin_id: PUBLIC_EXTENSION_ID,
                 type: containerType,
@@ -1120,7 +1120,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 await this.refreshAfterMutation();
             }
             return createdSuccessfully;
-        })).finally(() => {
+        }).finally(() => {
             this.initializationControllers.delete(initializationController);
         });
         if (createdSuccessfully && this.isActiveView(context)) {
@@ -1177,13 +1177,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 
     private showError(error: unknown): void {
-        const message = formatContainerInitializationError(error);
         console.error('侧边栏操作失败', error);
-        void vscode.window.showErrorMessage(message, { modal: true });
+        showContainerCreationError(error);
     }
 
     private showCreateSuccess(): void {
-        void vscode.window.showInformationMessage('云端沙箱 服务创建成功');
+        showContainerCreationSuccess();
     }
 
     private completeWebviewAction(

@@ -3,6 +3,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { ContainerConfig, type ContainerConfigEntry } from '../containerConfig';
 import { getContainerHostName, getUniqueHostName } from '../containerSync';
 import { ContainerInitializationRunner, combineAbortSignals, getInitializationResultContainer } from '../containerInitializationPoller';
+import {
+    showContainerCreationError,
+    showContainerCreationSuccess,
+    withContainerCreationProgress,
+} from '../containerCreationNotifications';
 import { Log } from '../common/logger';
 import { getRemoteSettings, RemoteSettings } from '../settings';
 import { UserIdProvider } from '../user';
@@ -41,6 +46,11 @@ export type PublicCreateContainerRequest = Omit<UserCreateContainerRequest, 'use
     callbacks?: PublicCreateContainerCallbacks;
 };
 
+export interface PublicCreateContainerOptions {
+    initializationSignal?: AbortSignal;
+    showNotifications?: boolean;
+}
+
 export type PublicContainerQuery = Omit<UserContainerQuery, 'user_id'>;
 
 export type PublicContainerStatusResponse = ContainerStatusResponse & {
@@ -50,7 +60,7 @@ export type PublicContainerStatusResponse = ContainerStatusResponse & {
 export interface PublicUserContainerApi {
     createContainer(
         request: PublicCreateContainerRequest,
-        options?: { initializationSignal?: AbortSignal },
+        options?: PublicCreateContainerOptions,
     ): Promise<CreateContainerResponse>;
     getActiveServiceIds(query?: PublicContainerQuery): Promise<ServiceIdsResponse>;
     getContainer(serviceId: string): Promise<PublicContainerStatusResponse>;
@@ -178,82 +188,105 @@ export function createPublicUserContainerApi(
         allowDebugProxy: getSettings().debug,
     });
 
-    return {
-        createContainer: async (request, createOptions) => {
-            assertObject(request, '请求必须是对象');
-            const pluginId = normalizePluginId(request.plugin_id);
-            const callbacks = normalizeCallbacks(request.callbacks);
-            const { userId, userApi } = await prepareUserRequest();
-            const requestFields = omitPublicFields(request, new Set(['plugin_id', 'callbacks', 'user_id']));
-            const created = stripPublicCreateFields(await userApi.createContainer({
-                ...requestFields,
-                user_id: userId,
-            }));
+    const createContainer = async (
+        request: PublicCreateContainerRequest,
+        createOptions?: PublicCreateContainerOptions,
+    ): Promise<CreateContainerResponse> => {
+        assertObject(request, '请求必须是对象');
+        const pluginId = normalizePluginId(request.plugin_id);
+        const callbacks = normalizeCallbacks(request.callbacks);
+        const { userId, userApi } = await prepareUserRequest();
+        const requestFields = omitPublicFields(request, new Set(['plugin_id', 'callbacks', 'user_id']));
+        const created = stripPublicCreateFields(await userApi.createContainer({
+            ...requestFields,
+            user_id: userId,
+        }));
 
-            let callbackContainer: ContainerConfigEntry | undefined;
-            const invokeCallback = async (
-                stage: keyof PublicCreateContainerCallbacks,
-                callback: PublicContainerCallback | undefined,
-                container: Pick<ContainerStatusResponse, 'endpoint' | 'expires_at' | 'gitee_user' | 'gitee_repository'>,
-            ): Promise<void> => {
-                if (!callback) {
-                    return;
-                }
-                callbackContainer = await getCreateContainerEntry(
-                    options.containerConfig,
-                    created.service_id,
-                    container.endpoint,
-                    container.gitee_user,
-                    container.gitee_repository,
-                    container.expires_at,
-                    callbackContainer,
-                    getSettings().debug,
-                );
-                await runCreateCallback(stage, callback, {
-                    pluginId,
-                    userApi,
-                    serviceId: created.service_id,
-                    container: callbackContainer,
-                });
-            };
+        let callbackContainer: ContainerConfigEntry | undefined;
+        const invokeCallback = async (
+            stage: keyof PublicCreateContainerCallbacks,
+            callback: PublicContainerCallback | undefined,
+            container: Pick<ContainerStatusResponse, 'endpoint' | 'expires_at' | 'gitee_user' | 'gitee_repository'>,
+        ): Promise<void> => {
+            if (!callback) {
+                return;
+            }
+            callbackContainer = await getCreateContainerEntry(
+                options.containerConfig,
+                created.service_id,
+                container.endpoint,
+                container.gitee_user,
+                container.gitee_repository,
+                container.expires_at,
+                callbackContainer,
+                getSettings().debug,
+            );
+            await runCreateCallback(stage, callback, {
+                pluginId,
+                userApi,
+                serviceId: created.service_id,
+                container: callbackContainer,
+            }, createOptions?.showNotifications === true);
+        };
 
-            await invokeCallback('postCompleted', callbacks.postCompleted, {
+        await invokeCallback('postCompleted', callbacks.postCompleted, {
+            endpoint: created.endpoint,
+            expires_at: created.expires_at,
+            gitee_user: typeof requestFields['gitee_user'] === 'string' ? requestFields['gitee_user'] : '',
+            gitee_repository: typeof requestFields['gitee_repository'] === 'string' ? requestFields['gitee_repository'] : '',
+        });
+
+        let result: CreateContainerResponse = created;
+        let finalContainer: ContainerStatusResponse | undefined;
+        if (initializationPoller) {
+            // The postCompleted callback is the handoff into the internal waiting/SSH/Git initialization flow.
+            const initialization = await initializationPoller.initialize({
+                serviceId: created.service_id,
+                operatorUserId: userId,
+                endpoint: created.endpoint,
+                statusReader: userApi,
+                signal: combineAbortSignals(options.initializationSignal, createOptions?.initializationSignal),
+            });
+            const initializedContainer = getInitializationResultContainer(initialization);
+            finalContainer = initializedContainer ? stripUserId(initializedContainer) : undefined;
+            if (finalContainer) {
+                await invokeCallback('gitInitialized', callbacks.gitInitialized, finalContainer);
+                result = mergeFinalContainerStatus(created, finalContainer);
+            }
+        }
+
+        if (finalContainer?.status?.trim().toLowerCase() === 'running'
+            || (!initializationPoller && created.status?.trim().toLowerCase() === 'running')) {
+            await invokeCallback('containerPrepared', callbacks.containerPrepared, finalContainer ?? {
                 endpoint: created.endpoint,
                 expires_at: created.expires_at,
                 gitee_user: typeof requestFields['gitee_user'] === 'string' ? requestFields['gitee_user'] : '',
                 gitee_repository: typeof requestFields['gitee_repository'] === 'string' ? requestFields['gitee_repository'] : '',
             });
+        }
+        return result;
+    };
 
-            let result: CreateContainerResponse = created;
-            let finalContainer: ContainerStatusResponse | undefined;
-            if (initializationPoller) {
-                // The postCompleted callback is the handoff into the internal waiting/SSH/Git initialization flow.
-                const initialization = await initializationPoller.initialize({
-                    serviceId: created.service_id,
-                    operatorUserId: userId,
-                    endpoint: created.endpoint,
-                    statusReader: userApi,
-                    signal: combineAbortSignals(options.initializationSignal, createOptions?.initializationSignal),
-                });
-                const initializedContainer = getInitializationResultContainer(initialization);
-                finalContainer = initializedContainer ? stripUserId(initializedContainer) : undefined;
-                if (finalContainer) {
-                    await invokeCallback('gitInitialized', callbacks.gitInitialized, finalContainer);
-                    result = mergeFinalContainerStatus(created, finalContainer);
-                }
+    const createContainerWithNotifications = async (
+        request: PublicCreateContainerRequest,
+        createOptions?: PublicCreateContainerOptions,
+    ): Promise<CreateContainerResponse> => {
+        try {
+            const created = await withContainerCreationProgress(() => createContainer(request, createOptions));
+            showContainerCreationSuccess();
+            return created;
+        } catch (error) {
+            if (!(error instanceof PublicApiCallbackError)) {
+                showContainerCreationError(error);
             }
+            throw error;
+        }
+    };
 
-            if (finalContainer?.status?.trim().toLowerCase() === 'running'
-                || (!initializationPoller && created.status?.trim().toLowerCase() === 'running')) {
-                await invokeCallback('containerPrepared', callbacks.containerPrepared, finalContainer ?? {
-                    endpoint: created.endpoint,
-                    expires_at: created.expires_at,
-                    gitee_user: typeof requestFields['gitee_user'] === 'string' ? requestFields['gitee_user'] : '',
-                    gitee_repository: typeof requestFields['gitee_repository'] === 'string' ? requestFields['gitee_repository'] : '',
-                });
-            }
-            return result;
-        },
+    return {
+        createContainer: (request, createOptions) => createOptions?.showNotifications
+            ? createContainerWithNotifications(request, createOptions)
+            : createContainer(request, createOptions),
         getActiveServiceIds: async query => {
             const normalizedQuery = query ?? {};
             assertObject(normalizedQuery, '查询参数必须是对象');
@@ -335,6 +368,7 @@ export function createPublicUserContainerApi(
         stage: keyof PublicCreateContainerCallbacks,
         callback: PublicContainerCallback | undefined,
         context: { pluginId: string; userApi: UserRestApi; serviceId: string; container: ContainerConfigEntry },
+        showNotifications: boolean,
     ): Promise<void> {
         if (!callback) {
             return;
@@ -377,10 +411,12 @@ export function createPublicUserContainerApi(
             } else {
                 console.error(callbackError.message, logData);
             }
-            try {
-                await vscode.window.showErrorMessage(callbackError.message, { modal: true });
-            } catch {
-                // A UI notification must not hide the callback failure.
+            if (showNotifications) {
+                try {
+                    await vscode.window.showErrorMessage(callbackError.message, { modal: true });
+                } catch {
+                    // A UI notification must not hide the callback failure.
+                }
             }
             throw callbackError;
         } finally {
