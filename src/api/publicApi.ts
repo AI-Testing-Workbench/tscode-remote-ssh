@@ -33,6 +33,7 @@ import {
 } from './restClient';
 
 export const PUBLIC_EXTENSION_ID = 'test-tech.tscode-remote-ssh';
+const REMOTE_SIDEBAR_COMMAND = 'workbench.view.remote';
 
 export const PUBLIC_API_ERROR_CODES = {
     INVALID_ARGUMENT: 'invalid_argument',
@@ -58,6 +59,8 @@ export type PublicContainerStatusResponse = ContainerStatusResponse & {
 };
 
 export interface PublicUserContainerApi {
+    /** Opens or focuses the Remote Explorer sidebar containing the service view. */
+    revealSidebar(): Promise<void>;
     createContainer(
         request: PublicCreateContainerRequest,
         options?: PublicCreateContainerOptions,
@@ -284,6 +287,9 @@ export function createPublicUserContainerApi(
     };
 
     return {
+        revealSidebar: async () => {
+            await vscode.commands.executeCommand(REMOTE_SIDEBAR_COMMAND);
+        },
         createContainer: (request, createOptions) => createOptions?.showNotifications
             ? createContainerWithNotifications(request, createOptions)
             : createContainer(request, createOptions),

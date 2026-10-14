@@ -17,7 +17,19 @@ describe('public user container API', () => {
         vscode.window.withProgress.mockReset().mockImplementation((_options, task) => (
             task({ report: vi.fn() }, {} as never) as Promise<unknown>
         ));
+        vscode.commands.executeCommand.mockReset();
         vscode.extensions.getExtension.mockReset();
+    });
+
+    it('opens the Remote Explorer sidebar without toggling it closed on repeat calls', async () => {
+        const api = createApi(createUserApi());
+
+        await api.revealSidebar();
+        await api.revealSidebar();
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(2);
+        expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(1, 'workbench.view.remote');
+        expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(2, 'workbench.view.remote');
     });
 
     it('keeps creation notifications disabled by default', async () => {
@@ -88,6 +100,7 @@ describe('public user container API', () => {
             'getActiveServiceIds',
             'getContainer',
             'restartContainer',
+            'revealSidebar',
             'startContainer',
             'stopContainer',
             'syncFiles',

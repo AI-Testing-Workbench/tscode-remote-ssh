@@ -2070,6 +2070,7 @@ function createUserApi(admin: boolean): UserRestApi {
 
 function createPublicApi(userApi?: UserRestApi): PublicUserContainerApi {
     return {
+        revealSidebar: vi.fn(async () => undefined),
         createContainer: vi.fn(async () => ({ service_id: 'service-1', status: 'pending' })),
         getContainer: vi.fn(async () => ({
             service_id: 'service-1',
