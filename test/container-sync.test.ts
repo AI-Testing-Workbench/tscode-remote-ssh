@@ -79,6 +79,34 @@ describe('ContainerSync', () => {
         expect(text).toContain('UserKnownHostsFile /dev/null');
     });
 
+    it('keeps remote response order and appends local history in SSH config order', async () => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, { serviceId: 'history-z', host: 'history-z' });
+        store.upsertContainer(document.config, { serviceId: 'history-a', host: 'history-a' });
+        await store.write(document);
+
+        const sync = createSync(store, {
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [
+                    status('remote-z', 'running', '10.0.0.9:22', '', ''),
+                    status('remote-a', 'running', '10.0.0.1:22', '', ''),
+                    status('remote-z', 'stopped', '10.0.0.9:22', '', ''),
+                ],
+            })),
+        });
+
+        const result = await sync.sync();
+
+        expect(result.containers.map(container => container.serviceId)).toEqual([
+            'remote-z',
+            'remote-a',
+            'history-z',
+            'history-a',
+        ]);
+        expect(result.containers.slice(0, 2).map(container => container.status)).toEqual(['stopped', 'running']);
+    });
+
     it('writes the current SSH username when the username setting is blank', async () => {
         const store = await createStore();
         const document = await store.read();

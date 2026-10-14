@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ContainerConfig, type ContainerConfigEntry } from '../containerConfig';
-import { getContainerHostName, getUniqueHostName } from '../containerSync';
+import { getContainerHostName, getUniqueHostName, uniqueServiceStatusesInOrder } from '../containerSync';
 import { ContainerInitializationRunner, combineAbortSignals, getInitializationResultContainer } from '../containerInitializationPoller';
 import {
     showContainerCreationError,
@@ -299,18 +299,10 @@ export function createPublicUserContainerApi(
             const { userId, userApi } = await prepareUserRequest();
             const queryFields = omitPublicFields(normalizedQuery, new Set(['user_id']));
             const response = await userApi.getContainerStatuses({ ...queryFields, user_id: userId });
-            const serviceIds: string[] = [];
-            const seen = new Set<string>();
-            for (const container of response.containers ?? []) {
-                if (typeof container.service_id !== 'string'
-                    || typeof container.status !== 'string'
-                    || container.status.trim().toLowerCase() !== 'running'
-                    || seen.has(container.service_id)) {
-                    continue;
-                }
-                seen.add(container.service_id);
-                serviceIds.push(container.service_id);
-            }
+            const serviceIds = uniqueServiceStatusesInOrder(response.containers ?? [])
+                .filter(container => typeof container.status === 'string'
+                    && container.status.trim().toLowerCase() === 'running')
+                .map(container => container.service_id);
             return { service_ids: serviceIds };
         },
         getContainer: async serviceId => {

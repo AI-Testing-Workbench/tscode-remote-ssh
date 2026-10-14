@@ -127,22 +127,22 @@ describe('public user container API', () => {
         expect(userIdProvider.getCurrentUserId).toHaveBeenCalledTimes(8);
     });
 
-    it('returns only running service IDs and removes duplicate status entries', async () => {
+    it('keeps sidebar order and the final status for duplicate service IDs', async () => {
         const userApi = createUserApi();
         vi.mocked(userApi.getContainerStatuses).mockResolvedValue({
             containers: [
-                { ...containerStatus('service-running-1', 'running'), container_id: 'physical-running-1' },
-                { ...containerStatus('service-stopped-1', 'stopped'), container_id: 'physical-stopped-1' },
-                { ...containerStatus('service-running-1', 'RUNNING'), container_id: 'physical-duplicate-1' },
-                { ...containerStatus('service-pending-1', 'pending'), container_id: 'physical-pending-1' },
-                { ...containerStatus('service-failed-1', 'failed'), container_id: 'physical-failed-1' },
-                { ...containerStatus('service-unknown-1', 'unknown'), container_id: 'physical-unknown-1' },
+                { ...containerStatus('service-z', 'running'), container_id: 'physical-z-first' },
+                { ...containerStatus('service-b', 'stopped'), container_id: 'physical-b-first' },
+                { ...containerStatus('service-a', 'running'), container_id: 'physical-a' },
+                { ...containerStatus('service-z', 'stopped'), container_id: 'physical-z-last' },
+                { ...containerStatus('service-b', 'RUNNING'), container_id: 'physical-b-last' },
+                { ...containerStatus('', 'running'), container_id: 'physical-empty' },
             ] as never,
         });
         const api = createApi(userApi);
 
         await expect(api.getActiveServiceIds()).resolves.toEqual({
-            service_ids: ['service-running-1'],
+            service_ids: ['service-b', 'service-a'],
         });
     });
 

@@ -94,6 +94,7 @@ describe('extension activation API', () => {
             'getActiveServiceIds',
             'getContainer',
             'restartContainer',
+            'revealSidebar',
             'startContainer',
             'stopContainer',
             'syncFiles',

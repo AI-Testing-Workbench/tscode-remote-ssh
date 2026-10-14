@@ -465,7 +465,7 @@ export class ContainerSync {
     ): Promise<{ remoteIds: string[]; remoteStatuses: Map<string, RemoteStatusResult> }> {
         const list = await userApi.getContainerStatuses({ user_id: userId });
         const containers = Array.isArray(list?.containers) ? list.containers : [];
-        const remoteIds = uniqueServiceIds(containers.map(container => container.service_id));
+        const remoteIds = uniqueServiceStatusesInOrder(containers).map(container => container.service_id);
         const remoteStatuses = new Map<string, RemoteStatusResult>();
         for (const container of containers) {
             remoteStatuses.set(container.service_id, this.parseStatusResponse(container, allowDebugProxy));
@@ -739,17 +739,17 @@ function indexEntries(entries: ContainerConfigEntry[]): Map<string, ContainerCon
     return result;
 }
 
-function uniqueServiceIds(serviceIds: string[]): string[] {
-    const result: string[] = [];
-    const seen = new Set<string>();
-    for (const serviceId of serviceIds) {
-        if (typeof serviceId !== 'string' || !serviceId.trim() || seen.has(serviceId)) {
+/** Keeps each service's first position while retaining its last status record. */
+export function uniqueServiceStatusesInOrder<T extends { service_id: string }>(containers: readonly T[]): T[] {
+    const result = new Map<string, T>();
+    for (const container of containers) {
+        const serviceId = container.service_id;
+        if (typeof serviceId !== 'string' || !serviceId.trim()) {
             continue;
         }
-        seen.add(serviceId);
-        result.push(serviceId);
+        result.set(serviceId, container);
     }
-    return result;
+    return Array.from(result.values());
 }
 
 function compareExpiration(left: ContainerConfigEntry, right: ContainerConfigEntry): number {
