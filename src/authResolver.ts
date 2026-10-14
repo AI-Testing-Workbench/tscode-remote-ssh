@@ -26,6 +26,7 @@ import {
 import { getEffectiveRemoteUserName, getRemoteSettings } from './settings';
 import { GIT_CLONE_COMMAND } from './ssh/gitCloneCommand';
 import { copyTestagentConfigToRemote, TESTAGENT_CONFIG_FILE_NAMES } from './testagentConfigSync';
+import { showCopyableErrorMessage } from './copyableErrorMessage';
 import * as os from 'os';
 import type { ContainerConfigEntry } from './containerConfig';
 
@@ -304,7 +305,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 this.logger.error(`Error resolving authority`, e);
 
                 if (e instanceof InvalidContainerEndpointError) {
-                    await vscode.window.showErrorMessage(e.message, { modal: true });
+                    await showCopyableErrorMessage(e.message, { modal: true });
                     throw vscode.RemoteAuthorityResolverError.NotAvailable(e.message);
                 }
 
@@ -319,7 +320,13 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     const closeRemote = '关闭连接';
                     const retry = '重试';
                     const copyLog = '复制日志';
-                    const result = await vscode.window.showErrorMessage(`连接至 云端沙箱 服务 "${sshDest.hostname}" 时失败，\n请重试或者复制日志并联系支持人员。`, { modal: true }, retry, copyLog, closeRemote);
+                    const result = await showCopyableErrorMessage(
+                        `连接至 云端沙箱 服务 "${sshDest.hostname}" 时失败，\n请重试或者复制日志并联系支持人员。`,
+                        { modal: true },
+                        retry,
+                        copyLog,
+                        closeRemote,
+                    );
                     if (result === closeRemote) {
                         await vscode.commands.executeCommand('workbench.action.remote.close');
                     } else if (result === retry) {

@@ -28,6 +28,7 @@ import {
     showContainerCreationSuccess,
     withContainerCreationProgress,
 } from './containerCreationNotifications';
+import { showCopyableErrorMessage } from './copyableErrorMessage';
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
 
@@ -572,7 +573,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 return;
             }
             this.operationRegistry?.complete(serviceId, 'failed', operation.operationId);
-            void vscode.window.showErrorMessage(
+            void showCopyableErrorMessage(
                 `服务 "${serviceId}" 的${getContainerOperationStatus(operation.action)}状态确认超时，请刷新后重试`,
                 { modal: true },
             );
@@ -722,7 +723,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         } catch (error) {
             outcome = error instanceof SidebarActionCancelledError ? 'cancelled' : 'failed';
             if (outcome === 'failed' && this.isActiveView(context)) {
-                this.showError(error);
+                this.showError(error, !['copyServiceId', 'openNovnc'].includes(action));
             }
         } finally {
             if (requestKey) {
@@ -1019,7 +1020,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             }
             normalizedGiteeInput = giteeInput.trim();
             if (!normalizedGiteeInput) {
-                this.showError('码云仓库地址不能为空');
+                this.showError('码云仓库地址不能为空', false);
                 return;
             }
         }
@@ -1031,7 +1032,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             const parsedRepository = parseGiteeRepositoryUrl(normalizedGiteeInput);
             if (!parsedRepository) {
                 if (this.isActiveView(context)) {
-                    this.showError('码云仓库地址格式无效');
+                    this.showError('码云仓库地址格式无效', false);
                 }
                 return;
             }
@@ -1176,9 +1177,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
     }
 
-    private showError(error: unknown): void {
+    private showError(error: unknown, copyable = true): void {
         console.error('侧边栏操作失败', error);
-        showContainerCreationError(error);
+        showContainerCreationError(error, copyable);
     }
 
     private showCreateSuccess(): void {

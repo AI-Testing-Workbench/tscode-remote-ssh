@@ -550,6 +550,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '服务 "invalid-endpoint" 的 endpoint 无效，必须是 IP:Port',
             { modal: true },
+            '复制',
         );
     });
 
@@ -577,6 +578,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '服务 "container-1" 正在执行操作，暂时无法连接',
             { modal: true },
+            '复制',
         );
 
         resolveConnect?.();
@@ -741,6 +743,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '服务 "failed-1" 处于失败状态，不能重启',
             { modal: true },
+            '复制',
         );
     });
 
@@ -777,6 +780,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             expect.stringContaining('正在执行操作'),
             { modal: true },
+            '复制',
         );
 
         releaseRestart?.();
@@ -1045,7 +1049,7 @@ describe('SidebarViewProvider', () => {
         await flushMessages();
 
         expect(onOpenConfig).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('当前用户没有管理员权限', { modal: true });
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('当前用户没有管理员权限', { modal: true }, '复制');
         await expect(provider.openConfigFile()).rejects.toThrow('当前用户没有管理员权限');
         expect(onOpenConfig).not.toHaveBeenCalled();
     });
@@ -1382,6 +1386,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '服务 "service-created-2" 的 endpoint 无效，应为 IP:Port 格式：example.com:22',
             { modal: true },
+            '复制',
         );
         expect(config.read).not.toHaveBeenCalled();
         expect(config.upsertContainer).not.toHaveBeenCalled();
@@ -1401,7 +1406,11 @@ describe('SidebarViewProvider', () => {
 
         await provider.createContainerFromPrompt();
 
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败\n错误码: failed_initialize', { modal: true });
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '码云初始化失败\n错误码: failed_initialize',
+            { modal: true },
+            '复制',
+        );
     });
 
     it('waits for public 码云 initialization before validating a null endpoint', async () => {
@@ -1443,6 +1452,7 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '服务 "service-created-after-git" 的 endpoint 无效，应为 IP:Port 格式：(空)',
             { modal: true },
+            '复制',
         );
         expect(config.upsertContainer).not.toHaveBeenCalled();
     });

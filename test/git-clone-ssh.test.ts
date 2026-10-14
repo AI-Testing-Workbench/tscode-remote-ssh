@@ -223,6 +223,7 @@ describe('SSH service identity', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             expect.stringContaining('服务 "service-1" 的 endpoint 无效'),
             { modal: true },
+            '复制',
         );
     });
 

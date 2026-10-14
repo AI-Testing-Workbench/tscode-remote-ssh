@@ -31,6 +31,7 @@ import { UserIdProvider } from './user';
 import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository';
 import { renderAdminContent, renderAdminPage } from './adminWebview/view';
 import { ADMIN_CONTAINER_TYPES, containerTypeOf } from './adminWebview/containerTypes';
+import { showCopyableErrorMessage } from './copyableErrorMessage';
 import type { AdminDefaultImage, AdminPanelState, AdminTab, AdminVolumeState } from './adminWebview/types';
 import {
     combineAbortSignals,
@@ -215,7 +216,7 @@ export class AdminPanel implements vscode.Disposable {
             .catch(error => {
                 console.error('管理员面板消息处理失败', error);
                 if (this.isActive(panel, generation)) {
-                    void vscode.window.showErrorMessage(getErrorMessage(error));
+                    showAdminErrorMessage(error);
                 }
             })
             .finally(() => {
@@ -336,7 +337,7 @@ export class AdminPanel implements vscode.Disposable {
         } catch (error) {
             if (this.isActive(panel, generation)) {
                 console.error('管理员面板操作失败', error);
-                void vscode.window.showErrorMessage(getErrorMessage(error));
+                showAdminErrorMessage(error);
             }
         } finally {
             this.flushPendingAdminUpdate(panel, generation);
@@ -635,7 +636,7 @@ export class AdminPanel implements vscode.Disposable {
 
         const filename = path.basename(selected.fsPath);
         if (!/\.tar(?:\.gz)?$/i.test(filename)) {
-            throw new Error('镜像归档文件必须是 .tar 或 .tar.gz 格式');
+            throw new AdminPanelInputValidationError('镜像归档文件必须是 .tar 或 .tar.gz 格式');
         }
         return { fsPath: selected.fsPath, filename };
     }
@@ -1469,7 +1470,7 @@ function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateCont
         const giteeUrl = optionalText(message.gitee_url);
         const separateGiteeFields = [giteeUser, giteeRepository, giteeUrl];
         if (separateGiteeFields.some(value => value !== undefined) && separateGiteeFields.some(value => value === undefined)) {
-            throw new Error('需要完整填写码云用户名、仓库名和网址前缀');
+            throw new AdminPanelInputValidationError('需要完整填写码云用户名、仓库名和网址前缀');
         }
         if (giteeUser !== undefined) {
             request.gitee_user = giteeUser;
@@ -1507,7 +1508,7 @@ function parseGiteeRepositoryUrl(value: string): Pick<AdminCreateContainerReques
     const normalizedValue = value.trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
     const parsed = parseRepositoryUrl(normalizedValue);
     if (!parsed) {
-        throw new Error('码云地址格式无效');
+        throw new AdminPanelInputValidationError('码云地址格式无效');
     }
     return {
         gitee_user: parsed.user,
@@ -1536,7 +1537,7 @@ async function confirmAction(message: string, confirmLabel: string): Promise<boo
 function requireText(value: unknown, message: string): string {
     const text = optionalText(value);
     if (!text) {
-        throw new Error(message);
+        throw new AdminPanelInputValidationError(message);
     }
     return text;
 }
@@ -1544,7 +1545,7 @@ function requireText(value: unknown, message: string): string {
 function requireContainerType(value: unknown): ContainerTypeValue {
     const type = containerTypeOf(value);
     if (!type) {
-        throw new Error('请选择容器类型');
+        throw new AdminPanelInputValidationError('请选择容器类型');
     }
     return type;
 }
@@ -1565,13 +1566,13 @@ function requireOneOf<T extends string>(value: unknown, allowed: readonly T[], m
     if (typeof value === 'string' && allowed.includes(value as T)) {
         return value as T;
     }
-    throw new Error(message);
+    throw new AdminPanelInputValidationError(message);
 }
 
 function requireNonNegativeInteger(value: unknown, label: string): number {
     const number = requireNumber(value, label);
     if (!Number.isInteger(number) || number < 0) {
-        throw new Error(`${label}必须是大于或等于 0 的整数`);
+        throw new AdminPanelInputValidationError(`${label}必须是大于或等于 0 的整数`);
     }
     return number;
 }
@@ -1586,7 +1587,7 @@ function optionalNonNegativeInteger(value: unknown, label: string): number | und
 function requirePositiveInteger(value: unknown, label: string): number {
     const number = requireNumber(value, label);
     if (!Number.isInteger(number) || number <= 0) {
-        throw new Error(`${label}必须是大于 0 的整数`);
+        throw new AdminPanelInputValidationError(`${label}必须是大于 0 的整数`);
     }
     return number;
 }
@@ -1601,7 +1602,7 @@ function optionalPositiveInteger(value: unknown, label: string): number | undefi
 function requirePositiveNumber(value: unknown, label: string): number {
     const number = requireNumber(value, label);
     if (number <= 0) {
-        throw new Error(`${label}必须是大于 0 的数字`);
+        throw new AdminPanelInputValidationError(`${label}必须是大于 0 的数字`);
     }
     return number;
 }
@@ -1616,7 +1617,7 @@ function optionalPositiveNumber(value: unknown, label: string): number | undefin
 function requireNumber(value: unknown, label: string): number {
     const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
     if (!Number.isFinite(number)) {
-        throw new Error(`${label}必须是数字`);
+        throw new AdminPanelInputValidationError(`${label}必须是数字`);
     }
     return number;
 }
@@ -1643,6 +1644,17 @@ function getRequestId(value: unknown): string | undefined {
 
 function getErrorMessage(error: unknown): string {
     return formatContainerInitializationError(error);
+}
+
+class AdminPanelInputValidationError extends Error {}
+
+function showAdminErrorMessage(error: unknown): void {
+    const message = getErrorMessage(error);
+    if (error instanceof AdminPanelInputValidationError) {
+        void vscode.window.showErrorMessage(message);
+        return;
+    }
+    void showCopyableErrorMessage(message);
 }
 
 function isContainerConnectionProcessing(status: string): boolean {

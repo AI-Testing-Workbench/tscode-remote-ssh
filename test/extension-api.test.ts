@@ -70,6 +70,7 @@ describe('public user container API', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             expect.stringContaining('云端沙箱 服务冲突'),
             { modal: true },
+            '复制',
         );
         expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     });
@@ -378,6 +379,7 @@ describe('public user container API', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             expect.stringContaining('sync_stage_invalid'),
             { modal: true },
+            '复制',
         );
     });
 
@@ -443,6 +445,7 @@ describe('public user container API', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             expect.stringContaining('[sftp_unavailable] FileSyncError: SSH 身份验证失败'),
             { modal: true },
+            '复制',
         );
     });
 
@@ -517,6 +520,7 @@ describe('public user container API', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             expect.stringContaining('callback failed'),
             { modal: true },
+            '复制',
         );
     });
 

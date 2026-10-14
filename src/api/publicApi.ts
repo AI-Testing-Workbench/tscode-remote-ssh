@@ -8,6 +8,7 @@ import {
     showContainerCreationSuccess,
     withContainerCreationProgress,
 } from '../containerCreationNotifications';
+import { showCopyableErrorMessage } from '../copyableErrorMessage';
 import { Log } from '../common/logger';
 import { getRemoteSettings, RemoteSettings } from '../settings';
 import { UserIdProvider } from '../user';
@@ -411,7 +412,7 @@ export function createPublicUserContainerApi(
             }
             if (showNotifications) {
                 try {
-                    await vscode.window.showErrorMessage(callbackError.message, { modal: true });
+                    await showCopyableErrorMessage(callbackError.message, { modal: true });
                 } catch {
                     // A UI notification must not hide the callback failure.
                 }

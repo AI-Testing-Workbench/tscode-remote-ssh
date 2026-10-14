@@ -17,6 +17,7 @@ import {ContainerOperationRegistry} from './containerOperations';
 import {ContainerInitializationPoller} from './containerInitializationPoller';
 import {getRemoteSettings} from './settings';
 import type {ContainerStatusResponse} from './api/models';
+import {showCopyableErrorMessage} from './copyableErrorMessage';
 
 let activeContainerSync: ContainerSync | undefined;
 let activeSidebarView: SidebarViewProvider | undefined;
@@ -89,7 +90,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         operationRegistry,
         onSync: result => sidebarSyncState.update(result),
         onInvalidEndpoint: ({ serviceId, endpoint }) => {
-            void vscode.window.showErrorMessage(
+            void showCopyableErrorMessage(
                 `云端沙箱 服务 "${serviceId}" 的 endpoint 无效，应为 IP:Port：${endpoint ?? '(空)'}`,
                 { modal: true },
             );
@@ -170,7 +171,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
             await sidebarView.openConfigFile();
         } catch (error) {
             logger.error('打开 SSH 配置文件失败', error);
-            void vscode.window.showErrorMessage(
+            void showCopyableErrorMessage(
                 error instanceof Error ? error.message : '无法打开 SSH 配置文件',
                 { modal: true },
             );

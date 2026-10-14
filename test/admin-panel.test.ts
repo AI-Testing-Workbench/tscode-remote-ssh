@@ -399,6 +399,7 @@ describe('AdminPanel', () => {
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '后端 云端沙箱 服务请求失败\n请联系支持团队解决\n容器当前不可启动 (错误码: container_not_ready，HTTP 状态码 409)',
+            '复制',
         );
         expect(consoleError).toHaveBeenCalledWith('管理员面板操作失败', expect.any(Error));
         consoleError.mockRestore();
@@ -416,7 +417,7 @@ describe('AdminPanel', () => {
         await flushMessages();
 
         expect(adminApi.restartContainer).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "service-1" 处于失败状态，不能重启');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "service-1" 处于失败状态，不能重启', '复制');
     });
 
     it('keeps a timed-out administrator lifecycle operation in reconciliation', async () => {
@@ -1225,12 +1226,12 @@ describe('AdminPanel', () => {
         await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
 
         expect(onConnect).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "service-1" 已业务删除，无法连接');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "service-1" 已业务删除，无法连接', '复制');
 
         container = { ...sampleContainer(), status: 'processing' };
         await send(panel, { command: 'refresh' });
         await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
-        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('服务 "service-1" 正在处理中，暂时无法连接');
+        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('服务 "service-1" 正在处理中，暂时无法连接', '复制');
 
         container = { ...sampleContainer(), status: 'running' };
         await send(panel, { command: 'refresh' });
@@ -1238,7 +1239,7 @@ describe('AdminPanel', () => {
         await send(panel, { command: 'connectContainer', serviceId: 'service-1' });
 
         expect(onConnect).not.toHaveBeenCalled();
-        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('服务 "service-1" 正在处理中，暂时无法连接');
+        expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith('服务 "service-1" 正在处理中，暂时无法连接', '复制');
         operationRegistry.dispose();
     });
 
@@ -1391,7 +1392,7 @@ describe('AdminPanel', () => {
 
         expect(initializationPoller.initialize).toHaveBeenCalledOnce();
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败', '复制');
     });
 
     it('does not report administrator creation success for an invalid endpoint', async () => {
@@ -1414,6 +1415,7 @@ describe('AdminPanel', () => {
 
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
             '服务 "service-1" 的 endpoint 无效，应为 IP:Port 格式：(空)',
+            '复制',
         );
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
     });
@@ -1468,7 +1470,7 @@ describe('AdminPanel', () => {
             giteeMode: 'none',
         });
 
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败\n错误码: failed_initialize');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('码云初始化失败\n错误码: failed_initialize', '复制');
     });
 
     it('aborts administrator initialization when the panel is disposed', async () => {
