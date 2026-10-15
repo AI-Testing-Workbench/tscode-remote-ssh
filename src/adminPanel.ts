@@ -767,9 +767,11 @@ export class AdminPanel implements vscode.Disposable {
         }
 
         switch (action) {
-            case 'expiration':
-                await adminApi.setExpiration(serviceId, toExpirationRequest(message));
+            case 'expiration': {
+                const expirationRequest = toAddedExpirationRequest(message, container?.expires_at);
+                await adminApi.setExpiration(serviceId, expirationRequest);
                 return true;
+            }
         }
     }
 
@@ -1527,6 +1529,15 @@ function toLimitRequest(message: Record<string, unknown>): ContainerLimitRequest
 
 function toExpirationRequest(message: Record<string, unknown>): ExpirationRequest {
     return { expiration_hours: requireNonNegativeInteger(message.expirationHours ?? message.expiration_hours, '有效期') };
+}
+
+function toAddedExpirationRequest(message: Record<string, unknown>, expiresAt: string | null | undefined, now = Date.now()): ExpirationRequest {
+    const addedHours = requireNonNegativeInteger(message.expirationHours ?? message.expiration_hours, '增加有效期');
+    const expirationTimestamp = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+    const remainingHours = Number.isFinite(expirationTimestamp)
+        ? Math.max(0, Math.ceil((expirationTimestamp - now) / (60 * 60 * 1000)))
+        : 0;
+    return { expiration_hours: remainingHours + addedHours };
 }
 
 async function confirmAction(message: string, confirmLabel: string): Promise<boolean> {

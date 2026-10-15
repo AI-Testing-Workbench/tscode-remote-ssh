@@ -420,6 +420,38 @@ describe('AdminPanel', () => {
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('服务 "service-1" 处于失败状态，不能重启', '复制');
     });
 
+    it('rounds remaining time up to hours before adding the requested expiration', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        vi.mocked(adminApi.listContainers).mockResolvedValue({ containers: [{
+            ...sampleContainer(),
+            expires_at: new Date(Date.now() + 26 * 60 * 60 * 1000 + 45 * 60 * 1000).toISOString(),
+        }] });
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'expiration', expirationHours: '3' });
+
+        expect(adminApi.setExpiration).toHaveBeenCalledWith('service-1', { expiration_hours: 30 });
+    });
+
+    it('treats expired or missing expiration timestamps as zero remaining hours', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        vi.mocked(adminApi.listContainers).mockResolvedValue({ containers: [{
+            ...sampleContainer(),
+            expires_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        }] });
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'expiration', expirationHours: '3' });
+
+        expect(adminApi.setExpiration).toHaveBeenCalledWith('service-1', { expiration_hours: 3 });
+    });
+
     it('keeps a timed-out administrator lifecycle operation in reconciliation', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
