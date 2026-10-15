@@ -963,10 +963,10 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('type-badge-autotest');
         expect(view.webview.html).toContain('自动化跑批');
         expect(view.webview.html.match(/data-action="openNovnc"/g)).toHaveLength(1);
-        expect(view.webview.html).toContain('沙箱访问');
+        expect(view.webview.html).toContain('访问沙箱浏览器');
     });
 
-    it('opens the noVNC link in the external browser when sandbox access is clicked', async () => {
+    it('opens the noVNC link in the built-in browser when sandbox access is clicked', async () => {
         const novncUrl = 'http://127.0.0.1:59864/proxy/6080/vnc.html?host=127.0.0.1&port=59864&path=proxy/6080';
         const state = new SidebarSyncState();
         state.update({
@@ -983,22 +983,22 @@ describe('SidebarViewProvider', () => {
         view.fireMessage({ command: 'openNovnc', serviceId: 'autotest-1' });
         await flushMessages();
 
-        expect(vscode.Uri.parse).toHaveBeenCalledWith(novncUrl);
-        expect(vscode.env.openExternal).toHaveBeenCalledOnce();
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('simpleBrowser.show', `${novncUrl}&autoconnect=true`);
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('workbench.action.closeSidebar');
     });
 
-    it('reports when the external browser rejects a noVNC link', async () => {
+    it('reports when the built-in browser rejects a noVNC link', async () => {
         const novncUrl = 'http://127.0.0.1:59864/proxy/6080/vnc.html';
         const state = new SidebarSyncState();
         state.update({
             containers: [syncedContainer('autotest-1', 'running', true, undefined, undefined, undefined, { novncUrl })],
             changed: false,
         });
-        vscode.env.openExternal.mockResolvedValueOnce(false);
         const view = createWebviewView();
         const provider = createProvider({ state, view });
         await provider.resolveWebviewView(view as never);
 
+        vscode.commands.executeCommand.mockRejectedValueOnce(new Error('无法打开沙箱访问链接'));
         view.fireMessage({ command: 'openNovnc', serviceId: 'autotest-1', requestId: 'novnc-1' });
         await flushMessages();
 

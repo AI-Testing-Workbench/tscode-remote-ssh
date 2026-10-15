@@ -793,14 +793,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (!container?.remote || !container.novncUrl) {
             throw new Error('当前服务没有可用的沙箱访问链接');
         }
-        const url = container.novncUrl.trim();
-        if (!/^https?:\/\//i.test(url)) {
+        const base = container.novncUrl.trim();
+        if (!/^https?:\/\//i.test(base)) {
             throw new Error('沙箱访问链接格式无效');
         }
-        const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
-        if (!opened) {
-            throw new Error('无法打开沙箱访问链接');
-        }
+        const separator = base.includes('?') ? '&' : '?';
+        const url = `${base}${separator}autoconnect=true`;
+        await vscode.commands.executeCommand('simpleBrowser.show', url);
+        await vscode.commands.executeCommand('workbench.action.closeSidebar');
     }
 
     private async runContainerAction(
@@ -1456,7 +1456,7 @@ function renderSandboxAccess(
     return `
         <div class="sandbox-access-row">
             <button class="sandbox-access-link${activeAction ? ' is-loading' : ''}" data-action="openNovnc" data-service-id="${escapeHtml(container.serviceId)}" title="在浏览器中打开沙箱可视化访问链接"${renderActionStateAttributes(false, activeAction)}>
-                ${renderIcon('external')}沙箱访问
+                ${renderIcon('external')}访问沙箱浏览器
             </button>
         </div>
     `;
