@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ContainerConfig, type ContainerConfigEntry } from '../containerConfig';
 import { getContainerHostName, getUniqueHostName, uniqueServiceStatusesInOrder } from '../containerSync';
-import { ContainerInitializationRunner, combineAbortSignals, getInitializationResultContainer } from '../containerInitializationPoller';
+import {
+    ContainerInitializationRunner,
+    ContainerInitializationStatusResponse,
+    combineAbortSignals,
+    getInitializationResultContainer,
+} from '../containerInitializationPoller';
 import {
     showContainerCreationError,
     showContainerCreationSuccess,
@@ -241,7 +246,7 @@ export function createPublicUserContainerApi(
         });
 
         let result: CreateContainerResponse = created;
-        let finalContainer: ContainerStatusResponse | undefined;
+        let finalContainer: ContainerInitializationStatusResponse | undefined;
         if (initializationPoller) {
             // The postCompleted callback is the handoff into the internal waiting/SSH/Git initialization flow.
             const initialization = await initializationPoller.initialize({
@@ -254,19 +259,29 @@ export function createPublicUserContainerApi(
             const initializedContainer = getInitializationResultContainer(initialization);
             finalContainer = initializedContainer ? stripUserId(initializedContainer) : undefined;
             if (finalContainer) {
-                await invokeCallback('gitInitialized', callbacks.gitInitialized, finalContainer);
+                await invokeCallback('gitInitialized', callbacks.gitInitialized, {
+                    ...finalContainer,
+                    gitee_user: finalContainer.gitee_user ?? '',
+                    gitee_repository: finalContainer.gitee_repository ?? '',
+                });
                 result = mergeFinalContainerStatus(created, finalContainer);
             }
         }
 
         if (finalContainer?.status?.trim().toLowerCase() === 'running'
             || (!initializationPoller && created.status?.trim().toLowerCase() === 'running')) {
-            await invokeCallback('containerPrepared', callbacks.containerPrepared, finalContainer ?? {
-                endpoint: created.endpoint,
-                expires_at: created.expires_at,
-                gitee_user: typeof requestFields['gitee_user'] === 'string' ? requestFields['gitee_user'] : '',
-                gitee_repository: typeof requestFields['gitee_repository'] === 'string' ? requestFields['gitee_repository'] : '',
-            });
+            await invokeCallback('containerPrepared', callbacks.containerPrepared, finalContainer
+                ? {
+                    ...finalContainer,
+                    gitee_user: finalContainer.gitee_user ?? '',
+                    gitee_repository: finalContainer.gitee_repository ?? '',
+                }
+                : {
+                    endpoint: created.endpoint,
+                    expires_at: created.expires_at,
+                    gitee_user: typeof requestFields['gitee_user'] === 'string' ? requestFields['gitee_user'] : '',
+                    gitee_repository: typeof requestFields['gitee_repository'] === 'string' ? requestFields['gitee_repository'] : '',
+                });
         }
         return result;
     };
@@ -557,7 +572,7 @@ function formatErrorDetails(error: unknown): string {
     return formatted.length > 800 ? `${formatted.slice(0, 797)}...` : formatted;
 }
 
-function mergeFinalContainerStatus(created: CreateContainerResponse, finalContainer: ContainerStatusResponse): CreateContainerResponse {
+function mergeFinalContainerStatus(created: CreateContainerResponse, finalContainer: ContainerInitializationStatusResponse): CreateContainerResponse {
     const result: CreateContainerResponse = {
         ...created,
         status: finalContainer.status,
@@ -576,6 +591,9 @@ function mergeFinalContainerStatus(created: CreateContainerResponse, finalContai
     }
     if (Object.prototype.hasOwnProperty.call(finalContainer, 'expires_at')) {
         result.expires_at = finalContainer.expires_at;
+    }
+    if (Object.prototype.hasOwnProperty.call(finalContainer, 'api_token')) {
+        result.api_token = finalContainer.api_token;
     }
     return result;
 }

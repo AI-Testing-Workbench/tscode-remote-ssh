@@ -2069,6 +2069,8 @@ function createUserApi(admin: boolean): UserRestApi {
             status: 'running',
             gitee_user: '',
             gitee_repository: '',
+            gitee_url: '',
+            gitee_branch: null,
         })),
         checkAdmin: vi.fn(async () => ({ admin, limit: admin ? 'none' as const : 'user' as const })),
         startContainer: vi.fn(async () => undefined),
@@ -2087,6 +2089,8 @@ function createPublicApi(userApi?: UserRestApi): PublicUserContainerApi {
             status: 'running',
             gitee_user: '',
             gitee_repository: '',
+            gitee_url: '',
+            gitee_branch: null,
         })),
         checkAdmin: vi.fn(async () => userApi
             ? userApi.checkAdmin({ user_id: 'user-1' })

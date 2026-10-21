@@ -543,6 +543,8 @@ function containerStatus(status: string, git_fin_status: string | undefined): Co
         status,
         gitee_user: '',
         gitee_repository: '',
+        gitee_url: '',
+        gitee_branch: null,
         ...(git_fin_status === undefined ? {} : { git_fin_status }),
         endpoint: '127.0.0.1:2222',
     };

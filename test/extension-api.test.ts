@@ -172,6 +172,7 @@ describe('public user container API', () => {
             service_id: 'service-created-1',
             container_id: 'physical-created-1',
             status: 'pending',
+            api_token: 'read-only-token',
             plugin_id: 'echoed.plugin',
             user_id: 'echoed-user',
         } as never);
@@ -199,6 +200,7 @@ describe('public user container API', () => {
         expect(created).not.toHaveProperty('plugin_id');
         expect(created).not.toHaveProperty('user_id');
         expect(created).not.toHaveProperty('container_id');
+        expect(created).toHaveProperty('api_token', 'read-only-token');
     });
 
     it('returns the admin limit mode through a zero-argument public method', async () => {
@@ -216,6 +218,7 @@ describe('public user container API', () => {
             service_id: 'service-created-1',
             container_id: 'physical-created-1',
             status: 'pending',
+            api_token: 'created-token',
         } as never);
         const calls: string[] = [];
         const postCompleted = vi.fn((container: ContainerConfigEntry) => { calls.push(`postCompleted:${container.serviceId}`); });
@@ -224,7 +227,12 @@ describe('public user container API', () => {
         const initializationPoller = {
             initialize: vi.fn(async () => {
                 calls.push('git-poll-start');
-                return { container: containerStatus('service-created-1', 'running', 'initialized') };
+                return {
+                    container: {
+                        ...containerStatus('service-created-1', 'running', 'initialized'),
+                        api_token: 'initialized-token',
+                    },
+                };
             }),
         };
         const api = createPublicUserContainerApi({
@@ -241,7 +249,7 @@ describe('public user container API', () => {
                 gitInitialized,
                 containerPrepared,
             },
-        })).resolves.toMatchObject({ status: 'running' });
+        })).resolves.toMatchObject({ status: 'running', api_token: 'initialized-token' });
 
         expect(calls).toEqual([
             'postCompleted:service-created-1',
@@ -531,6 +539,9 @@ describe('public user container API', () => {
             container_id: 'physical-1',
             name: 'backend-name',
             user_id: 'backend-user',
+            api_token: 'read-only-token',
+            gitee_url: 'https://gitee.com/alice/repo',
+            gitee_branch: 'main',
         } as never);
         const config = {
             read: vi.fn(async () => ({ config: {} as never, originalText: '' })),
@@ -543,7 +554,12 @@ describe('public user container API', () => {
             containerConfig: config,
         });
 
-        await expect(api.getContainer('service-1')).resolves.toMatchObject({ name: 'legacy-host' });
+        await expect(api.getContainer('service-1')).resolves.toMatchObject({
+            name: 'legacy-host',
+            api_token: 'read-only-token',
+            gitee_url: 'https://gitee.com/alice/repo',
+            gitee_branch: 'main',
+        });
         await expect(api.getContainer('service-1')).resolves.not.toHaveProperty('user_id');
         await expect(api.getContainer('service-1')).resolves.not.toHaveProperty('container_id');
     });
@@ -588,6 +604,8 @@ function containerStatus(serviceId: string, status: string, git_fin_status?: str
         ...(git_fin_status ? { git_fin_status } : {}),
         gitee_user: '',
         gitee_repository: '',
+        gitee_url: '',
+        gitee_branch: null,
     };
 }
 

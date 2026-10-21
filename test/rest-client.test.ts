@@ -214,17 +214,46 @@ describe('RestClient', () => {
 
     it('preserves service_id from user and administrator creation responses', async () => {
         const responses = [
-            jsonResponse(200, { service_id: 'service-user-1', status: 'pending' }),
-            jsonResponse(200, { container_id: 'physical-container-2', service_id: 'service-admin-2', status: 'pending' }),
+            jsonResponse(200, { service_id: 'service-user-1', status: 'pending', api_token: '' }),
+            jsonResponse(200, { container_id: 'physical-container-2', service_id: 'service-admin-2', status: 'pending', api_token: 'opaque-token' }),
         ];
         const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
         const client = new RestClient('https://api.example.test', { transport });
 
-        await expect(client.user.createContainer({ user_id: 'user-1' })).resolves.toEqual({ service_id: 'service-user-1', status: 'pending' });
+        await expect(client.user.createContainer({ user_id: 'user-1' })).resolves.toEqual({
+            service_id: 'service-user-1',
+            status: 'pending',
+            api_token: '',
+        });
         await expect(client.admin.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({
             service_id: 'service-admin-2',
             container_id: 'physical-container-2',
+            api_token: 'opaque-token',
         });
+    });
+
+    it('preserves response-only api_token and C80 Gitee fields on detail and batch statuses', async () => {
+        const userStatus = {
+            service_id: 'service-1',
+            status: 'running',
+            git_fin_status: 'initialized',
+            gitee_user: 'alice',
+            gitee_repository: 'repo',
+            gitee_url: 'https://gitee.com',
+            gitee_branch: null,
+            api_token: 'opaque-token',
+        };
+        const responses = [
+            jsonResponse(200, { containers: [userStatus] }),
+            jsonResponse(200, userStatus),
+        ];
+        const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.user.getContainerStatuses({ user_id: 'user-1' })).resolves.toEqual({
+            containers: [userStatus],
+        });
+        await expect(client.user.getContainer('service-1')).resolves.toEqual(userStatus);
     });
 
     it('defaults missing user 码云 final status to pending', async () => {
@@ -496,6 +525,9 @@ describe('RestClient', () => {
             memory_usage: null,
             gitee_user: 'alice',
             gitee_repository: 'repo',
+            gitee_url: 'https://gitee.com',
+            gitee_branch: null,
+            api_token: 'opaque-token',
         };
         const imageList = {
             images: [{
@@ -521,6 +553,7 @@ describe('RestClient', () => {
             memory_usage: 12.5,
             image: 'registry.test:5000/testagent/app:v1',
             user_id: 'user-1',
+            api_token: 'opaque-token',
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: null,

@@ -1,12 +1,19 @@
 import type { ContainerStatusResponse, GitCredentialSubmitRequest, GitFailureStatus, GitStatus } from './api/models';
-import { formatRestClientError, RestClientError, type GitRestApi, type UserRestApi } from './api/restClient';
+import { formatRestClientError, RestClientError, type GitRestApi } from './api/restClient';
 import { GitConfigReader } from './gitConfig';
 import { promptForGitCredentials } from './gitCredentialPrompt';
+
+export type ContainerInitializationStatusResponse = Pick<ContainerStatusResponse, 'service_id' | 'status'>
+    & Partial<Omit<ContainerStatusResponse, 'service_id' | 'status'>>;
+
+export interface ContainerInitializationStatusReader {
+    getContainer(serviceId: string): Promise<ContainerInitializationStatusResponse>;
+}
 
 export interface ContainerInitializationInput {
     serviceId: string;
     operatorUserId: string;
-    statusReader?: Pick<UserRestApi, 'getContainer'>;
+    statusReader?: ContainerInitializationStatusReader;
     signal?: AbortSignal;
     /** 创建响应可能不包含服务地址；码云状态进入 waiting 后读取实时状态。 */
     endpoint?: string | null;
@@ -21,16 +28,16 @@ export interface GitCredentialPromptContext {
 export interface ContainerInitializationResult {
     serviceId: string;
     operatorUserId: string;
-    container: ContainerStatusResponse;
+    container: ContainerInitializationStatusResponse;
     gitStatus: 'initialized';
     attempts: number;
 }
 
 export interface ContainerInitializationPollerOptions {
-    userApi?: Pick<UserRestApi, 'getContainer'>;
+    userApi?: ContainerInitializationStatusReader;
     gitApi: Pick<GitRestApi, 'getGitState' | 'submitGitCredential' | 'reportUserCancelled'>
         & Partial<Pick<GitRestApi, 'reportGitFailure'>>;
-    runGitClone?: (container: ContainerStatusResponse, signal?: AbortSignal) => Promise<void>;
+    runGitClone?: (container: ContainerInitializationStatusResponse, signal?: AbortSignal) => Promise<void>;
     statusSyncInterval?: number;
     maxAttempts?: number;
     sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -41,7 +48,7 @@ export interface ContainerInitializationRunner {
     initialize(input: ContainerInitializationInput): Promise<unknown>;
 }
 
-export function getInitializationResultContainer(value: unknown): ContainerStatusResponse | undefined {
+export function getInitializationResultContainer(value: unknown): ContainerInitializationStatusResponse | undefined {
     if (!isRecord(value) || !isRecord(value.container)) {
         return undefined;
     }
@@ -49,7 +56,7 @@ export function getInitializationResultContainer(value: unknown): ContainerStatu
     if (typeof container.service_id !== 'string' || typeof container.status !== 'string') {
         return undefined;
     }
-    return container as unknown as ContainerStatusResponse;
+    return container as unknown as ContainerInitializationStatusResponse;
 }
 
 export function formatContainerInitializationError(error: unknown): string {
@@ -116,7 +123,7 @@ const KNOWN_GIT_STATUSES = new Set<GitStatus>([
 ]);
 
 export class ContainerInitializationPoller {
-    private readonly userApi: Pick<UserRestApi, 'getContainer'> | undefined;
+    private readonly userApi: ContainerInitializationStatusReader | undefined;
     private readonly gitApi: ContainerInitializationPollerOptions['gitApi'];
     private readonly runGitClone: ContainerInitializationPollerOptions['runGitClone'];
     private readonly intervalMilliseconds: number;
@@ -161,7 +168,7 @@ export class ContainerInitializationPoller {
     }
 
     private async poll(input: ContainerInitializationInput): Promise<ContainerInitializationResult> {
-        let lastContainer: ContainerStatusResponse | undefined;
+        let lastContainer: ContainerInitializationStatusResponse | undefined;
         let gitClonePromise: Promise<{ error?: unknown }> | undefined;
         let gitCloneFailed = false;
         let gitCloneError: unknown;
@@ -184,7 +191,7 @@ export class ContainerInitializationPoller {
             }
             for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
                 this.throwIfCancelled(input);
-                let container: ContainerStatusResponse;
+                let container: ContainerInitializationStatusResponse;
                 try {
                     container = await statusReader.getContainer(input.serviceId);
                     lastContainer = container;

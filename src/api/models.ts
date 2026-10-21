@@ -54,10 +54,13 @@ export interface ContainerStatusResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    api_token?: string;
     cpu_usage?: number | null;
     memory_usage?: number | null;
     gitee_user: string;
     gitee_repository: string;
+    gitee_url: string;
+    gitee_branch: string | null;
 }
 
 export interface ContainerStatusListResponse {
@@ -72,6 +75,7 @@ export interface CreateContainerResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    api_token?: string;
 }
 
 /** Receives the same SSH entry shape used by ContainerConfig; async work must be awaited or returned. */
@@ -129,6 +133,7 @@ export interface AdminContainerResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    api_token?: string;
     cpu_usage?: number | null;
     memory_usage?: number | null;
     image: string;

@@ -14,9 +14,8 @@ import {createPublicUserContainerApi, type TestAgentRemoteApi} from './api/publi
 import SSHDestination from './ssh/sshDestination';
 import {AdminPanel} from './adminPanel';
 import {ContainerOperationRegistry} from './containerOperations';
-import {ContainerInitializationPoller} from './containerInitializationPoller';
+import {ContainerInitializationPoller, type ContainerInitializationStatusResponse} from './containerInitializationPoller';
 import {getRemoteSettings} from './settings';
-import type {ContainerStatusResponse} from './api/models';
 import {showCopyableErrorMessage} from './copyableErrorMessage';
 
 let activeContainerSync: ContainerSync | undefined;
@@ -207,7 +206,7 @@ export function deactivate() {
     activeAdminPanel = undefined;
 }
 
-async function getInitializationHostAlias(config: ContainerConfig, container: ContainerStatusResponse): Promise<string> {
+async function getInitializationHostAlias(config: ContainerConfig, container: ContainerInitializationStatusResponse): Promise<string> {
     const document = await config.read();
     const entries = config.list(document.config);
     const existing = entries.find(entry => entry.serviceId === container.service_id);

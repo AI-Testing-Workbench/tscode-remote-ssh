@@ -132,6 +132,8 @@ describe('ContainerSync', () => {
                     memory_usage: null,
                     gitee_user: '',
                     gitee_repository: '',
+                    gitee_url: '',
+                    gitee_branch: null,
                 }],
             })),
         });
@@ -484,6 +486,8 @@ describe('ContainerSync', () => {
                         endpoint: 'example.com:22',
                         gitee_user: 'alice',
                         gitee_repository: 'repo',
+                        gitee_url: 'https://gitee.com',
+                        gitee_branch: 'main',
                     }],
                 })),
             } as unknown as UserRestApi,
@@ -526,6 +530,8 @@ describe('ContainerSync', () => {
                     endpoint: '10.0.0.30:2200/proxy/XX',
                     gitee_user: 'alice',
                     gitee_repository: 'debug-repo',
+                    gitee_url: 'https://gitee.com',
+                    gitee_branch: null,
                 }],
             })),
         }, { debug: true });
@@ -841,6 +847,8 @@ function status(
         ...(endpoint !== null ? { endpoint } : { endpoint: null }),
         gitee_user: giteeUser,
         gitee_repository: giteeRepository,
+        gitee_url: '',
+        gitee_branch: null,
     };
 }
 
