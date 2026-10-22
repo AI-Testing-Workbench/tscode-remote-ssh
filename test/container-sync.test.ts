@@ -42,6 +42,7 @@ describe('ContainerSync', () => {
             {
                 serviceId: 'container-1',
                 host: 'alice/repo',
+                name: 'alice/repo',
                 giteeRepository: 'repo',
                 hostName: '10.0.0.1',
                 port: 22,
@@ -56,6 +57,7 @@ describe('ContainerSync', () => {
             {
                 serviceId: 'container-2',
                 host: 'sandbox',
+                name: 'sandbox',
                 status: 'stopped',
                 endpoint: null,
                 startedAt: undefined,
@@ -72,6 +74,7 @@ describe('ContainerSync', () => {
 
         const text = await fs.readFile(store.filePath, 'utf8');
         expect(text).toContain('Host alice/repo');
+        expect(text).toContain('Name alice/repo');
         expect(text).toContain('HostName 10.0.0.1');
         expect(text).toContain('User root');
         expect(text).not.toContain('container-2');
@@ -167,6 +170,7 @@ describe('ContainerSync', () => {
         expect(missing.containers).toEqual([{
             serviceId: 'service-3',
             host: '10.0.0.3',
+            name: '10.0.0.3',
             status: 'missing',
             expiresAt: '2026-09-01T00:00:00.000Z',
             remote: false,
@@ -292,9 +296,11 @@ describe('ContainerSync', () => {
             containers: [{
                 serviceId: 'service-local-1',
                 host: 'local-service',
+                name: 'local-service',
                 hostName: '10.0.0.1',
                 port: 22,
                 status: 'syncing',
+                expiresAt: undefined,
                 remote: false,
             }],
             changed: false,
@@ -408,9 +414,16 @@ describe('ContainerSync', () => {
             'alice/repo(1)',
             'sandbox',
         ]);
+        expect(result.containers.map(container => container.name)).toEqual([
+            'alice/repo',
+            'alice/repo(1)',
+            'sandbox',
+        ]);
         const text = await fs.readFile(store.filePath, 'utf8');
         expect(text).toContain('Host alice/repo\n');
         expect(text).toContain('Host alice/repo(1)\n');
+        expect(text).toContain('Name alice/repo\n');
+        expect(text).toContain('Name alice/repo(1)\n');
         expect(text).toContain('Host sandbox\n');
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(3);
     });
@@ -439,6 +452,11 @@ describe('ContainerSync', () => {
             ['two', 'alice/repo(1)'],
             ['three', 'alice/repo(2)'],
         ]));
+        expect(new Map(result.containers.map(container => [container.serviceId, container.name]))).toEqual(new Map([
+            ['one', 'alice/repo'],
+            ['two', 'alice/repo(1)'],
+            ['three', 'alice/repo(2)'],
+        ]));
     });
 
     it('repairs duplicate Host aliases already present in the config', async () => {
@@ -463,7 +481,39 @@ describe('ContainerSync', () => {
             'alice/repo',
             'alice/repo(1)',
         ]);
+        expect(result.containers.map(container => container.name)).toEqual([
+            'alice/repo',
+            'alice/repo(1)',
+        ]);
         expect((await store.read()).config.filter(line => line.type === 1 && 'config' in line)).toHaveLength(2);
+    });
+
+    it('repairs an unsuffixed Name when its Host already has a collision suffix', async () => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, { serviceId: 'one', host: 'alice/repo', name: 'alice/repo' });
+        store.upsertContainer(document.config, { serviceId: 'two', host: 'alice/repo(1)', name: 'alice/repo' });
+        await store.write(document);
+
+        const sync = createSync(store, {
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [
+                    status('one', 'running', '10.0.0.1:22', 'alice', 'repo'),
+                    status('two', 'running', '10.0.0.2:22', 'alice', 'repo'),
+                ],
+            })),
+        });
+
+        const result = await sync.sync();
+
+        expect(result.containers.map(container => container.name)).toEqual([
+            'alice/repo',
+            'alice/repo(1)',
+        ]);
+        expect(store.list((await store.read()).config).map(entry => entry.name)).toEqual([
+            'alice/repo',
+            'alice/repo(1)',
+        ]);
     });
 
     it('adds a suffix when an existing Host differs only by case or whitespace', () => {

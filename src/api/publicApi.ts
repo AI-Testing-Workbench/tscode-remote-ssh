@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ContainerConfig, type ContainerConfigEntry } from '../containerConfig';
-import { getContainerHostName, getUniqueHostName, uniqueServiceStatusesInOrder } from '../containerSync';
+import { getContainerHostName, getContainerNameForHost, getUniqueHostName, uniqueServiceStatusesInOrder } from '../containerSync';
 import {
     ContainerInitializationRunner,
     ContainerInitializationStatusResponse,
@@ -527,10 +527,11 @@ async function getCreateContainerEntry(
         || existing?.host
         || getUniqueHostName(baseName, usedHosts);
     const parsedEndpoint = parseContainerEndpoint(endpoint, { allowDebugProxy });
+    const name = getContainerNameForHost(baseName, host, existing?.name?.trim() || previous?.name?.trim() || host);
     const entry: ContainerConfigEntry = {
         serviceId,
         host,
-        name: existing?.name?.trim() || previous?.name?.trim() || host,
+        name,
     };
     const hostName = parsedEndpoint?.host || previous?.hostName || existing?.hostName;
     const port = parsedEndpoint?.port || previous?.port || existing?.port;

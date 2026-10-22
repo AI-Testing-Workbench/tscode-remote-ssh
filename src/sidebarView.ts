@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { ContainerConfig } from './containerConfig';
 import {
     ContainerSync,
+    getContainerNameForHost,
     getContainerHostName,
     getUniqueHostName,
     type ContainerSyncError,
@@ -1094,17 +1095,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 const existingEntries = this.config.list(document.config)
                     .filter(entry => entry.serviceId !== created.service_id);
                 const usedNames = new Set(existingEntries.map(entry => entry.host).filter(Boolean));
-                const host = getUniqueHostName(
-                    getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
-                    usedNames,
-                );
+                const baseName = getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository);
+                const host = getUniqueHostName(baseName, usedNames);
                 if (!this.isActiveView(context)) {
                     return false;
                 }
                 this.config.upsertContainer(document.config, {
                     serviceId: created.service_id,
                     host,
-                    name: getContainerHostName(normalizedGiteeUser, normalizedGiteeRepository),
+                    name: getContainerNameForHost(baseName, host),
                     hostName: endpoint.host,
                     port: endpoint.port,
                 }, {
@@ -1378,7 +1377,7 @@ function renderContainerCard(
     const operationActionInFlight = operationInFlight || Boolean(connectAction || restartAction || deleteAction);
     const sandboxAccess = renderSandboxAccess(container, activeActions);
     const serviceId = escapeHtml(container.serviceId);
-    const host = escapeHtml(container.host || '未配置 Host');
+    const name = escapeHtml(container.name?.trim() || container.host || '未配置 Host');
     const canOperate = container.remote;
     const canConnect = canOperate
         && container.status.toLowerCase() === 'running'
@@ -1400,7 +1399,7 @@ function renderContainerCard(
         <article class="container-card" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
             <div class="service-heading" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
                 <div class="service-name-row">
-                    <strong class="service-name">${host}</strong>
+                    <strong class="service-name">${name}</strong>
                     <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyServiceId" data-service-id="${serviceId}" title="复制云端沙箱标识码" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
                 </div>
                 <div class="service-status">

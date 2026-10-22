@@ -21,6 +21,7 @@ export interface ContainerSyncError {
 export interface SyncedContainer {
     serviceId: string;
     host: string;
+    name?: string;
     giteeRepository?: string;
     hostName?: string;
     status: string;
@@ -122,6 +123,25 @@ export function getUniqueHostName(baseName: string, usedNames: Set<string>): str
     }
     usedNames.add(candidate);
     return candidate;
+}
+
+export function getContainerNameForHost(baseName: string, host: string, name = baseName): string {
+    const fallbackName = baseName.trim() || DEFAULT_CONTAINER_HOST_NAME;
+    const displayName = name.trim() || fallbackName;
+    const normalizedBaseName = normalizeHostName(fallbackName);
+    const normalizedHost = normalizeHostName(host);
+    const suffixPrefix = `${normalizedBaseName}(`;
+    if (!normalizedHost.startsWith(suffixPrefix) || !normalizedHost.endsWith(')')) {
+        return displayName;
+    }
+
+    const suffix = normalizedHost.slice(suffixPrefix.length, -1);
+    if (!/^\d+$/.test(suffix)) {
+        return displayName;
+    }
+
+    const displaySuffix = `(${suffix})`;
+    return displayName.endsWith(displaySuffix) ? displayName : `${displayName}${displaySuffix}`;
 }
 
 export class ContainerSync {
@@ -571,6 +591,7 @@ export class ContainerSync {
             const response = remoteStatus?.response;
             const assignment = hostAssignments.get(serviceId);
             const host = entry?.host ?? assignment?.host ?? '';
+            const name = entry?.name ?? assignment?.name;
             const hostName = entry?.hostName ?? assignment?.hostName ?? remoteStatus?.parsedEndpoint?.host;
             const port = entry?.port ?? assignment?.port ?? remoteStatus?.parsedEndpoint?.port;
             const endpointError = !entry && response && !hostName
@@ -579,6 +600,7 @@ export class ContainerSync {
             return {
                 serviceId,
                 host,
+                ...(name ? { name } : {}),
                 ...(response?.gitee_repository?.trim() ? { giteeRepository: response.gitee_repository.trim() } : {}),
                 ...(hostName ? { hostName } : {}),
                 ...(port !== undefined ? { port } : {}),
@@ -600,6 +622,7 @@ export class ContainerSync {
                 states.push({
                     serviceId: entry.serviceId,
                     host: entry.host,
+                    ...(entry.name ? { name: entry.name } : {}),
                     status: 'missing',
                     expiresAt: entry.expiresAt,
                     remote: false,
@@ -613,6 +636,7 @@ export class ContainerSync {
         return Array.from(indexEntries(entries).values(), entry => ({
             serviceId: entry.serviceId,
             host: entry.host,
+            ...(entry.name ? { name: entry.name } : {}),
             ...(entry.hostName ? { hostName: entry.hostName } : {}),
             ...(entry.port !== undefined ? { port: entry.port } : {}),
             status: entry.expiresAt ? 'missing' : 'unknown',
@@ -635,6 +659,7 @@ export class ContainerSync {
                 containers: Array.from(indexEntries(entries).values(), entry => ({
                     serviceId: entry.serviceId,
                     host: entry.host,
+                    ...(entry.name ? { name: entry.name } : {}),
                     ...(entry.hostName ? { hostName: entry.hostName } : {}),
                     ...(entry.port !== undefined ? { port: entry.port } : {}),
                     status: entry.expiresAt ? 'missing' : 'syncing',
@@ -683,7 +708,7 @@ export class ContainerSync {
             assignedNames.add(normalizeHostName(host));
             assignments.set(serviceId, {
                 host,
-                name: baseName,
+                name: getContainerNameForHost(baseName, host),
                 ...(hostName ? { hostName } : {}),
                 ...(port !== undefined ? { port } : {}),
             });

@@ -203,6 +203,37 @@ describe('public user container API', () => {
         expect(created).toHaveProperty('api_token', 'read-only-token');
     });
 
+    it('adds a Host collision suffix to the configured display name', async () => {
+        const userApi = createUserApi();
+        vi.mocked(userApi.createContainer).mockResolvedValue({
+            service_id: 'service-created-1',
+            status: 'running',
+            endpoint: '10.1.2.3:22',
+        });
+        const containerPrepared = vi.fn();
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            containerConfig: {
+                read: vi.fn(async () => ({ config: {} as never, originalText: '' })),
+                list: vi.fn(() => [{ serviceId: 'existing-service', host: 'alice/repo' }]),
+            },
+        });
+
+        await api.createContainer({
+            plugin_id: 'example.plugin',
+            gitee_user: 'alice',
+            gitee_repository: 'repo',
+            callbacks: { containerPrepared },
+        });
+
+        expect(containerPrepared).toHaveBeenCalledWith(expect.objectContaining({
+            host: 'alice/repo(1)',
+            name: 'alice/repo(1)',
+        }));
+    });
+
     it('returns the admin limit mode through a zero-argument public method', async () => {
         const userApi = createUserApi();
         vi.mocked(userApi.checkAdmin).mockResolvedValue({ admin: false, limit: 'repository' });

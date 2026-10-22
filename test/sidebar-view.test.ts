@@ -54,7 +54,7 @@ describe('SidebarViewProvider', () => {
         const state = new SidebarSyncState();
         state.update({
             containers: [
-                syncedContainer('running-1', 'running', true),
+                syncedContainer('running-1', 'running', true, undefined, undefined, undefined, { name: 'alice/repo(1)' }),
                 syncedContainer('stopped-1', 'stopped', true),
                 syncedContainer('failed-1', 'failed', true),
                 syncedContainer('pending-1', 'pending', true),
@@ -94,7 +94,7 @@ describe('SidebarViewProvider', () => {
             expect(view.webview.html).toContain(`data-action="copyServiceId" data-service-id="${serviceId}"`);
         }
         expect(view.webview.html).toMatch(
-            /<strong class="service-name">host-running-1<\/strong>\s*<button class="service-copy-button" data-action="copyServiceId" data-service-id="running-1"/,
+            /<strong class="service-name">alice\/repo\(1\)<\/strong>\s*<button class="service-copy-button" data-action="copyServiceId" data-service-id="running-1"/,
         );
         expect(view.webview.html).toContain('post(\'connect\'');
         expect(view.webview.html).toMatch(/<article class="container-card" data-service-id="running-1" data-connectable="true">/);
@@ -1155,7 +1155,7 @@ describe('SidebarViewProvider', () => {
     it('creates a user container, validates its endpoint, and writes only user fields', async () => {
         const state = new SidebarSyncState();
         state.update({ containers: [], changed: false });
-        const config = createConfig();
+        const config = createConfig([configuredContainer('existing-service', 'alice/repo')]);
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
             container_id: 'physical-created-1',
@@ -1220,8 +1220,8 @@ describe('SidebarViewProvider', () => {
         expect(showQuickPick.mock.invocationCallOrder[1]).toBeLessThan(showInputBox.mock.invocationCallOrder[0]);
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
             serviceId: 'service-created-1',
-            host: 'alice/repo',
-            name: 'alice/repo',
+            host: 'alice/repo(1)',
+            name: 'alice/repo(1)',
             hostName: '10.0.0.5',
             port: 2222,
         }, { skipKnownHostsCheck: true, userName: 'root' });

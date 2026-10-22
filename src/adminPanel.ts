@@ -16,7 +16,7 @@ import {
 import { AdminRestApi, formatRestClientError, RestClient, RestClientError, REST_ERROR_CODES, UserRestApi } from './api/restClient';
 import { FileBrowserBridge, getFileBrowserFrameSource, validateFileBrowserUrl, type FileBrowserBridgeSession } from './filebrowserBridge';
 import { ContainerConfig } from './containerConfig';
-import { getContainerHostName, getUniqueHostName } from './containerSync';
+import { getContainerHostName, getContainerNameForHost, getUniqueHostName } from './containerSync';
 import {
     ContainerOperationAction,
     ContainerOperationEvent,
@@ -812,10 +812,11 @@ export class AdminPanel implements vscode.Disposable {
             .map(entry => entry.host.trim())
             .filter(Boolean));
         const existingHost = existing?.host.trim();
+        const baseName = getContainerHostName(container.gitee_user, container.gitee_repository);
         const host = existingHost && !Array.from(usedHosts).some(value => value.toLocaleLowerCase() === existingHost.toLocaleLowerCase())
             ? existingHost
-            : getUniqueHostName(getContainerHostName(container.gitee_user, container.gitee_repository), usedHosts);
-        const name = existing?.name?.trim() || host;
+            : getUniqueHostName(baseName, usedHosts);
+        const name = getContainerNameForHost(baseName, host, existing?.name?.trim() || host);
         const settings = this.getSettings();
         this.containerConfig.upsertContainer(document.config, {
             serviceId,

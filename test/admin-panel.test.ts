@@ -1218,7 +1218,7 @@ describe('AdminPanel', () => {
         const configDocument = { config: {} as never, originalText: '' };
         const containerConfig = {
             read: vi.fn(async () => configDocument),
-            list: vi.fn(() => []),
+            list: vi.fn(() => [{ serviceId: 'existing-service', host: 'alice/repo' }]),
             upsertContainer: vi.fn(),
             write: vi.fn(async () => true),
         };
@@ -1230,8 +1230,8 @@ describe('AdminPanel', () => {
 
         expect(containerConfig.upsertContainer).toHaveBeenCalledWith(configDocument.config, {
             serviceId: 'service-1',
-            host: 'alice/repo',
-            name: 'alice/repo',
+            host: 'alice/repo(1)',
+            name: 'alice/repo(1)',
             hostName: '10.0.0.1',
             port: 22,
         }, {
@@ -1239,7 +1239,7 @@ describe('AdminPanel', () => {
             userName: 'root',
         });
         expect(containerConfig.write).toHaveBeenCalledWith(configDocument);
-        expect(onConnect).toHaveBeenCalledWith('alice/repo', 'repo');
+        expect(onConnect).toHaveBeenCalledWith('alice/repo(1)', 'repo');
     });
 
     it('rejects a forged admin connection request for business-deleted or processing containers', async () => {
