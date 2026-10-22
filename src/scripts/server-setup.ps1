@@ -4,6 +4,8 @@ $TMP_DIR="$env:TEMP\$([System.IO.Path]::GetRandomFileName())"
 $ProgressPreference = "SilentlyContinue"
 
 $DISTRO_COMMIT="%%DISTRO_COMMIT%%"
+$CLIENT_COMMIT="%%CLIENT_COMMIT%%"
+$FORCE_CLIENT_COMMIT="%%FORCE_CLIENT_COMMIT%%"
 
 $SERVER_APP_NAME="%%SERVER_APP_NAME%%"
 $SERVER_INITIAL_EXTENSIONS="%%SERVER_INITIAL_EXTENSIONS%%"
@@ -14,6 +16,8 @@ $SERVER_SCRIPT="$SERVER_DIR\bin\$SERVER_APP_NAME.cmd"
 $SERVER_LOGFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.log"
 $SERVER_PIDFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.pid"
 $SERVER_TOKENFILE="$SERVER_DATA_DIR\.$DISTRO_COMMIT.token"
+$SERVER_PRODUCT_JSON="$SERVER_DIR\product.json"
+$SERVER_PRODUCT_JSON_BACKUP="$SERVER_DIR\product.json.backup"
 $SERVER_CONNECTION_TOKEN=
 $SERVER_VALIDATION_FLAG="%%SERVER_VALIDATION_FLAG%%"
 
@@ -38,6 +42,19 @@ function printInstallResults($code) {
   "%%SCRIPT_ID%%: end"
 }
 
+function Get-InstalledCommit() {
+  if(!(Test-Path $SERVER_PRODUCT_JSON)) {
+    return $null
+  }
+
+  $match = [regex]::Match((Get-Content -Raw $SERVER_PRODUCT_JSON), '"commit"\s*:\s*"([^"]*)"')
+  if($match.Success) {
+    return $match.Groups[1].Value
+  }
+
+  return $null
+}
+
 # Check machine architecture
 $ARCH=$env:PROCESSOR_ARCHITECTURE
 
@@ -52,7 +69,45 @@ if(!$SERVER_SCRIPT_ITEM -or $SERVER_SCRIPT_ITEM.Length -eq 0) {
 "Server script found in $SERVER_SCRIPT"
 
 # Try to find if server is already running
-if(Get-Process node -ErrorAction SilentlyContinue | Where-Object Path -Like "$SERVER_DIR\*") {
+$SERVER_RUNNING_PROCESS = @(Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -Like "$SERVER_DIR\*" })
+$REMOTE_COMMIT = Get-InstalledCommit
+if($REMOTE_COMMIT -ne $CLIENT_COMMIT) {
+  "Remote server commit '$REMOTE_COMMIT' differs from local VS Code commit '$CLIENT_COMMIT'"
+}
+else {
+  "Remote server commit matches local VS Code commit"
+}
+
+if($FORCE_CLIENT_COMMIT -eq "true" -and $SERVER_RUNNING_PROCESS.Count -eq 0) {
+  try {
+    if(!(Test-Path $SERVER_PRODUCT_JSON)) {
+      throw "Remote product.json was not found"
+    }
+    $PRODUCT_JSON_CONTENT = Get-Content -Raw $SERVER_PRODUCT_JSON
+    if($PRODUCT_JSON_CONTENT -notmatch '"commit"\s*:\s*"[^"]*"') {
+      throw "Remote product.json does not contain a commit field"
+    }
+    if(Test-Path $SERVER_PRODUCT_JSON_BACKUP) {
+      Remove-Item -LiteralPath $SERVER_PRODUCT_JSON_BACKUP -Force
+    }
+    Copy-Item -LiteralPath $SERVER_PRODUCT_JSON -Destination $SERVER_PRODUCT_JSON_BACKUP
+    $UPDATED_PRODUCT_JSON = [regex]::new('"commit"\s*:\s*"[^"]*"').Replace($PRODUCT_JSON_CONTENT, ('"commit": "' + $CLIENT_COMMIT + '"'), 1)
+    [System.IO.File]::WriteAllText($SERVER_PRODUCT_JSON, $UPDATED_PRODUCT_JSON, [System.Text.UTF8Encoding]::new($false))
+    if((Get-InstalledCommit) -ne $CLIENT_COMMIT) {
+      throw "Remote product.json commit update could not be verified"
+    }
+    "Remote product.json backed up and commit updated"
+  } catch {
+    $ERROR_MESSAGE="Failed to back up or update remote product.json: $($_.Exception.Message)"
+    printInstallResults 1
+    exit 0
+  }
+}
+elseif($REMOTE_COMMIT -ne $CLIENT_COMMIT -and $SERVER_RUNNING_PROCESS.Count -gt 0) {
+  "Remote server is running; leaving its product.json unchanged"
+}
+
+if($SERVER_RUNNING_PROCESS.Count -gt 0) {
   echo "Server script is already running $SERVER_SCRIPT"
 }
 else {

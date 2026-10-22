@@ -3,6 +3,8 @@
 TMP_DIR="${XDG_RUNTIME_DIR:-"/tmp"}"
 
 DISTRO_COMMIT="%%DISTRO_COMMIT%%"
+CLIENT_COMMIT="%%CLIENT_COMMIT%%"
+FORCE_CLIENT_COMMIT="%%FORCE_CLIENT_COMMIT%%"
 
 SERVER_APP_NAME="%%SERVER_APP_NAME%%"
 SERVER_INITIAL_EXTENSIONS="%%SERVER_INITIAL_EXTENSIONS%%"
@@ -13,6 +15,8 @@ SERVER_SCRIPT="$SERVER_DIR/bin/$SERVER_APP_NAME"
 SERVER_LOGFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.log"
 SERVER_PIDFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.pid"
 SERVER_TOKENFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.token"
+SERVER_PRODUCT_JSON="$SERVER_DIR/product.json"
+SERVER_PRODUCT_JSON_BACKUP="$SERVER_DIR/product.json.backup"
 SERVER_CONNECTION_TOKEN=
 SERVER_VALIDATION_FLAG="%%SERVER_VALIDATION_FLAG%%"
 
@@ -21,6 +25,35 @@ OS_RELEASE_ID=
 ARCH=
 PLATFORM=
 ERROR_MESSAGE=
+
+get_installed_commit() {
+  if [[ ! -f "$SERVER_PRODUCT_JSON" ]]; then
+    return 0
+  fi
+
+  sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SERVER_PRODUCT_JSON" 2>/dev/null | head -n 1
+}
+
+update_installed_commit() {
+  if [[ ! -f "$SERVER_PRODUCT_JSON" ]] || ! grep -Eq '"commit"[[:space:]]*:[[:space:]]*"[^"]*"' "$SERVER_PRODUCT_JSON"; then
+    ERROR_MESSAGE="Remote product.json does not contain a commit field"
+    return 1
+  fi
+
+  local updatedProductJson="$SERVER_PRODUCT_JSON.tmp"
+  rm -f "$SERVER_PRODUCT_JSON_BACKUP" || return 1
+  cp "$SERVER_PRODUCT_JSON" "$SERVER_PRODUCT_JSON_BACKUP" || return 1
+  if ! sed -E "s/(\"commit\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\1$CLIENT_COMMIT\2/" "$SERVER_PRODUCT_JSON" > "$updatedProductJson"; then
+    rm -f "$updatedProductJson"
+    return 1
+  fi
+  if ! mv "$updatedProductJson" "$SERVER_PRODUCT_JSON"; then
+    rm -f "$updatedProductJson"
+    return 1
+  fi
+
+  [[ "$(get_installed_commit)" == "$CLIENT_COMMIT" ]]
+}
 
 # Mimic output from logs of remote-ssh extension
 print_install_results_and_exit() {
@@ -135,6 +168,25 @@ if [[ -f $SERVER_PIDFILE ]]; then
   SERVER_RUNNING_PROCESS="$(ps -o pid,args -p $SERVER_PID | grep $SERVER_SCRIPT)"
 else
   SERVER_RUNNING_PROCESS="$(ps -o pid,args -A | grep $SERVER_SCRIPT | grep -v grep)"
+fi
+
+REMOTE_COMMIT="$(get_installed_commit)"
+if [[ "$REMOTE_COMMIT" != "$CLIENT_COMMIT" ]]; then
+  echo "Remote server commit '$REMOTE_COMMIT' differs from local VS Code commit '$CLIENT_COMMIT'"
+else
+  echo "Remote server commit matches local VS Code commit"
+fi
+
+if [[ -z "$SERVER_RUNNING_PROCESS" && "$FORCE_CLIENT_COMMIT" == "true" ]]; then
+  echo "Backing up remote product.json and updating its commit"
+  if ! update_installed_commit; then
+    if [[ -z "$ERROR_MESSAGE" ]]; then
+      ERROR_MESSAGE="Failed to back up or update remote product.json"
+    fi
+    print_install_results_and_exit 1
+  fi
+elif [[ -n "$SERVER_RUNNING_PROCESS" && "$REMOTE_COMMIT" != "$CLIENT_COMMIT" ]]; then
+  echo "Remote server is running; leaving its product.json unchanged"
 fi
 
 if [[ -z $SERVER_RUNNING_PROCESS ]]; then

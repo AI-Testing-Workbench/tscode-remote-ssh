@@ -14,6 +14,7 @@ export const REMOTE_SETTING_DEFAULTS = {
     statusSyncInterval: 5,
     debug: false,
     disableClientValidation: true,
+    forceClientCommit: true,
 } as const;
 
 export interface RemoteSettings {
@@ -24,6 +25,7 @@ export interface RemoteSettings {
     statusSyncInterval: number;
     debug: boolean;
     disableClientValidation: boolean;
+    forceClientCommit?: boolean;
 }
 
 export function getRemoteSettings(
@@ -37,6 +39,7 @@ export function getRemoteSettings(
     const statusSyncInterval = configuration.get<unknown>('statusSyncInterval', REMOTE_SETTING_DEFAULTS.statusSyncInterval);
     const debug = configuration.get<unknown>('debug', REMOTE_SETTING_DEFAULTS.debug);
     const disableClientValidation = configuration.get<unknown>('disableClientValidation', REMOTE_SETTING_DEFAULTS.disableClientValidation);
+    const forceClientCommit = configuration.get<unknown>('forceClientCommit', REMOTE_SETTING_DEFAULTS.forceClientCommit);
 
     return {
         backendApiUrl: configuredBackendApiUrl
@@ -58,6 +61,9 @@ export function getRemoteSettings(
         disableClientValidation: typeof disableClientValidation === 'boolean'
             ? disableClientValidation
             : REMOTE_SETTING_DEFAULTS.disableClientValidation,
+        forceClientCommit: typeof forceClientCommit === 'boolean'
+            ? forceClientCommit
+            : REMOTE_SETTING_DEFAULTS.forceClientCommit,
     };
 }
 

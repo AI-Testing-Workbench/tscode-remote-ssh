@@ -8,6 +8,7 @@ vi.mock('../src/serverConfig', () => ({
     getVSCodeServerConfig: vi.fn(async () => ({
         serverApplicationName: 'codium-server',
         serverDataFolderName: '.vscodium-server',
+        clientCommit: 'local-commit-123',
     })),
 }));
 
@@ -49,8 +50,9 @@ function resultForCommand(command: string): CommandResult {
     };
 }
 
-async function generateScript(platform: 'linux' | 'windows', disableClientValidation: boolean): Promise<string> {
+async function generateScript(platform: 'linux' | 'windows', disableClientValidation: boolean, forceClientCommit = true): Promise<string> {
     vscode.setConfigurationValue('tscode.remote', 'disableClientValidation', disableClientValidation);
+    vscode.setConfigurationValue('tscode.remote', 'forceClientCommit', forceClientCommit);
     const commands: string[] = [];
     const connection = {
         exec: vi.fn(async (command: string) => {
@@ -107,4 +109,36 @@ describe('server setup client validation flag', () => {
 
         expect(script).not.toContain('\r');
     });
+
+    for (const platform of ['linux', 'windows'] as const) {
+        it(`passes the local commit and force setting to the ${platform} script`, async () => {
+            const script = await generateScript(platform, false, true);
+
+            expect(script).toContain(platform === 'linux'
+                ? 'CLIENT_COMMIT="local-commit-123"'
+                : '$CLIENT_COMMIT="local-commit-123"');
+            expect(script).toContain(platform === 'linux'
+                ? 'FORCE_CLIENT_COMMIT="true"'
+                : '$FORCE_CLIENT_COMMIT="true"');
+            expect(script).toContain(platform === 'linux' ? 'get_installed_commit()' : 'function Get-InstalledCommit()');
+            expect(script).toContain('product.json.backup');
+            expect(script).toContain(platform === 'linux'
+                ? 'if [[ -z "$SERVER_RUNNING_PROCESS" && "$FORCE_CLIENT_COMMIT" == "true" ]]'
+                : 'if($FORCE_CLIENT_COMMIT -eq "true" -and $SERVER_RUNNING_PROCESS.Count -eq 0)');
+            expect(script).toContain(platform === 'linux'
+                ? 'rm -f "$SERVER_PRODUCT_JSON_BACKUP"'
+                : 'Remove-Item -LiteralPath $SERVER_PRODUCT_JSON_BACKUP -Force');
+            expect(script).toContain(platform === 'linux'
+                ? 'cp "$SERVER_PRODUCT_JSON" "$SERVER_PRODUCT_JSON_BACKUP"'
+                : 'Copy-Item -LiteralPath $SERVER_PRODUCT_JSON -Destination $SERVER_PRODUCT_JSON_BACKUP');
+        });
+
+        it(`passes a disabled force setting to the ${platform} script`, async () => {
+            const script = await generateScript(platform, false, false);
+
+            expect(script).toContain(platform === 'linux'
+                ? 'FORCE_CLIENT_COMMIT="false"'
+                : '$FORCE_CLIENT_COMMIT="false"');
+        });
+    }
 });

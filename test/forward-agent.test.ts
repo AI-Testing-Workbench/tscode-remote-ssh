@@ -28,7 +28,7 @@ const PRODUCT_JSON = JSON.stringify({
   nameLong: 'VSCodium',
   applicationName: 'codium',
   quality: 'stable',
-  commit: 'tscode',
+  commit: 'local-test-commit',
   version: '1.126.04524',
   serverApplicationName: 'codium-server',
   serverDataFolderName: '.vscodium-server',
@@ -128,10 +128,18 @@ it('forwards the agent through a socket that stays alive', async () => {
   try {
     await preparationConnection.connect();
     await prepareServerPath(preparationConnection);
+    const remoteProductJson = '$HOME/.vscodium-server/bin/tscode/product.json';
+    const { stderr } = await preparationConnection.exec([
+      `sed -E 's/("commit"[[:space:]]*:[[:space:]]*")[^"]*(")/\\1remote-test-commit\\2/' "${remoteProductJson}" > "${remoteProductJson}.tmp"`,
+      `mv "${remoteProductJson}.tmp" "${remoteProductJson}"`,
+      `printf stale-backup > "${remoteProductJson}.backup"`,
+    ].join(' && '));
+    expect(stderr).toBe('');
   } finally {
     await preparationConnection.close();
   }
 
+  vscode.setConfigurationValue('tscode.remote', 'forceClientCommit', true);
   const logger = new Log('Remote - SSH') as unknown as SourceLog;
   const extContext = new vscode.ExtensionContext() as unknown as import('vscode').ExtensionContext;
   const remoteSSHResolver = new RemoteSSHResolver(extContext, logger);
@@ -167,6 +175,28 @@ it('forwards the agent through a socket that stays alive', async () => {
       expect(stdout.trim(), 'forwarded socket should still exist after resolve').toContain('LIVE');
     } finally {
       await probe.close();
+    }
+
+    const verificationConnection = new SSHConnection({
+      host: '127.0.0.1',
+      port: hostPort,
+      username: USERNAME,
+      password: PASSWORD,
+      reconnect: false,
+      readyTimeout: 10_000,
+      strictVendor: false,
+    });
+
+    try {
+      await verificationConnection.connect();
+      const remoteProductJson = '$HOME/.vscodium-server/bin/tscode/product.json';
+      const { stdout } = await verificationConnection.exec(`cat "${remoteProductJson}"; printf '\\nBACKUP\\n'; cat "${remoteProductJson}.backup"`);
+      const [updatedProductJson, backupProductJson] = stdout.split('\nBACKUP\n');
+      expect(updatedProductJson).toMatch(/"commit"\s*:\s*"local-test-commit"/);
+      expect(backupProductJson).toMatch(/"commit"\s*:\s*"remote-test-commit"/);
+      expect(backupProductJson).not.toContain('stale-backup');
+    } finally {
+      await verificationConnection.close();
     }
   } finally {
     remoteSSHResolver.dispose();

@@ -27,6 +27,8 @@ export type ServerInstallOptions = {
     useSocketPath: boolean;
     serverApplicationName: string;
     serverDataFolderName: string;
+    clientCommit: string;
+    forceClientCommit: boolean;
     disableClientValidation: boolean;
 };
 
@@ -89,7 +91,7 @@ export async function installCodeServer(
     const scriptId = crypto.randomBytes(12).toString('hex');
 
     const vscodeServerConfig = await getVSCodeServerConfig();
-    const { disableClientValidation } = getRemoteSettings();
+    const { disableClientValidation, forceClientCommit } = getRemoteSettings();
 
     const installOptions: ServerInstallOptions = {
         id: scriptId,
@@ -98,6 +100,8 @@ export async function installCodeServer(
         useSocketPath,
         serverApplicationName: vscodeServerConfig.serverApplicationName,
         serverDataFolderName: vscodeServerConfig.serverDataFolderName,
+        clientCommit: vscodeServerConfig.clientCommit,
+        forceClientCommit: forceClientCommit !== false,
         disableClientValidation,
     };
 
@@ -219,7 +223,7 @@ function parseServerInstallOutput(str: string, scriptId: string): { [k: string]:
     return resultMap;
 }
 
-function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, disableClientValidation }: ServerInstallOptions, extensionPath: string): string {
+function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, clientCommit, forceClientCommit, disableClientValidation }: ServerInstallOptions, extensionPath: string): string {
     const extensions = extensionIds.map(extId => '--install-extension ' + extId).join(' ');
     const serverDataDir = `$HOME/${serverDataFolderName}`;
     const listenFlag = useSocketPath
@@ -229,6 +233,8 @@ function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPa
 
     return compileTemplate('server-setup.sh', {
         DISTRO_COMMIT,
+        CLIENT_COMMIT: clientCommit,
+        FORCE_CLIENT_COMMIT: forceClientCommit ? 'true' : 'false',
         SERVER_APP_NAME: serverApplicationName,
         SERVER_INITIAL_EXTENSIONS: extensions,
         SERVER_LISTEN_FLAG: listenFlag,
@@ -240,7 +246,7 @@ function generateBashInstallScript({ id, extensionIds, envVariables, useSocketPa
     }, extensionPath).replace(/\r\n/g, '\n');
 }
 
-function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, disableClientValidation }: ServerInstallOptions, extensionPath: string): string {
+function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, clientCommit, forceClientCommit, disableClientValidation }: ServerInstallOptions, extensionPath: string): string {
     const extensions = extensionIds.map(extId => '--install-extension ' + extId).join(' ');
     const serverDataDir = `$(Resolve-Path ~)\\${serverDataFolderName}`;
     const listenFlag = useSocketPath
@@ -250,6 +256,8 @@ function generatePowerShellInstallScript({ id, extensionIds, envVariables, useSo
 
     return compileTemplate('server-setup.ps1', {
         DISTRO_COMMIT,
+        CLIENT_COMMIT: clientCommit,
+        FORCE_CLIENT_COMMIT: forceClientCommit ? 'true' : 'false',
         SERVER_APP_NAME: serverApplicationName,
         SERVER_INITIAL_EXTENSIONS: extensions,
         SERVER_LISTEN_FLAG: listenFlag,

@@ -19,6 +19,7 @@ describe('remote settings', () => {
         vscode.setConfigurationValue('tscode.remote', 'statusSyncInterval', 2.5);
         vscode.setConfigurationValue('tscode.remote', 'debug', true);
         vscode.setConfigurationValue('tscode.remote', 'disableClientValidation', false);
+        vscode.setConfigurationValue('tscode.remote', 'forceClientCommit', false);
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: 'https://api.example.test/',
@@ -28,6 +29,7 @@ describe('remote settings', () => {
             statusSyncInterval: 2.5,
             debug: true,
             disableClientValidation: false,
+            forceClientCommit: false,
         });
     });
 
@@ -39,6 +41,7 @@ describe('remote settings', () => {
         vscode.setConfigurationValue('tscode.remote', 'statusSyncInterval', 0);
         vscode.setConfigurationValue('tscode.remote', 'debug', 'true');
         vscode.setConfigurationValue('tscode.remote', 'disableClientValidation', 'false');
+        vscode.setConfigurationValue('tscode.remote', 'forceClientCommit', 'false');
 
         expect(getRemoteSettings()).toEqual({
             backendApiUrl: Buffer.from(DEFAULT_BACKEND_API_URL_BASE64, 'base64').toString('utf8'),
@@ -48,7 +51,12 @@ describe('remote settings', () => {
             statusSyncInterval: 5,
             debug: false,
             disableClientValidation: true,
+            forceClientCommit: true,
         });
+    });
+
+    it('defaults forceClientCommit to true', () => {
+        expect(getRemoteSettings().forceClientCommit).toBe(true);
     });
 
     it('keeps an explicitly blank userName for current SSH fallback handling', () => {

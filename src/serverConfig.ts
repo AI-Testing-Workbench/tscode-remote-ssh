@@ -18,6 +18,7 @@ async function getVSCodeProductJson() {
 export type IServerConfig = {
     serverApplicationName: string;
     serverDataFolderName: string;
+    clientCommit: string;
 };
 
 export async function getVSCodeServerConfig(): Promise<IServerConfig> {
@@ -26,5 +27,14 @@ export async function getVSCodeServerConfig(): Promise<IServerConfig> {
     return {
         serverApplicationName: productJson.serverApplicationName as string,
         serverDataFolderName: productJson.serverDataFolderName as string,
+        clientCommit: getClientCommit(productJson.commit),
     };
+}
+
+function getClientCommit(commit: unknown): string {
+    if (typeof commit !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(commit)) {
+        throw new Error('Local VS Code product.json does not contain a valid commit');
+    }
+
+    return commit;
 }
