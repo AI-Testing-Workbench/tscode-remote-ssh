@@ -33,6 +33,8 @@ import { showCopyableErrorMessage } from './copyableErrorMessage';
 
 export type SidebarSyncListener = (result: ContainerSyncResult) => void;
 
+const HELP_MANUAL_URL_BASE64 = 'aHR0cDovL3RzY29kZS1nYXRld2F5LnBhYXN1YXQuY21iY2hpbmEuY24vdGVzdGFnZW50LWNsb3VkLWRvYw==';
+
 interface CreateContainerQuickPickItem extends vscode.QuickPickItem {
     type: ContainerTypeValue | 'yes' | 'no';
 }
@@ -680,6 +682,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     }
                     await this.onOpenAdmin();
                     return;
+                case 'openHelp': {
+                    const url = Buffer.from(HELP_MANUAL_URL_BASE64, 'base64').toString('utf8');
+                    await vscode.commands.executeCommand('simpleBrowser.show', url);
+                    return;
+                }
                 case 'create':
                     await this.createContainerFromPrompt(context);
                     return;
@@ -1258,6 +1265,77 @@ type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'cloudAd
 
 const CLOUD_ICON_PATH = '<path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/>';
 
+const EMPTY_CLOUD_ILLUSTRATION = `<svg class="empty-cloud-illustration" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+        <mask id="empty-cloud-face-cut" maskUnits="userSpaceOnUse" x="-7" y="-6" width="38" height="38">
+            <rect x="-7" y="-6" width="38" height="38" fill="#fff"/>
+            <circle cx="12" cy="12" r="13.5" fill="#000"/>
+        </mask>
+        <mask id="empty-cloud-front-cut" maskUnits="userSpaceOnUse" x="-7" y="-6" width="38" height="38">
+            <rect x="-7" y="-6" width="38" height="38" fill="#fff"/>
+            <g transform="translate(17.88 21.41) scale(0.85)">
+                <path d="M-15.6 5.4c-2.4 0-4.4-1.8-4.4-4.0 0-1.9 1.5-3.6 3.5-4.0 .4-2.7 3.0-4.8 6.2-4.8 1.2 0 2.3 .3 3.3 .9 1.4-2.1 3.9-3.5 6.8-3.5 3.6 0 6.6 2.1 7.4 5.0 3.4 0 6.0 2.4 6.0 5.3 0 2.8-2.5 5.0-5.6 5.0H-15.6z" fill="#000"/>
+            </g>
+        </mask>
+    </defs>
+    <g transform="translate(47.1579 40.4211) scale(6.736842)" fill="none" stroke="#D9D9D9" stroke-linecap="round" stroke-linejoin="round">
+        <g mask="url(#empty-cloud-face-cut)">
+            <g mask="url(#empty-cloud-front-cut)">
+                <g transform="translate(11 21.41) scale(0.85)">
+                    <path d="M-15.6 5.4c-2.4 0-4.4-1.8-4.4-4.0 0-1.9 1.5-3.6 3.5-4.0 .4-2.7 3.0-4.8 6.2-4.8 1.2 0 2.3 .3 3.3 .9 1.4-2.1 3.9-3.5 6.8-3.5 3.6 0 6.6 2.1 7.4 5.0 3.4 0 6.0 2.4 6.0 5.3 0 2.8-2.5 5.0-5.6 5.0H-15.6z" stroke-width="1.2"/>
+                </g>
+            </g>
+        </g>
+        <g mask="url(#empty-cloud-front-cut)">
+            <circle cx="12" cy="12" r="12.75" stroke-width="1.5"/>
+            <ellipse cx="8" cy="9.33" rx="1.63" ry="2.62" fill="#D9D9D9" stroke="none"/>
+            <ellipse cx="16" cy="9.33" rx="1.63" ry="2.62" fill="#D9D9D9" stroke="none"/>
+        </g>
+        <g transform="translate(17.88 21.41) scale(0.85)">
+            <path d="M-15.6 5.4c-2.4 0-4.4-1.8-4.4-4.0 0-1.9 1.5-3.6 3.5-4.0 .4-2.7 3.0-4.8 6.2-4.8 1.2 0 2.3 .3 3.3 .9 1.4-2.1 3.9-3.5 6.8-3.5 3.6 0 6.6 2.1 7.4 5.0 3.4 0 6.0 2.4 6.0 5.3 0 2.8-2.5 5.0-5.6 5.0H-15.6z" stroke-width="1.2"/>
+        </g>
+    </g>
+</svg>`;
+
+const TESTAGENT_CLOUD_ICON = `<svg class="service-cloud-icon" viewBox="-7 -6 38 38" fill="none" aria-hidden="true">
+    <defs>
+        <linearGradient id="ta-rg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#4fc3f7"/>
+            <stop offset="50%" stop-color="#2979ff"/>
+            <stop offset="100%" stop-color="#69f0ae"/>
+        </linearGradient>
+        <linearGradient id="ta-back" x1="0" y1="-9" x2="0" y2="9" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#FFE3CE"/>
+            <stop offset="0.5" stop-color="#FFD3B3"/>
+            <stop offset="1" stop-color="#FFB89A"/>
+        </linearGradient>
+        <linearGradient id="ta-front" x1="0" y1="-9" x2="0" y2="9" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#FFF1CE"/>
+            <stop offset="0.5" stop-color="#FCE3B0"/>
+            <stop offset="1" stop-color="#F5C374"/>
+        </linearGradient>
+        <radialGradient id="ta-hi" cx="32%" cy="24%" r="60%">
+            <stop offset="0" stop-color="#ffffff" stop-opacity=".62"/>
+            <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="ta-shadow" x="-80%" y="-120%" width="260%" height="340%">
+            <feDropShadow dx="0" dy="0.9" stdDeviation="1.05" flood-color="#A2603C" flood-opacity=".18"/>
+        </filter>
+    </defs>
+    <g transform="translate(11.0 21.41) scale(0.85)" filter="url(#ta-shadow)">
+        <path d="M-15.6 5.4c-2.4 0-4.4-1.8-4.4-4.0 0-1.9 1.5-3.6 3.5-4.0 .4-2.7 3.0-4.8 6.2-4.8 1.2 0 2.3 .3 3.3 .9 1.4-2.1 3.9-3.5 6.8-3.5 3.6 0 6.6 2.1 7.4 5.0 3.4 0 6.0 2.4 6.0 5.3 0 2.8-2.5 5.0-5.6 5.0H-15.6z" fill="url(#ta-back)" stroke="#E69E78" stroke-width="0.55" stroke-opacity="0.32" stroke-linejoin="round"/>
+        <ellipse cx="-3.5" cy="-4.5" rx="6" ry="2.8" fill="url(#ta-hi)" opacity=".48"/>
+    </g>
+    <circle cx="12" cy="12" r="12" fill="#e8f4ff"/>
+    <circle cx="12" cy="12" r="12.75" fill="none" stroke="url(#ta-rg)" stroke-width="1.5"/>
+    <ellipse cx="8" cy="9.33" rx="1.63" ry="2.62" fill="#2979ff"/>
+    <ellipse cx="16" cy="9.33" rx="1.63" ry="2.62" fill="#2979ff"/>
+    <g transform="translate(17.88 21.41) scale(0.85)" filter="url(#ta-shadow)">
+        <path d="M-15.6 5.4c-2.4 0-4.4-1.8-4.4-4.0 0-1.9 1.5-3.6 3.5-4.0 .4-2.7 3.0-4.8 6.2-4.8 1.2 0 2.3 .3 3.3 .9 1.4-2.1 3.9-3.5 6.8-3.5 3.6 0 6.6 2.1 7.4 5.0 3.4 0 6.0 2.4 6.0 5.3 0 2.8-2.5 5.0-5.6 5.0H-15.6z" fill="url(#ta-front)" stroke="#D9A04F" stroke-width="0.55" stroke-opacity="0.36" stroke-linejoin="round"/>
+        <ellipse cx="-3" cy="-4" rx="5.2" ry="2.4" fill="url(#ta-hi)" opacity=".55"/>
+    </g>
+</svg>`;
+
 const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     admin: '<path d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 3.5v3M17 5h3"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
@@ -1310,10 +1388,9 @@ function renderSidebarHtml(
             inFlightServiceIds.has(container.serviceId),
             activeActions,
         )).join('')
-        : `<div class="empty-state">
-                <div class="cloud-icon empty-cloud-icon" aria-hidden="true">${renderIcon('cloud')}</div>
-                <strong>还没有 云端沙箱 服务</strong>
-                <span>当前没有可用的容器</span>
+        : `            <div class="empty-state">
+                <div class="cloud-icon empty-cloud-icon" aria-hidden="true">${EMPTY_CLOUD_ILLUSTRATION}</div>
+                <span>当前无可用沙箱，可通过上方按钮创建</span>
             </div>`;
     const adminButton = showAdmin
         ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin', false, findActiveAction(activeActions, 'openAdmin'))
@@ -1335,6 +1412,7 @@ function renderSidebarHtml(
     return renderDocument(`
         <main class="sidebar">
             <header class="app-bar">
+                <button class="help-link" data-action="openHelp" title="打开帮助手册">帮助手册</button>
                 <div class="toolbar-actions" role="toolbar">
                     ${adminButton}
                     ${configButton}
@@ -1399,7 +1477,7 @@ function renderContainerCard(
         <article class="container-card" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
             <div class="service-heading" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
                 <div class="service-name-row">
-                    <strong class="service-name">${name}</strong>
+                    <strong class="service-name">${name}${container.remote ? TESTAGENT_CLOUD_ICON : ''}</strong>
                     <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyServiceId" data-service-id="${serviceId}" title="复制云端沙箱标识码" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
                 </div>
                 <div class="service-status">
@@ -1616,7 +1694,9 @@ function renderDocument(body: string): string {
         button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
         .icon { width: 18px; height: 18px; flex: 0 0 18px; }
         .sidebar { width: 100%; max-width: none; margin: 0; }
-        .app-bar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 12px; }
+        .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .help-link { position: relative; min-height: auto; padding: 0; border: 0; border-radius: 0; color: var(--primary); background: transparent; font-size: 12px; line-height: 1.4; text-decoration: underline; text-underline-offset: 3px; }
+        .help-link:hover { border: 0; color: var(--primary); background: transparent; opacity: .8; }
         .section-kicker { display: block; color: var(--on-surface-variant); font-size: 10px; font-weight: 700; letter-spacing: .14em; line-height: 1.2; }
         .toolbar-actions { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; padding: 2px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); }
         .icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
@@ -1628,8 +1708,9 @@ function renderDocument(body: string): string {
         .container-card:hover { border-color: var(--vscode-focusBorder); }
         .service-heading { min-width: 0; }
         .service-name-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
-        .service-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
-        .service-copy-button { width: 28px; height: 28px; min-height: 28px; display: grid; place-items: center; flex: 0 0 28px; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
+        .service-name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 15px; }
+        .service-name .service-cloud-icon { width: 30px; height: 30px; margin-left: 5px; vertical-align: -5px; }
+        .service-copy-button { width: 28px; height: 28px; min-height: 28px; display: grid; place-items: center; flex: 0 0 28px; margin-left: auto; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
         .service-copy-button:hover { border-color: transparent; color: var(--on-surface); background: var(--surface-container-high); }
         .service-copy-button .icon { width: 15px; height: 15px; }
         .service-status { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 7px 0 0; color: var(--on-surface-variant); font-size: 12px; }
@@ -1675,9 +1756,9 @@ function renderDocument(body: string): string {
         .history-remove:hover { border: 0; color: var(--error); background: var(--surface-container-high); }
         .history-remove .icon { width: 15px; height: 15px; }
         .empty-state, .loading, .cloud-card { text-align: center; }
-        .empty-state { display: flex; align-items: center; flex-direction: column; gap: 5px; padding: 38px 18px; border: 1px dashed var(--outline); border-radius: 12px; color: var(--on-surface-variant); }
-        .empty-state .cloud-icon { margin-bottom: 7px; color: var(--primary); }
-        .empty-state strong { color: var(--on-surface); font-size: 14px; }
+        .empty-state { display: flex; align-items: center; flex-direction: column; gap: 6px; padding: 30px 18px 34px; border: 1px dashed var(--outline); border-radius: 12px; color: var(--on-surface-variant); }
+        .empty-state .cloud-icon { width: 132px; height: 132px; margin-bottom: 2px; border-radius: 0; color: var(--primary); background: transparent; }
+        .empty-cloud-illustration { width: 132px; height: 132px; }
         .cloud-card { min-height: 150px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; padding: 14px; border: 2px solid var(--warning); border-radius: 16px; background: var(--surface-container); box-shadow: 0 5px 16px rgba(0, 0, 0, .16); }
         .cloud-icon { width: 84px; height: 84px; display: grid; place-items: center; border-radius: 12px; color: var(--warning); background: var(--surface-container-high); }
         .cloud-icon .icon { width: 54px; height: 54px; }

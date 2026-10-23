@@ -58,7 +58,10 @@ function renderReadyPage(state: AdminPanelState): string {
     return `<main class="admin-shell" data-patch-key="admin-root">
         <header class="page-header" data-patch-key="page-header">
             <h1>管理员页面</h1>
-            <button class="tonal-button" type="button" data-action="refresh">刷新</button>
+            <div class="page-header-actions">
+                <button class="tonal-button" type="button" data-action="openK8sDashboard">K8S集群资源情况</button>
+                <button class="tonal-button" type="button" data-action="refresh">刷新</button>
+            </div>
         </header>
         ${renderStats(state.stats, state.limit, state.orphanContainerIds)}
         ${renderDefaultBanners(state.defaultImages, state.images)}
@@ -763,6 +766,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .admin-shell { max-width: 1440px; margin: 0 auto; padding: 24px clamp(16px, 4vw, 56px) 52px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
 .page-header h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+.page-header-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 h1, h2, h3, p { margin-top: 0; }
 h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
 h3 { margin: 0 0 5px; font-size: 14px; }

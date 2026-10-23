@@ -94,8 +94,9 @@ describe('SidebarViewProvider', () => {
             expect(view.webview.html).toContain(`data-action="copyServiceId" data-service-id="${serviceId}"`);
         }
         expect(view.webview.html).toMatch(
-            /<strong class="service-name">alice\/repo\(1\)<\/strong>\s*<button class="service-copy-button" data-action="copyServiceId" data-service-id="running-1"/,
+            /<strong class="service-name">alice\/repo\(1\)<svg class="service-cloud-icon"[\s\S]*?<\/svg><\/strong>\s*<button class="service-copy-button" data-action="copyServiceId" data-service-id="running-1"/,
         );
+        expect((view.webview.html.match(/class="service-cloud-icon"/g) ?? [])).toHaveLength(5);
         expect(view.webview.html).toContain('post(\'connect\'');
         expect(view.webview.html).toMatch(/<article class="container-card" data-service-id="running-1" data-connectable="true">/);
         expect(view.webview.html).toMatch(/data-action="connect" data-service-id="running-1" data-connectable="true">/);
@@ -134,7 +135,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px;');
         expect(view.webview.html).toContain('.icon-button-create, .icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 0; }');
         expect(view.webview.html).toContain('.icon-button-create .icon, .icon-button[data-action="clearExpired"] .icon { width: 22px; height: 22px; }');
-        expect(view.webview.html).toContain('.empty-state .cloud-icon { margin-bottom: 7px; color: var(--primary); }');
+        expect(view.webview.html).toContain('.empty-state .cloud-icon { width: 132px; height: 132px;');
         expect(view.webview.html).toContain('border: 1px solid var(--outline)');
         expect(view.webview.html).toContain('font-family: var(--vscode-font-family,');
         expect(view.webview.html).not.toContain('--vscode-editorWidget-background');
@@ -181,6 +182,24 @@ describe('SidebarViewProvider', () => {
         );
     });
 
+    it('opens the help manual in the built-in browser', async () => {
+        const view = createWebviewView();
+        const provider = createProvider({ view });
+
+        await provider.resolveWebviewView(view as never);
+
+        expect(view.webview.html).toContain('data-action="openHelp"');
+        expect(view.webview.html).toContain('>帮助手册<');
+
+        view.fireMessage({ command: 'openHelp', requestId: 'help-1' });
+        await flushMessages();
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'simpleBrowser.show',
+            'http://tscode-gateway.paasuat.cmbchina.cn/testagent-cloud-doc',
+        );
+    });
+
     it('renders an empty state without a creation instruction when no containers exist', async () => {
         const state = new SidebarSyncState();
         state.update({ containers: [], changed: false });
@@ -190,8 +209,7 @@ describe('SidebarViewProvider', () => {
         await provider.resolveWebviewView(view as never);
 
         expect(view.webview.html).toContain('class="empty-state"');
-        expect(view.webview.html).toContain('还没有 云端沙箱 服务');
-        expect(view.webview.html).toContain('当前没有可用的容器');
+        expect(view.webview.html).toContain('当前无可用沙箱，可通过上方按钮创建');
         expect(view.webview.html).toContain('<div class="cloud-icon empty-cloud-icon" aria-hidden="true">');
         expect(view.webview.html).not.toContain('请使用 测小智TestAgent 插件进行创建');
     });

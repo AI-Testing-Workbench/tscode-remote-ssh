@@ -21,6 +21,7 @@ describe('AdminPanel', () => {
         vscode.window.showInformationMessage.mockReset();
         vscode.env.openExternal.mockReset();
         vscode.env.openExternal.mockResolvedValue(true);
+        vscode.commands.executeCommand.mockReset();
     });
 
     afterEach(() => {
@@ -87,6 +88,24 @@ describe('AdminPanel', () => {
         expect(panel.webview.html).not.toContain('scope-label');
         expect(panel.webview.html).toContain('script-src \'nonce-');
         expect(panel.webview.html).not.toContain('主题切换');
+    });
+
+    it('opens the K8S cluster dashboard in the built-in browser', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminPanel = createPanel();
+
+        await adminPanel.open();
+
+        expect(panel.webview.html).toContain('K8S集群资源情况');
+        expect(panel.webview.html).toContain('data-action="openK8sDashboard"');
+
+        await send(panel, { command: 'openK8sDashboard', requestId: 'open-k8s-1' });
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+            'simpleBrowser.show',
+            'http://tscode-gateway.paasuat.cmbchina.cn/sandbox-k8s-dashboard',
+        );
     });
 
     it('loads volume status only on the volume tab and on a volume refresh', async () => {

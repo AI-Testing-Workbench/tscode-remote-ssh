@@ -43,6 +43,8 @@ import { InvalidContainerEndpointError, parseContainerEndpoint } from './contain
 
 export const ADMIN_PANEL_VIEW_TYPE = 'testagentRemote.adminPanel';
 export const ADMIN_PANEL_TITLE = '管理员页面';
+
+const K8S_DASHBOARD_URL_BASE64 = 'aHR0cDovL3RzY29kZS1nYXRld2F5LnBhYXN1YXQuY21iY2hpbmEuY24vc2FuZGJveC1rOHMtZGFzaGJvYXJk';
 const OPERATION_RECONCILIATION_TIMEOUT_MS = 60_000;
 
 type UserIdSource = Pick<UserIdProvider, 'getCurrentUserId'>;
@@ -278,6 +280,13 @@ export class AdminPanel implements vscode.Disposable {
             case 'openVolumeBrowser':
                 try {
                     await this.openVolumeBrowser(panel, generation);
+                } finally {
+                    this.completeOperation(panel, generation, message.command, requestId);
+                }
+                return;
+            case 'openK8sDashboard':
+                try {
+                    await this.openK8sDashboard(panel, generation);
                 } finally {
                     this.completeOperation(panel, generation, message.command, requestId);
                 }
@@ -967,6 +976,20 @@ export class AdminPanel implements vscode.Disposable {
         } catch {
             if (this.isActive(panel, generation)) {
                 void vscode.window.showErrorMessage('无法打开 FileBrowser Quantum 浏览器页面。');
+            }
+        }
+    }
+
+    private async openK8sDashboard(panel: vscode.WebviewPanel, generation: number): Promise<void> {
+        if (!this.isActive(panel, generation)) {
+            return;
+        }
+        const url = Buffer.from(K8S_DASHBOARD_URL_BASE64, 'base64').toString('utf8');
+        try {
+            await vscode.commands.executeCommand('simpleBrowser.show', url);
+        } catch {
+            if (this.isActive(panel, generation)) {
+                void vscode.window.showErrorMessage('无法打开 K8S 集群资源情况页面。');
             }
         }
     }
