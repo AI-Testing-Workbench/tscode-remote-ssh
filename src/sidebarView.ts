@@ -1261,7 +1261,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 }
 
-type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'cloudAdd' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'search' | 'warning';
+type SidebarIcon = 'admin' | 'bookOpen' | 'close' | 'config' | 'connect' | 'cloud' | 'cloudAdd' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'search' | 'warning';
 
 const CLOUD_ICON_PATH = '<path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/>';
 
@@ -1338,6 +1338,7 @@ const TESTAGENT_CLOUD_ICON = `<svg class="service-cloud-icon" viewBox="-7 -6 38 
 
 const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     admin: '<path d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 3.5v3M17 5h3"/>',
+    bookOpen: '<path d="M12 7.5c-1.5-2.3-4.3-3.5-8-3.5v14c3.7 0 6.5 1.2 8 3.5 1.5-2.3 4.3-3.5 8-3.5V4c-3.7 0-6.5 1.2-8 3.5Z"/><path d="M12 7.5v14"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     config: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
     connect: '<path d="M8.5 15.5 15.5 8.5"/><path d="M6.25 12.75 4.5 14.5a3.18 3.18 0 0 0 4.5 4.5l1.75-1.75"/><path d="m13.25 6.75 1.75-1.75a3.18 3.18 0 0 1 4.5 4.5l-1.75 1.75"/>',
@@ -1403,7 +1404,7 @@ function renderSidebarHtml(
     const createButton = showCreate
         ? renderToolbarButton('create', '创建新的服务', 'cloudAdd', false, findActiveAction(activeActions, 'create'))
         : '';
-    const searchButton = `<button class="icon-button" data-search-action="open" title="搜索您的服务" aria-label="搜索您的服务" aria-expanded="false">${renderIcon('search')}</button>`;
+    const searchButton = `<button class="icon-button icon-button-search" data-search-action="open" title="搜索您的服务" aria-label="搜索您的服务" aria-expanded="false">${renderIcon('search')}</button>`;
     const clearExpiredAction = findActiveAction(activeActions, 'clearExpired');
     const clearExpiredButton = renderToolbarButton(
         'clearExpired',
@@ -1415,7 +1416,7 @@ function renderSidebarHtml(
     return renderDocument(`
         <main class="sidebar">
             <header class="app-bar">
-                <button class="help-link" data-action="openHelp" title="打开帮助手册">帮助手册</button>
+                <button class="help-link" data-action="openHelp" title="打开帮助手册" aria-label="打开帮助手册">${renderIcon('bookOpen')}<span class="help-link-label">帮助手册</span></button>
                 <div class="toolbar-actions" role="toolbar">
                     ${adminButton}
                     ${configButton}
@@ -1715,12 +1716,16 @@ function renderDocument(body: string): string {
         button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
         .icon { width: 18px; height: 18px; flex: 0 0 18px; }
         .sidebar { width: 100%; max-width: none; margin: 0; }
-        .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-        .help-link { position: relative; min-height: auto; padding: 0; border: 0; border-radius: 0; color: var(--primary); background: transparent; font-size: 12px; line-height: 1.4; text-decoration: underline; text-underline-offset: 3px; }
-        .help-link:hover { border: 0; color: var(--primary); background: transparent; opacity: .8; }
+        .app-bar { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .help-link { width: auto; height: 42px; min-height: 42px; display: inline-flex; align-items: center; flex: 0 0 auto; gap: 6px; padding: 0 8px; border: 1px solid var(--outline); border-radius: 12px; color: var(--on-surface-variant); background: transparent; font-size: 12px; line-height: 1.2; text-decoration: none; white-space: nowrap; }
+        .help-link .icon { width: 16px; height: 16px; flex: 0 0 16px; }
+        .help-link:hover { border-color: var(--outline); color: var(--on-surface); background: var(--surface-container-high); }
+        .help-link:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
         .section-kicker { display: block; color: var(--on-surface-variant); font-size: 10px; font-weight: 700; letter-spacing: .14em; line-height: 1.2; }
-        .toolbar-actions { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; padding: 2px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); }
-        .icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
+        .toolbar-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 1px; flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 2px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); scrollbar-width: none; }
+        .toolbar-actions::-webkit-scrollbar { display: none; }
+        .icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; flex: 0 0 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
+        .icon-button-search { width: 28px; flex: 0 0 28px; justify-items: start; padding-left: 7px; }
         .icon-button-create, .icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 0; }
         .icon-button-create .icon, .icon-button[data-action="clearExpired"] .icon { width: 22px; height: 22px; }
         .icon-button:hover { border: 0; color: var(--on-surface); background: var(--surface-container-high); }
@@ -1803,8 +1808,11 @@ function renderDocument(body: string): string {
         @media (max-width: 360px) {
             body { padding: 0 10px 20px; }
             .app-bar { gap: 7px; margin-bottom: 10px; }
-            .toolbar-actions { gap: 0; }
-            .icon-button { width: 30px; height: 30px; min-height: 30px; }
+            .help-link { min-width: 0; gap: 4px; padding: 0 5px; }
+            .help-link .icon { width: 14px; height: 14px; flex-basis: 14px; }
+            .toolbar-actions { gap: 0; margin-left: auto; }
+            .icon-button { width: 30px; height: 30px; min-height: 30px; flex-basis: 30px; }
+            .icon-button-search { width: 28px; flex-basis: 28px; }
             .container-card { padding: 14px; }
             .action-button { flex: 1 1 90px; }
         }

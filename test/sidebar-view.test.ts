@@ -111,6 +111,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('data-action="create"');
         expect(view.webview.html).toContain('title="创建新的服务" aria-label="创建新的服务"');
         expect(view.webview.html).toContain('data-search-action="open" title="搜索您的服务" aria-label="搜索您的服务"');
+        expect(view.webview.html).toContain('class="icon-button icon-button-search" data-search-action="open"');
         expect(view.webview.html).toContain('data-service-id="running-1" data-connectable="true" data-search-service-id="running-1" data-search-host="host-running-1" data-search-name="alice/repo(1)"');
         expect(view.webview.html).toMatch(/data-action="create"[\s\S]*?data-search-action="open"[\s\S]*?data-action="clearExpired"/);
         expect(view.webview.html).toContain('data-search-panel role="search" hidden');
@@ -141,7 +142,11 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('button.is-loading');
         expect(view.webview.html).toContain('.action-button.is-confirming');
         expect(view.webview.html).toContain('justify-content: center');
-        expect(view.webview.html).toContain('.app-bar { display: flex; align-items: center;');
+        expect(view.webview.html).toContain('.app-bar { display: flex; flex-wrap: nowrap; align-items: center;');
+        expect(view.webview.html).toContain('.toolbar-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 1px; flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden;');
+        expect(view.webview.html).toContain('.toolbar-actions::-webkit-scrollbar { display: none; }');
+        expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px; display: grid; flex: 0 0 32px;');
+        expect(view.webview.html).toContain('.icon-button-search { width: 28px; flex: 0 0 28px; justify-items: start; padding-left: 7px; }');
         expect(view.webview.html).toContain('.sidebar { width: 100%; max-width: none; margin: 0; }');
         expect(view.webview.html).toContain('.icon-button { width: 32px; height: 32px; min-height: 32px;');
         expect(view.webview.html).toContain('.icon-button-create, .icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 0; }');
@@ -200,7 +205,16 @@ describe('SidebarViewProvider', () => {
         await provider.resolveWebviewView(view as never);
 
         expect(view.webview.html).toContain('data-action="openHelp"');
-        expect(view.webview.html).toContain('>帮助手册<');
+        expect(view.webview.html).toContain('class="help-link" data-action="openHelp" title="打开帮助手册" aria-label="打开帮助手册"');
+        expect(view.webview.html).toContain('class="help-link-label">帮助手册</span>');
+        expect(view.webview.html).toContain('M12 7.5c-1.5-2.3-4.3-3.5-8-3.5');
+        expect(view.webview.html).toContain('.app-bar { display: flex; flex-wrap: nowrap; align-items: center;');
+        expect(view.webview.html).toContain('.help-link { width: auto; height: 42px; min-height: 42px; display: inline-flex; align-items: center; flex: 0 0 auto; gap: 6px; padding: 0 8px; border: 1px solid var(--outline); border-radius: 12px;');
+        expect(view.webview.html).toContain('.help-link:focus-visible { outline: 1px solid var(--vscode-focusBorder);');
+        expect(view.webview.html).toContain('.help-link { min-width: 0; gap: 4px; padding: 0 5px; }');
+        expect(view.webview.html).toContain('.icon-button-search { width: 28px; flex-basis: 28px; }');
+        expect(view.webview.html).toContain('.toolbar-actions { gap: 0; margin-left: auto; }');
+        expect(view.webview.html).not.toContain('.help-link-label { display: none; }');
 
         view.fireMessage({ command: 'openHelp', requestId: 'help-1' });
         await flushMessages();
