@@ -1261,7 +1261,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 }
 
-type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'cloudAdd' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'warning';
+type SidebarIcon = 'admin' | 'close' | 'config' | 'connect' | 'cloud' | 'cloudAdd' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'search' | 'warning';
 
 const CLOUD_ICON_PATH = '<path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/>';
 
@@ -1349,6 +1349,7 @@ const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     refresh: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3M19 20v-4h-4"/>',
     restart: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3"/><path d="M19 16v4h-4"/>',
+    search: '<circle cx="10.8" cy="10.8" r="6.3"/><path d="m16 16 4.5 4.5"/>',
     warning: '<path d="m12 4 8 15H4Z"/><path d="M12 9v4M12 16h.01"/>',
 };
 
@@ -1388,10 +1389,11 @@ function renderSidebarHtml(
             inFlightServiceIds.has(container.serviceId),
             activeActions,
         )).join('')
-        : `            <div class="empty-state">
-                <div class="cloud-icon empty-cloud-icon" aria-hidden="true">${EMPTY_CLOUD_ILLUSTRATION}</div>
-                <span>当前无可用沙箱，可通过上方按钮创建</span>
-            </div>`;
+        : renderSidebarEmptyState(
+            '当前无可用沙箱，可通过上方按钮创建',
+            'data-empty-state',
+            '没有找到符合搜索条件的云端沙箱',
+        );
     const adminButton = showAdmin
         ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin', false, findActiveAction(activeActions, 'openAdmin'))
         : '';
@@ -1401,6 +1403,7 @@ function renderSidebarHtml(
     const createButton = showCreate
         ? renderToolbarButton('create', '创建新的服务', 'cloudAdd', false, findActiveAction(activeActions, 'create'))
         : '';
+    const searchButton = `<button class="icon-button" data-search-action="open" title="搜索您的服务" aria-label="搜索您的服务" aria-expanded="false">${renderIcon('search')}</button>`;
     const clearExpiredAction = findActiveAction(activeActions, 'clearExpired');
     const clearExpiredButton = renderToolbarButton(
         'clearExpired',
@@ -1417,13 +1420,31 @@ function renderSidebarHtml(
                     ${adminButton}
                     ${configButton}
                     ${createButton}
+                    ${searchButton}
                     ${clearExpiredButton}
                     ${renderToolbarButton('refresh', '刷新页面', 'refresh', false, findActiveAction(activeActions, 'refresh'))}
                 </div>
             </header>
-            <section class="container-list">${cards}</section>
+            <div class="service-search" data-search-panel role="search" hidden>
+                <input type="text" data-search-input aria-label="搜索您的服务" placeholder="输入云端沙箱名称或者服务 ID">
+                <button class="search-close" data-search-action="close" type="button" title="关闭" aria-label="关闭">${renderIcon('close')}</button>
+            </div>
+            <section class="container-list">
+                ${cards}
+                ${containers.length ? renderSidebarEmptyState('没有找到符合搜索条件的云端沙箱', 'data-search-empty hidden') : ''}
+            </section>
         </main>
     `);
+}
+
+function renderSidebarEmptyState(message: string, attributes: string, searchMessage?: string): string {
+    const searchMessageAttribute = searchMessage
+        ? ` data-search-message="${escapeHtml(searchMessage)}"`
+        : '';
+    return `<div class="empty-state" ${attributes}${searchMessageAttribute}>
+                <div class="cloud-icon empty-cloud-icon" aria-hidden="true">${EMPTY_CLOUD_ILLUSTRATION}</div>
+                <span data-empty-text data-empty-message="${escapeHtml(message)}"${searchMessageAttribute}>${escapeHtml(message)}</span>
+            </div>`;
 }
 
 function renderToolbarButton(
@@ -1474,7 +1495,7 @@ function renderContainerCard(
             </div>`
         : '';
     return `
-        <article class="container-card" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
+        <article class="container-card" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}" data-search-service-id="${serviceId}" data-search-host="${escapeHtml(container.host ?? '')}" data-search-name="${escapeHtml(container.name?.trim() || container.host || '')}">
             <div class="service-heading" data-service-id="${serviceId}" data-connectable="${canConnect ? 'true' : 'false'}">
                 <div class="service-name-row">
                     <strong class="service-name">${name}${container.remote ? TESTAGENT_CLOUD_ICON : ''}</strong>
@@ -1703,6 +1724,13 @@ function renderDocument(body: string): string {
         .icon-button-create, .icon-button[data-action="clearExpired"] { width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 0; }
         .icon-button-create .icon, .icon-button[data-action="clearExpired"] .icon { width: 22px; height: 22px; }
         .icon-button:hover { border: 0; color: var(--on-surface); background: var(--surface-container-high); }
+        .service-search { display: flex; align-items: center; gap: 7px; min-width: 0; margin-bottom: 12px; }
+        .service-search[hidden], .container-card[hidden], .empty-state[hidden] { display: none !important; }
+        .service-search input { box-sizing: border-box; width: 0; min-width: 0; min-height: 34px; flex: 1 1 auto; padding: 0 10px; border: 1px solid var(--outline); border-radius: 8px; outline: none; color: var(--on-surface); background: var(--surface-container); font: inherit; }
+        .service-search input:focus { border-color: var(--vscode-focusBorder); outline: none; box-shadow: none; }
+        .search-close { width: 32px; min-height: 32px; display: grid; place-items: center; flex: 0 0 32px; padding: 0; border: 0; border-radius: 50%; color: var(--on-surface-variant); background: transparent; }
+        .search-close:hover { border-color: transparent; color: var(--on-surface); background: var(--surface-container-high); }
+        .search-close .icon { width: 16px; height: 16px; }
         .container-list { display: flex; flex-direction: column; gap: 12px; }
         .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); }
         .container-card:hover { border-color: var(--vscode-focusBorder); }

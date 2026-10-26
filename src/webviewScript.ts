@@ -32,6 +32,87 @@ const clearConfirmation = (key, expectedExpiresAt) => {
     delete sidebarConfirmations[key];
     vscode.setState({ ...state, sidebarConfirmations });
 };
+const searchPanel = typeof document.querySelector === 'function' ? document.querySelector('[data-search-panel]') : undefined;
+const searchInput = typeof document.querySelector === 'function' ? document.querySelector('[data-search-input]') : undefined;
+const noServicesState = typeof document.querySelector === 'function' ? document.querySelector('[data-empty-state]') : undefined;
+const noServicesText = typeof document.querySelector === 'function' ? document.querySelector('[data-empty-state] [data-empty-text]') : undefined;
+const noSearchResultsState = typeof document.querySelector === 'function' ? document.querySelector('[data-search-empty]') : undefined;
+const searchOpenButton = typeof document.querySelector === 'function' ? document.querySelector('[data-search-action="open"]') : undefined;
+const serviceSearchStateValue = readViewState().serviceSearch;
+let serviceSearchState = serviceSearchStateValue && typeof serviceSearchStateValue === 'object'
+    ? {
+        open: serviceSearchStateValue.open === true,
+        input: typeof serviceSearchStateValue.input === 'string' ? serviceSearchStateValue.input : '',
+        query: typeof serviceSearchStateValue.input === 'string' ? serviceSearchStateValue.input.trim() : '',
+    }
+    : { open: false, input: '', query: '' };
+const writeServiceSearchState = () => {
+    if (typeof vscode.setState !== 'function') return;
+    vscode.setState({ ...readViewState(), serviceSearch: { ...serviceSearchState } });
+};
+const applyServiceSearch = () => {
+    const query = serviceSearchState.query.toLowerCase();
+    let visibleCount = 0;
+    const serviceCards = document.querySelectorAll('.container-card[data-service-id]');
+    serviceCards.forEach(card => {
+        const values = [
+            card.getAttribute('data-search-host'),
+            card.getAttribute('data-search-name'),
+            card.getAttribute('data-search-service-id') || card.getAttribute('data-service-id'),
+        ];
+        const matches = !query || values.some(value => typeof value === 'string' && value.toLowerCase().includes(query));
+        card.hidden = !matches;
+        if (matches) visibleCount += 1;
+    });
+    if (noServicesState) {
+        noServicesState.hidden = false;
+        if (noServicesText) {
+            noServicesText.textContent = query
+                ? noServicesState.getAttribute('data-search-message') || ''
+                : noServicesText.getAttribute('data-empty-message') || '';
+        }
+    }
+    if (noSearchResultsState) noSearchResultsState.hidden = !query || visibleCount > 0;
+};
+if (searchPanel && searchInput) {
+    searchPanel.hidden = !serviceSearchState.open;
+    searchInput.value = serviceSearchState.input;
+    if (searchOpenButton) searchOpenButton.setAttribute('aria-expanded', String(serviceSearchState.open));
+    searchInput.addEventListener('input', () => {
+        serviceSearchState = {
+            ...serviceSearchState,
+            input: searchInput.value,
+            query: searchInput.value.trim(),
+        };
+        writeServiceSearchState();
+        applyServiceSearch();
+    });
+    applyServiceSearch();
+    document.querySelectorAll('[data-search-action]').forEach(button => {
+        const action = button.getAttribute('data-search-action');
+        if (action === 'open') {
+            button.addEventListener('click', () => {
+                serviceSearchState = { ...serviceSearchState, open: true };
+                searchPanel.hidden = false;
+                button.setAttribute('aria-expanded', 'true');
+                writeServiceSearchState();
+                searchInput.focus();
+            });
+        } else if (action === 'close') {
+            button.addEventListener('click', () => {
+                serviceSearchState = { open: false, input: '', query: '' };
+                searchPanel.hidden = true;
+                searchInput.value = '';
+                if (searchOpenButton) {
+                    searchOpenButton.setAttribute('aria-expanded', 'false');
+                    searchOpenButton.focus();
+                }
+                writeServiceSearchState();
+                applyServiceSearch();
+            });
+        }
+    });
+}
 const armConfirmation = (actionButton, expiresAt) => {
     const key = getConfirmationKey(actionButton);
     const originalHtml = actionButton.innerHTML;

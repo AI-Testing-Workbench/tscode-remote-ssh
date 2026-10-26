@@ -98,7 +98,7 @@ describe('SidebarViewProvider', () => {
         );
         expect((view.webview.html.match(/class="service-cloud-icon"/g) ?? [])).toHaveLength(5);
         expect(view.webview.html).toContain('post(\'connect\'');
-        expect(view.webview.html).toMatch(/<article class="container-card" data-service-id="running-1" data-connectable="true">/);
+        expect(view.webview.html).toMatch(/<article class="container-card" data-service-id="running-1" data-connectable="true"[^>]*>/);
         expect(view.webview.html).toMatch(/data-action="connect" data-service-id="running-1" data-connectable="true">/);
         expect(view.webview.html).toMatch(/data-action="connect" data-service-id="stopped-1" data-connectable="false" disabled>/);
         expect(view.webview.html).toMatch(/data-action="connect" data-service-id="failed-1" data-connectable="false" disabled>/);
@@ -110,6 +110,17 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(view.webview.html).toContain('data-action="create"');
         expect(view.webview.html).toContain('title="创建新的服务" aria-label="创建新的服务"');
+        expect(view.webview.html).toContain('data-search-action="open" title="搜索您的服务" aria-label="搜索您的服务"');
+        expect(view.webview.html).toContain('data-service-id="running-1" data-connectable="true" data-search-service-id="running-1" data-search-host="host-running-1" data-search-name="alice/repo(1)"');
+        expect(view.webview.html).toMatch(/data-action="create"[\s\S]*?data-search-action="open"[\s\S]*?data-action="clearExpired"/);
+        expect(view.webview.html).toContain('data-search-panel role="search" hidden');
+        expect(view.webview.html).toContain('data-search-empty hidden');
+        expect(view.webview.html).toContain('<input type="text" data-search-input');
+        expect(view.webview.html).not.toContain('data-search-action="clear"');
+        expect(view.webview.html).not.toContain('search-input-clear');
+        expect(view.webview.html).not.toContain('search-submit');
+        expect(view.webview.html).toContain('<input type="text" data-search-input aria-label="搜索您的服务" placeholder="输入云端沙箱名称或者服务 ID">');
+        expect(view.webview.html).toContain('data-search-action="close" type="button" title="关闭" aria-label="关闭"');
         expect(view.webview.html).toContain('<g transform="translate(2 0)"><path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/><path d="M12 11.5v5m-2.5-2.5h5"/></g>');
         expect(view.webview.html).toMatch(/<div class="toolbar-actions" role="toolbar">[\s\S]*?data-action="create"[\s\S]*?data-action="clearExpired"/);
         expect(view.webview.html).toContain('data-action="clearExpired"');
@@ -210,6 +221,12 @@ describe('SidebarViewProvider', () => {
 
         expect(view.webview.html).toContain('class="empty-state"');
         expect(view.webview.html).toContain('当前无可用沙箱，可通过上方按钮创建');
+        expect(view.webview.html).toContain('data-empty-state');
+        expect(view.webview.html).toContain('data-search-message="没有找到符合搜索条件的云端沙箱"');
+        expect(view.webview.html).not.toMatch(/<div class="empty-state" data-search-empty/);
+        expect(view.webview.html).toContain('没有找到符合搜索条件的云端沙箱');
+        expect(view.webview.html.match(/class="empty-state"/g)).toHaveLength(1);
+        expect(view.webview.html.match(/class="cloud-icon empty-cloud-icon"/g)).toHaveLength(1);
         expect(view.webview.html).toContain('<div class="cloud-icon empty-cloud-icon" aria-hidden="true">');
         expect(view.webview.html).not.toContain('请使用 测小智TestAgent 插件进行创建');
     });
@@ -221,6 +238,8 @@ describe('SidebarViewProvider', () => {
         await provider.resolveWebviewView(view as never);
 
         expect(view.webview.html).not.toContain('data-action="create"');
+        expect(view.webview.html).toContain('data-search-action="open"');
+        expect(view.webview.html).toMatch(/data-search-action="open"[\s\S]*?data-action="clearExpired"/);
     });
 
     it('renders local syncing cards before user initialization completes', async () => {
@@ -348,6 +367,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('data-action="create"');
         expect(view.webview.html).not.toContain('data-action="refresh"');
         expect(view.webview.html).not.toContain('data-action="openConfig"');
+        expect(view.webview.html).not.toMatch(/<button[^>]*data-search-action="open"/);
     });
 
     it('dispatches cloud disconnect without touching container APIs or config', async () => {
