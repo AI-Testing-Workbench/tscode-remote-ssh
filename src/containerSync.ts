@@ -494,6 +494,11 @@ export class ContainerSync {
     }
 
     private parseStatusResponse(response: ContainerStatusResponse, allowDebugProxy: boolean): RemoteStatusResult {
+        if (response.status.trim().toLowerCase() === 'stopped' && !response.endpoint?.trim()) {
+            this.clearInvalidEndpointNotifications(response.service_id);
+            return { response };
+        }
+
         const parsedEndpoint = parseContainerEndpoint(response.endpoint, { allowDebugProxy });
         if (!parsedEndpoint) {
             this.reportInvalidEndpoint(response.service_id, response.endpoint);
@@ -594,7 +599,7 @@ export class ContainerSync {
             const name = entry?.name ?? assignment?.name;
             const hostName = entry?.hostName ?? assignment?.hostName ?? remoteStatus?.parsedEndpoint?.host;
             const port = entry?.port ?? assignment?.port ?? remoteStatus?.parsedEndpoint?.port;
-            const endpointError = !entry && response && !hostName
+            const endpointError = !entry && response && !hostName && response.status.trim().toLowerCase() !== 'stopped'
                 ? { code: 'endpoint_missing', message: '云端沙箱 服务状态未返回可用 endpoint' }
                 : undefined;
             return {

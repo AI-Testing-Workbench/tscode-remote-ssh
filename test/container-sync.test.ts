@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe('ContainerSync', () => {
-    it('adds new remote containers, deduplicates IDs, and reports missing endpoints per container', async () => {
+    it('adds remote containers, deduplicates IDs, and accepts a missing stopped endpoint', async () => {
         const store = await createStore();
         const getContainerStatuses = vi.fn(async () => ({
             containers: [
@@ -65,10 +65,6 @@ describe('ContainerSync', () => {
                 containerType: null,
                 novncUrl: null,
                 remote: true,
-                error: {
-                    code: 'invalid_endpoint',
-                    message: '云端沙箱 服务 endpoint 必须是 IP:Port',
-                },
             },
         ]);
 
@@ -522,7 +518,7 @@ describe('ContainerSync', () => {
         expect(getUniqueHostName('alice/repo', new Set(['alice/repo(1)', 'alice/repo(2)']))).toBe('alice/repo(3)');
     });
 
-    it('notifies once and skips new config entries for invalid endpoints', async () => {
+    it('allows a missing endpoint only for stopped services and reports invalid endpoints once', async () => {
         const store = await createStore();
         const onInvalidEndpoint = vi.fn();
         const sync = new ContainerSync({
@@ -534,6 +530,22 @@ describe('ContainerSync', () => {
                         service_id: 'service-invalid',
                         status: 'running',
                         endpoint: 'example.com:22',
+                        gitee_user: 'alice',
+                        gitee_repository: 'repo',
+                        gitee_url: 'https://gitee.com',
+                        gitee_branch: 'main',
+                    }, {
+                        service_id: 'service-stopped-invalid',
+                        status: 'stopped',
+                        endpoint: 'example.com:22',
+                        gitee_user: 'alice',
+                        gitee_repository: 'repo',
+                        gitee_url: 'https://gitee.com',
+                        gitee_branch: 'main',
+                    }, {
+                        service_id: 'service-stopped-no-endpoint',
+                        status: 'stopped',
+                        endpoint: null,
                         gitee_user: 'alice',
                         gitee_repository: 'repo',
                         gitee_url: 'https://gitee.com',
@@ -564,10 +576,64 @@ describe('ContainerSync', () => {
                 code: 'invalid_endpoint',
             },
         });
+        expect(first.containers[1]).toMatchObject({
+            serviceId: 'service-stopped-invalid',
+            status: 'stopped',
+            error: { code: 'invalid_endpoint' },
+        });
+        expect(first.containers[2]).toMatchObject({
+            serviceId: 'service-stopped-no-endpoint',
+            status: 'stopped',
+            remote: true,
+        });
+        expect(first.containers[2].error).toBeUndefined();
         expect(second.containers[0]).toMatchObject({ error: { code: 'invalid_endpoint' } });
-        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+        expect(onInvalidEndpoint).toHaveBeenCalledTimes(2);
         expect(onInvalidEndpoint).toHaveBeenCalledWith({ serviceId: 'service-invalid', endpoint: 'example.com:22' });
+        expect(onInvalidEndpoint).toHaveBeenCalledWith({ serviceId: 'service-stopped-invalid', endpoint: 'example.com:22' });
         expect((await fs.readFile(store.filePath, 'utf8'))).not.toContain('ServiceId service-invalid');
+        expect((await fs.readFile(store.filePath, 'utf8'))).not.toContain('ServiceId service-stopped-no-endpoint');
+    });
+
+    it('clears an invalid endpoint notification when the service stops', async () => {
+        const store = await createStore();
+        const onInvalidEndpoint = vi.fn();
+        let statusValue = 'running';
+        let endpoint: string | null = 'example.com:22';
+        const getContainerStatuses = vi.fn(async () => ({
+            containers: [status('service-transition', statusValue, endpoint, 'alice', 'repo')],
+        }));
+        const sync = new ContainerSync({
+            config: store,
+            userIdProvider: { getCurrentUserId: async () => 'user-1' },
+            userApi: { getContainerStatuses } as unknown as UserRestApi,
+            getSettings: () => ({
+                backendApiUrl: 'http://api.example.test',
+                userName: 'root',
+                skipKnownHostsCheck: true,
+                historyLimit: 5,
+                statusSyncInterval: 5,
+                debug: false,
+                disableClientValidation: true,
+            }),
+            onInvalidEndpoint,
+        });
+
+        const invalid = await sync.sync();
+        expect(invalid.containers[0].error?.code).toBe('invalid_endpoint');
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+
+        statusValue = 'stopped';
+        endpoint = null;
+        const stopped = await sync.sync();
+        expect(stopped.containers[0].error).toBeUndefined();
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+
+        statusValue = 'running';
+        endpoint = 'example.com:22';
+        const invalidAgain = await sync.sync();
+        expect(invalidAgain.containers[0].error?.code).toBe('invalid_endpoint');
+        expect(onInvalidEndpoint).toHaveBeenCalledTimes(2);
     });
 
     it('accepts and stores only the IP and port from a debug proxy endpoint when enabled', async () => {
@@ -826,7 +892,13 @@ describe('ContainerSync', () => {
         let statusValue = 'running';
         const registry = new ContainerOperationRegistry();
         const getContainerStatuses = vi.fn(async () => ({
-            containers: [status('container-1', statusValue, '10.0.0.1:22', '', '')],
+            containers: [status(
+                'container-1',
+                statusValue,
+                statusValue === 'stopped' ? null : '10.0.0.1:22',
+                '',
+                '',
+            )],
         }));
         const sync = createSync(store, { getContainerStatuses }, {}, registry);
         registry.begin('container-1', 'stop', 'admin');
