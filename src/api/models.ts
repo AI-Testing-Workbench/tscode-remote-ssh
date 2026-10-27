@@ -112,6 +112,8 @@ export interface FileSyncResult {
 export interface AdminCreateContainerRequest {
     user_id: string;
     type?: ContainerTypeValue;
+    from?: string;
+    skip_git?: boolean;
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;

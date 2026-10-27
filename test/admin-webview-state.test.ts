@@ -236,14 +236,22 @@ function runScript(document: FakeDocument, initialState: Record<string, unknown>
     };
 }
 
-function createFormDocument(imageValues: string[] = ['image-1', 'image-2']): {
+function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuDefault = '2', memoryDefault = '4'): {
     document: FakeDocument;
     userId: FakeElement;
+    giteeModeFrom: FakeElement;
     fullUrl: FakeElement;
     giteeModeNone: FakeElement;
     giteeModeFull: FakeElement;
     giteeModeParts: FakeElement;
+    from: FakeElement;
     giteeUser: FakeElement;
+    branchRow: FakeElement;
+    giteeBranch: FakeElement;
+    authorize: FakeElement;
+    skipGit: FakeElement;
+    cpu: FakeElement;
+    memory: FakeElement;
     autoPush: FakeElement;
     image: FakeElement;
     imageLabel: FakeElement;
@@ -253,13 +261,22 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2']): {
     const document = new FakeDocument();
     const form = new FakeElement('div', { 'data-form': 'createContainer' });
     const userId = new FakeElement('input', { 'data-field': 'user_id', 'data-persist-key': 'create.user_id', type: 'text' });
+    const giteeModeFrom = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'from', type: 'radio' });
     const giteeModeNone = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'none', type: 'radio', checked: '' });
     const giteeModeFull = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'full', type: 'radio' });
     const giteeModeParts = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'parts', type: 'radio' });
+    const fromPanel = new FakeElement('div', { 'data-gitee-mode-panel': 'from' });
+    const from = new FakeElement('input', { 'data-field': 'from', 'data-persist-key': 'create.from', type: 'text', disabled: '' });
     const fullPanel = new FakeElement('div', { 'data-gitee-mode-panel': 'full' });
     const fullUrl = new FakeElement('input', { 'data-field': 'gitee_full_url', 'data-persist-key': 'create.gitee_full_url', type: 'text' });
     const partsPanel = new FakeElement('div', { 'data-gitee-mode-panel': 'parts' });
     const giteeUser = new FakeElement('input', { 'data-field': 'gitee_user', 'data-persist-key': 'create.gitee_user', type: 'text', disabled: '' });
+    const branchRow = new FakeElement('div', { class: 'form-row two-fields branch-row' });
+    const giteeBranch = new FakeElement('input', { 'data-field': 'gitee_branch', 'data-gitee-dependent': '', 'data-persist-key': 'create.gitee_branch', type: 'text', disabled: '' });
+    const authorize = new FakeElement('input', { 'data-field': 'authorize_general_account', 'data-gitee-dependent': '', 'data-persist-key': 'create.authorize_general_account', type: 'checkbox', disabled: '' });
+    const skipGit = new FakeElement('input', { 'data-field': 'skip_git', 'data-persist-key': 'create.skip_git', type: 'checkbox' });
+    const cpu = new FakeElement('input', { 'data-field': 'cpu', 'data-persist-key': 'create.cpu', 'data-default-value': cpuDefault, type: 'number', value: cpuDefault });
+    const memory = new FakeElement('input', { 'data-field': 'memory', 'data-persist-key': 'create.memory', 'data-default-value': memoryDefault, type: 'number', value: memoryDefault });
     const autoPush = new FakeElement('input', { 'data-field': 'autoPush', 'data-persist-key': 'upload.autoPush', type: 'checkbox', checked: '' });
     const imageWrapper = new FakeElement('span', { 'data-custom-select': '', class: 'custom-select' });
     const imageLabel = new FakeElement('span', { 'data-select-label': '' });
@@ -270,14 +287,23 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2']): {
     const whitelistForm = new FakeElement('div', { 'data-form': 'whitelistUser' });
     const whitelistUserId = new FakeElement('input', { 'data-field': 'user_id', 'data-persist-key': 'whitelist.user_id', type: 'text' });
 
+    fromPanel.appendChild(from);
     fullPanel.appendChild(fullUrl);
     partsPanel.appendChild(giteeUser);
+    branchRow.appendChild(giteeBranch);
+    branchRow.appendChild(authorize);
     form.appendChild(userId);
+    form.appendChild(giteeModeFrom);
+    form.appendChild(fromPanel);
     form.appendChild(giteeModeNone);
     form.appendChild(giteeModeFull);
     form.appendChild(fullPanel);
     form.appendChild(giteeModeParts);
     form.appendChild(partsPanel);
+    form.appendChild(branchRow);
+    form.appendChild(skipGit);
+    form.appendChild(cpu);
+    form.appendChild(memory);
     form.appendChild(autoPush);
     imageValues.forEach(value => imageMenu.appendChild(new FakeElement('button', { 'data-select-option': '', 'data-select-value': value })));
     imageWrapper.appendChild(imageLabel);
@@ -288,7 +314,28 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2']): {
     whitelistForm.appendChild(whitelistUserId);
     document.appendChild(form);
     document.appendChild(whitelistForm);
-    return { document, userId, fullUrl, giteeModeNone, giteeModeFull, giteeModeParts, giteeUser, autoPush, image, imageLabel, imageTrigger, whitelistUserId };
+    return {
+        document,
+        userId,
+        giteeModeFrom,
+        fullUrl,
+        giteeModeNone,
+        giteeModeFull,
+        giteeModeParts,
+        from,
+        giteeUser,
+        branchRow,
+        giteeBranch,
+        authorize,
+        skipGit,
+        cpu,
+        memory,
+        autoPush,
+        image,
+        imageLabel,
+        imageTrigger,
+        whitelistUserId,
+    };
 }
 
 function createLogDocument(): {
@@ -384,6 +431,75 @@ describe('Admin Webview state', () => {
         expect(second.image.value).toBe('image-2');
         expect(second.imageLabel.textContent).toBe('image-2');
         expect(second.whitelistUserId.value).toBe('user-2');
+    });
+
+    it('enables repository fields only for Gitee binding modes', () => {
+        const form = createFormDocument();
+        const runtime = runScript(form.document, {});
+
+        expect(form.from.disabled).toBe(true);
+        expect(form.giteeBranch.disabled).toBe(true);
+        expect(form.authorize.disabled).toBe(true);
+        expect(form.branchRow.classList.contains('gitee-options-disabled')).toBe(true);
+
+        form.giteeModeNone.checked = false;
+        form.giteeModeFrom.checked = true;
+        form.document.dispatch('change', form.giteeModeFrom);
+        expect(form.from.disabled).toBe(false);
+        expect(form.giteeBranch.disabled).toBe(true);
+        expect(form.authorize.disabled).toBe(true);
+        expect(form.branchRow.classList.contains('gitee-options-disabled')).toBe(true);
+        form.from.value = 'source-service-1';
+        form.document.dispatch('input', form.from);
+        form.skipGit.checked = true;
+        form.document.dispatch('change', form.skipGit);
+
+        const restored = createFormDocument();
+        runScript(restored.document, runtime.getState());
+        expect(restored.giteeModeFrom.checked).toBe(true);
+        expect(restored.from.value).toBe('source-service-1');
+        expect(restored.skipGit.checked).toBe(true);
+        expect(restored.giteeBranch.disabled).toBe(true);
+        expect(restored.authorize.disabled).toBe(true);
+
+        form.giteeModeFrom.checked = false;
+        form.giteeModeParts.checked = true;
+        form.document.dispatch('change', form.giteeModeParts);
+        expect(form.from.disabled).toBe(true);
+        expect(form.giteeBranch.disabled).toBe(false);
+        expect(form.authorize.disabled).toBe(false);
+        expect(form.branchRow.classList.contains('gitee-options-disabled')).toBe(false);
+
+        form.giteeModeParts.checked = false;
+        form.giteeModeNone.checked = true;
+        form.document.dispatch('change', form.giteeModeNone);
+        expect(form.giteeBranch.disabled).toBe(true);
+        expect(form.authorize.disabled).toBe(true);
+        expect(form.branchRow.classList.contains('gitee-options-disabled')).toBe(true);
+    });
+
+    it('uses updated global limits for untouched defaults and preserves edited values', () => {
+        const initial = createFormDocument(undefined, '2', '4');
+        const initialRuntime = runScript(initial.document, {
+            fields: { 'create.cpu': '', 'create.memory': '' },
+        });
+        expect(initial.cpu.value).toBe('2');
+        expect(initial.memory.value).toBe('4');
+
+        const updatedDefaults = createFormDocument(undefined, '3', '8');
+        const updatedRuntime = runScript(updatedDefaults.document, initialRuntime.getState());
+        expect(updatedDefaults.cpu.value).toBe('3');
+        expect(updatedDefaults.memory.value).toBe('8');
+
+        updatedDefaults.cpu.value = '1.5';
+        updatedDefaults.document.dispatch('input', updatedDefaults.cpu);
+        updatedDefaults.memory.value = '';
+        updatedDefaults.document.dispatch('input', updatedDefaults.memory);
+
+        const latestDefaults = createFormDocument(undefined, '5', '16');
+        runScript(latestDefaults.document, updatedRuntime.getState());
+        expect(latestDefaults.cpu.value).toBe('1.5');
+        expect(latestDefaults.memory.value).toBe('');
     });
 
     it('notifies the host while a custom image selector is open', () => {

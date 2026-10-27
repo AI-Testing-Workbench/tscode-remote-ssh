@@ -527,7 +527,8 @@ export class AdminPanel implements vscode.Disposable {
                 {
                     const request = toAdminCreateRequest(message);
                     const created = await adminApi.createContainer(request);
-                    if (this.initializationPoller) {
+                    let endpoint = created.endpoint;
+                    if (!request.skip_git && this.initializationPoller) {
                         const initializationController = new AbortController();
                         this.initializationControllers.add(initializationController);
                         try {
@@ -539,13 +540,13 @@ export class AdminPanel implements vscode.Disposable {
                                 signal: combineAbortSignals(this.initializationSignal, initializationController.signal),
                             });
                             const finalContainer = getInitializationResultContainer(initialization);
-                            const endpoint = finalContainer ? finalContainer.endpoint : created.endpoint;
-                            if (!parseContainerEndpoint(endpoint, { allowDebugProxy: this.getSettings().debug })) {
-                                throw new Error(`服务 "${created.service_id}" 的 endpoint 无效，应为 IP:Port 格式：${endpoint ?? '(空)'}`);
-                            }
+                            endpoint = finalContainer ? finalContainer.endpoint : created.endpoint;
                         } finally {
                             this.initializationControllers.delete(initializationController);
                         }
+                    }
+                    if (!parseContainerEndpoint(endpoint, { allowDebugProxy: this.getSettings().debug })) {
+                        throw new Error(`服务 "${created.service_id}" 的 endpoint 无效，应为 IP:Port 格式：${endpoint ?? '(空)'}`);
                     }
                 }
                 return true;
@@ -1473,8 +1474,8 @@ function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateCont
     const request: AdminCreateContainerRequest = {
         user_id: requireText(message.user_id, '用户 ID 不能为空'),
         type: containerTypeOf(message.type) ?? 'testagent_cloud',
+        skip_git: asBoolean(message.skip_git, false),
     };
-    const giteeBranch = optionalText(message.gitee_branch);
     const image = optionalText(message.image);
     const hasSeparateGiteeFields = optionalText(message.gitee_user) !== undefined
         || optionalText(message.gitee_repository) !== undefined
@@ -1482,10 +1483,14 @@ function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateCont
     let giteeMode = 'full';
     if (message.giteeMode === 'none') {
         giteeMode = 'none';
+    } else if (message.giteeMode === 'from') {
+        giteeMode = 'from';
     } else if (message.giteeMode === 'parts' || message.giteeMode === undefined && hasSeparateGiteeFields) {
         giteeMode = 'parts';
     }
-    if (giteeMode === 'full') {
+    if (giteeMode === 'from') {
+        request.from = requireText(message.from, '源容器服务 ID 不能为空');
+    } else if (giteeMode === 'full') {
         const fullUrl = optionalText(message.gitee_full_url);
         if (fullUrl !== undefined) {
             Object.assign(request, parseGiteeRepositoryUrl(fullUrl));
@@ -1508,13 +1513,16 @@ function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateCont
             request.gitee_url = giteeUrl;
         }
     }
-    if (giteeBranch !== undefined) {
-        request.gitee_branch = giteeBranch;
+    if (giteeMode === 'full' || giteeMode === 'parts') {
+        const giteeBranch = optionalText(message.gitee_branch);
+        if (giteeBranch !== undefined) {
+            request.gitee_branch = giteeBranch;
+        }
+        request.authorize_general_account = asBoolean(message.authorize_general_account, false);
     }
     if (image !== undefined) {
         request.image = image;
     }
-    request.authorize_general_account = asBoolean(message.authorize_general_account, false);
     const expiration = optionalNonNegativeInteger(message.expiration_hours, '有效期');
     const cpu = optionalPositiveNumber(message.cpu, 'CPU');
     const memory = optionalPositiveInteger(message.memory, '内存');

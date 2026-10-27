@@ -627,6 +627,8 @@ describe('AdminPanel', () => {
         expect(html).toContain('prefers-reduced-motion: reduce');
         expect(html).toContain('CPU (当前值: 2 核)');
         expect(html).toContain('内存 (当前值: 4 Gi)');
+        expect(html).toContain('data-default-value="2" type="number" min="0.01" step="0.01" value="2"');
+        expect(html).toContain('data-default-value="4" type="number" min="1" step="1" value="4"');
         expect(html).not.toContain('当前使用');
         expect(html).not.toContain('default-separator');
         expect(html).not.toContain('status-dot');
@@ -635,9 +637,20 @@ describe('AdminPanel', () => {
         expect(html).toContain('容器管理');
         expect(html).not.toContain('SERVICES');
         expect(html).not.toContain('服务管理');
+        expect(html.indexOf('value="from" type="radio"')).toBeLessThan(html.indexOf('value="none" type="radio" checked'));
+        expect(html.slice(html.indexOf('value="from" type="radio"'), html.indexOf('value="none" type="radio" checked'))).toContain('data-gitee-mode-panel="from"');
+        expect(html).toContain('data-field="from" data-persist-key="create.from" type="text" placeholder="service_id" disabled');
         expect(html).toContain('value="none" type="radio" checked>无码云仓库绑定');
         expect(html).toContain('data-gitee-mode-panel="full"');
         expect(html).toContain('data-gitee-mode-panel="parts"');
+        expect(html).toContain('data-gitee-dependent data-persist-key="create.gitee_branch" type="text" placeholder="master" disabled');
+        expect(html).toContain('data-gitee-dependent data-persist-key="create.authorize_general_account" type="checkbox" disabled');
+        expect(html).toContain('.branch-row.gitee-options-disabled > label:first-child input:disabled');
+        expect(html).toContain('.branch-row.gitee-options-disabled .form-check {');
+        expect(html).toContain('background: var(--surface-soft); color: var(--muted); cursor: not-allowed; opacity: .68;');
+        expect(html).not.toContain('.branch-row.gitee-options-disabled .form-check { border-style: dashed');
+        expect(html).toContain('data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能');
+        expect(html.indexOf('data-field="skip_git"')).toBeLessThan(html.indexOf('data-action="createContainer"'));
         expect(html).toContain('data-field="gitee_repository" data-persist-key="create.gitee_repository" type="text" placeholder="XXX" disabled');
         expect(html).toContain('placeholder="完整的 https://XXX"');
         expect(html).toContain('placeholder="https://XXX 前缀"');
@@ -653,6 +666,8 @@ describe('AdminPanel', () => {
             'create.giteeMode',
             'create.giteeMode',
             'create.giteeMode',
+            'create.giteeMode',
+            'create.from',
             'create.gitee_full_url',
             'create.gitee_user',
             'create.gitee_repository',
@@ -664,6 +679,7 @@ describe('AdminPanel', () => {
             'create.expiration_hours',
             'create.cpu',
             'create.memory',
+            'create.skip_git',
         ]);
 
         const noDefaultHtml = renderAdminPage({ ...state, defaultImages: createDefaultImages(null, null) }, 'nonce', 'vscode-resource://test');
@@ -901,13 +917,56 @@ describe('AdminPanel', () => {
             gitee_user: 'ignored',
             gitee_repository: 'ignored',
             gitee_url: 'https://gitee.com',
+            gitee_branch: 'ignored',
+            authorize_general_account: true,
         });
 
         expect(adminApi.createContainer).toHaveBeenCalledWith({
             user_id: 'user-5',
             type: 'testagent_cloud',
-            authorize_general_account: false,
+            skip_git: false,
         });
+    });
+
+    it('passes source service IDs to the backend and displays its error unchanged', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const upstreamError = new RestClientError(
+            'http',
+            'source_not_found',
+            '来源服务不存在',
+            404,
+            undefined,
+            { method: 'POST', path: '/admin/containers' },
+        );
+        adminApi.createContainer = vi.fn(async () => { throw upstreamError; });
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), initializationPoller });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'from',
+            from: 'not-a-valid-service-id',
+            gitee_full_url: 'not a repository url',
+            gitee_user: 'stale-user',
+            gitee_repository: 'stale-repository',
+            gitee_url: 'https://stale.example',
+            gitee_branch: 'stale-branch',
+            authorize_general_account: true,
+        });
+
+        expect(adminApi.createContainer).toHaveBeenCalledWith({
+            user_id: 'user-5',
+            type: 'testagent_cloud',
+            skip_git: false,
+            from: 'not-a-valid-service-id',
+        });
+        expect(initializationPoller.initialize).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('来源服务不存在'), '复制');
+        expect(vscode.window.showErrorMessage.mock.calls[0]?.[0]).toContain('source_not_found');
     });
 
     it('renders the selected image filename after choosing an image file', async () => {
@@ -1196,6 +1255,7 @@ describe('AdminPanel', () => {
         expect(adminApi.createContainer).toHaveBeenCalledWith({
             user_id: 'user-2',
             type: 'testagent_cloud',
+            skip_git: false,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
@@ -1209,6 +1269,7 @@ describe('AdminPanel', () => {
         expect(adminApi.createContainer).toHaveBeenLastCalledWith({
             user_id: 'user-4',
             type: 'testagent_cloud',
+            skip_git: false,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_url: 'https://gitee.com',
@@ -1421,6 +1482,61 @@ describe('AdminPanel', () => {
         await vi.waitFor(() => expect(adminApi.listContainers).toHaveBeenCalledTimes(2));
     });
 
+    it('skips Git initialization and polling when skip_git is enabled', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+            skip_git: true,
+        });
+
+        expect(adminApi.createContainer).toHaveBeenCalledWith({
+            user_id: 'user-5',
+            type: 'testagent_cloud',
+            skip_git: true,
+        });
+        expect(initializationPoller.initialize).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(adminApi.listContainers).toHaveBeenCalledTimes(2));
+    });
+
+    it('still validates the create endpoint when skip_git bypasses initialization', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.createContainer = vi.fn(async () => ({ ...sampleContainer(), endpoint: null }));
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+            skip_git: true,
+        });
+
+        expect(initializationPoller.initialize).not.toHaveBeenCalled();
+        expect(adminApi.listContainers).toHaveBeenCalledOnce();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            '服务 "service-1" 的 endpoint 无效，应为 IP:Port 格式：(空)',
+            '复制',
+        );
+    });
+
     it('does not refresh administrator data after 码云 initialization fails', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -1591,7 +1707,7 @@ describe('AdminPanel', () => {
         expect(adminApi.createContainer).toHaveBeenCalledWith({
             user_id: 'user-9',
             type: 'autotest_cloud',
-            authorize_general_account: false,
+            skip_git: false,
         });
     });
 
@@ -1910,7 +2026,7 @@ async function flushMessages(): Promise<void> {
 
 function expectPersistedFields(html: string, expectedKeys: string[]): void {
     const markup = html.split('<script')[0];
-    const actualKeys = [...markup.matchAll(/data-field="[^"]+"\s+data-persist-key="([^"]+)"/g)]
+    const actualKeys = [...markup.matchAll(/data-field="[^"]+"[^>]*data-persist-key="([^"]+)"/g)]
         .map(match => match[1]);
     expect(actualKeys.sort()).toEqual([...expectedKeys].sort());
 }

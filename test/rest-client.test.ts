@@ -462,6 +462,8 @@ describe('RestClient', () => {
         });
         await client.admin.createContainer({
             user_id: 'user-1',
+            from: 'source-service-1',
+            skip_git: true,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: null,
@@ -489,6 +491,8 @@ describe('RestClient', () => {
         });
         expect(readJsonBody(requests.find(request => request.url.pathname === '/admin/containers')!)).toEqual({
             user_id: 'user-1',
+            from: 'source-service-1',
+            skip_git: true,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: null,

@@ -151,13 +151,20 @@ const restoreCollapsibleState = () => {
     });
 };
 
-const saveFormState = () => {
+const saveFormState = changedField => {
     const saved = getSavedState();
     const previousFields = saved.fields && typeof saved.fields === 'object' ? saved.fields : {};
     const fields = { ...previousFields };
+    const editedFields = saved.editedFields && typeof saved.editedFields === 'object' ? { ...saved.editedFields } : {};
+    const changedKey = changedField ? getFieldStateKey(changedField) : '';
+    if (changedKey && changedField.getAttribute('data-default-value') !== null) editedFields[changedKey] = true;
     document.querySelectorAll('[data-field]').forEach(field => {
         const key = getFieldStateKey(field);
         if (!key) return;
+        if (field.getAttribute('data-default-value') !== null && editedFields[key] !== true) {
+            delete fields[key];
+            return;
+        }
         if (field.type === 'radio') {
             if (field.checked) fields[key] = field.value;
             return;
@@ -165,7 +172,7 @@ const saveFormState = () => {
         fields[key] = field.type === 'checkbox' ? Boolean(field.checked) : field.value;
     });
     const focus = getActiveFocusState();
-    const next = { ...saved, fields };
+    const next = { ...saved, fields, editedFields };
     if (focus) {
         next.focus = focus;
     } else {
@@ -186,12 +193,35 @@ const ensureSelectValue = (field, value) => {
 
 const restoreFormState = () => {
     const saved = getSavedState();
-    const fields = saved.fields;
-    if (!fields || typeof fields !== 'object') return;
+    const fields = saved.fields && typeof saved.fields === 'object' ? saved.fields : {};
+    const editedFields = saved.editedFields && typeof saved.editedFields === 'object' ? { ...saved.editedFields } : {};
+    const nextFields = { ...fields };
+    let stateChanged = false;
     document.querySelectorAll('[data-field]').forEach(field => {
         const key = getFieldStateKey(field);
-        if (!key || !Object.prototype.hasOwnProperty.call(fields, key)) return;
+        if (!key) return;
+        const hasSavedValue = Object.prototype.hasOwnProperty.call(fields, key);
         const value = fields[key];
+        if (field.getAttribute('data-default-value') !== null) {
+            const hasEditMarker = Object.prototype.hasOwnProperty.call(editedFields, key);
+            const isLegacyEdit = hasSavedValue && !hasEditMarker && (typeof value === 'string' || typeof value === 'number') && String(value) !== '';
+            const isEdited = editedFields[key] === true || isLegacyEdit;
+            if (isEdited && hasSavedValue && (typeof value === 'string' || typeof value === 'number')) {
+                field.value = String(value);
+                if (isLegacyEdit) {
+                    editedFields[key] = true;
+                    stateChanged = true;
+                }
+            } else {
+                field.value = field.getAttribute('data-default-value') || '';
+                if (hasSavedValue) {
+                    delete nextFields[key];
+                    stateChanged = true;
+                }
+            }
+            return;
+        }
+        if (!hasSavedValue) return;
         if (field.type === 'radio') {
             field.checked = value === field.value;
         } else if (field.type === 'checkbox') {
@@ -202,6 +232,7 @@ const restoreFormState = () => {
             field.value = stringValue;
         }
     });
+    if (stateChanged) vscode.setState({ ...saved, fields: nextFields, editedFields });
 };
 
 const getSavedLogState = () => {
@@ -702,6 +733,13 @@ const updateGiteeMode = () => {
         }
         panel.querySelectorAll('[data-field]').forEach(field => { field.disabled = !active; });
     });
+    const canSetGiteeOptions = selected === 'full' || selected === 'parts';
+    document.querySelectorAll('[data-gitee-dependent]').forEach(field => { field.disabled = !canSetGiteeOptions; });
+    const branchRow = document.querySelector('.branch-row');
+    if (branchRow) {
+        if (canSetGiteeOptions) branchRow.classList.remove('gitee-options-disabled');
+        else branchRow.classList.add('gitee-options-disabled');
+    }
 };
 
 document.addEventListener('click', event => {
@@ -781,7 +819,7 @@ document.addEventListener('click', event => {
 
 document.addEventListener('input', event => {
     const target = event.target;
-    if (target && target.matches && target.matches('[data-field]')) saveFormState();
+    if (target && target.matches && target.matches('[data-field]')) saveFormState(target);
     const input = target && target.matches && target.matches('[data-search-input]') ? target : null;
     if (input) {
         const { controls } = getListContext();
@@ -794,7 +832,7 @@ document.addEventListener('input', event => {
 
 document.addEventListener('change', event => {
     const select = event.target;
-    if (select && select.matches && select.matches('[data-field]')) saveFormState();
+    if (select && select.matches && select.matches('[data-field]')) saveFormState(select);
     if (select && select.matches && select.matches('.native-select')) syncCustomSelect(select);
     if (select && select.matches && select.matches('[data-sort-select], [data-status-filter], [data-type-filter], [data-page-size]')) {
         const controls = select.closest('[data-list-controls]');

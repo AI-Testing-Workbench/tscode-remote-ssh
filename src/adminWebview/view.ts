@@ -88,7 +88,7 @@ function renderTabContent(state: AdminPanelState): string {
         case 'images':
             return renderImagesTab(state.images, state.defaultImages, state.selectedImageFilename, state.search, state.containers);
         case 'containers':
-            return renderContainersTab(state.containers, state.images, state.defaultImages, state.search, state.processingServiceIds);
+            return renderContainersTab(state.containers, state.images, state.defaultImages, state.search, state.processingServiceIds, state.limit);
         case 'volume':
             return renderVolumeTab(state.volume);
         case 'whitelist':
@@ -298,6 +298,7 @@ function renderContainersTab(
     defaultImages: AdminDefaultImage[],
     search = '',
     processingServiceIds: string[] = [],
+    limit?: ContainerLimitResponse,
 ): string {
     const processing = new Set(processingServiceIds);
     const rows = containers.map(container => renderContainerRow(container, processing.has(container.service_id))).join('');
@@ -314,6 +315,10 @@ function renderContainersTab(
                 <div class="form-row two-fields type-image-row">
                     <label>容器类型${renderStyledSelect('data-field="type" data-persist-key="create.type"', renderContainerTypeOptions())}</label>
                     <label>镜像${renderStyledSelect('data-field="image" data-persist-key="create.image"', renderImageOptions(images, defaultImages))}</label>
+                </div>
+                <div class="gitee-option-row">
+                    <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="from" type="radio">基于已有容器创建</label>
+                    <div class="gitee-fields" data-gitee-mode-panel="from"><label>源容器的服务 ID<input data-field="from" data-persist-key="create.from" type="text" placeholder="service_id" disabled></label></div>
                 </div>
                 <div class="gitee-option-row">
                     <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="none" type="radio" checked>无码云仓库绑定</label>
@@ -334,17 +339,17 @@ function renderContainersTab(
                     </div>
                 </div>
                 <div class="form-row two-fields branch-row">
-                    <label>码云分支<input data-field="gitee_branch" data-persist-key="create.gitee_branch" type="text" placeholder="master"></label>
-                    <label class="check-button form-check"><input data-field="authorize_general_account" data-persist-key="create.authorize_general_account" type="checkbox">授权使用 云端沙箱 通用码云账户</label>
+                    <label>码云分支<input data-field="gitee_branch" data-gitee-dependent data-persist-key="create.gitee_branch" type="text" placeholder="master" disabled></label>
+                    <label class="check-button form-check"><input data-field="authorize_general_account" data-gitee-dependent data-persist-key="create.authorize_general_account" type="checkbox" disabled>授权使用 云端沙箱 通用码云账户</label>
                 </div>
                 <div class="form-row single-field">
                     <label>有效期 (小时)<input data-field="expiration_hours" data-persist-key="create.expiration_hours" type="number" min="0" step="1" placeholder="0 表示该容器永不过期"></label>
                 </div>
                 <div class="form-row two-fields">
-                    <label>CPU (核)<input data-field="cpu" data-persist-key="create.cpu" type="number" min="0.01" step="0.01" placeholder="2"></label>
-                    <label>内存 (Gi)<input data-field="memory" data-persist-key="create.memory" type="number" min="1" step="1" placeholder="2"></label>
+                    <label>CPU (核)<input data-field="cpu" data-persist-key="create.cpu" data-default-value="${escapeAttribute(limit?.cpu ?? '')}" type="number" min="0.01" step="0.01" value="${escapeAttribute(limit?.cpu ?? '')}"></label>
+                    <label>内存 (Gi)<input data-field="memory" data-persist-key="create.memory" data-default-value="${escapeAttribute(limit?.memory ?? '')}" type="number" min="1" step="1" value="${escapeAttribute(limit?.memory ?? '')}"></label>
                 </div>
-                <div class="form-actions"><button class="primary-button" type="button" data-action="createContainer">创建容器</button></div>
+                <div class="form-actions"><label class="check-button form-check skip-git-check" title="跳过容器侧 Git 拉取和验证"><input data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能</label><button class="primary-button" type="button" data-action="createContainer">创建容器</button></div>
             </div>
         </details>
         ${renderSearchBox('搜索容器...', search)}
@@ -885,6 +890,11 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .two-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .branch-row { width: 100%; grid-template-columns: minmax(0, 1fr) auto; }
 .branch-row .form-check { width: fit-content; max-width: 100%; justify-self: start; white-space: normal; }
+.branch-row.gitee-options-disabled > label:first-child { opacity: .62; }
+.branch-row.gitee-options-disabled > label:first-child input:disabled { background: var(--surface-soft); color: var(--muted); cursor: not-allowed; opacity: .68; }
+.branch-row.gitee-options-disabled .form-check { border-color: var(--outline); color: var(--muted); background: var(--surface-soft); cursor: not-allowed; opacity: .68; }
+.branch-row.gitee-options-disabled .form-check:hover { border-color: var(--outline); }
+.branch-row.gitee-options-disabled .form-check input:disabled { accent-color: var(--muted); opacity: .55; }
 .gitee-option-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 13px; }
 .mode-radio { display: flex; flex-direction: row; align-items: center; gap: 7px; min-height: 35px; color: var(--text); cursor: pointer; }
 .gitee-fields { min-width: 0; }
@@ -893,7 +903,8 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .gitee-fields.inactive { opacity: .58; }
 .gitee-fields.inactive input { cursor: not-allowed; }
 .form-check { width: 100%; align-self: end; justify-self: stretch; }
-.form-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+.form-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+.form-actions .form-check { width: fit-content; align-self: center; justify-self: auto; }
 .search-panel { display: flex; align-items: center; gap: 9px; width: 100%; margin: 0 0 13px; }
 .search-box { display: flex; flex-direction: row; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; padding: 0 13px; border: 1px solid var(--outline); border-radius: 9px; background: var(--surface-raised); color: var(--muted); }
 .search-box input { width: 100%; min-height: 38px; border: 0; outline: 0; color: var(--text); background: transparent; }
