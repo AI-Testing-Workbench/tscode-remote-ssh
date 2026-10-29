@@ -595,6 +595,36 @@ describe('ContainerSync', () => {
         expect((await fs.readFile(store.filePath, 'utf8'))).not.toContain('ServiceId service-stopped-no-endpoint');
     });
 
+    it('deduplicates missing endpoint notifications until a valid endpoint returns', async () => {
+        const store = await createStore();
+        const onInvalidEndpoint = vi.fn();
+        let endpoint: string | null | undefined = null;
+        const sync = createSync(store, {
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [status('service-running', 'running', endpoint, 'alice', 'repo')],
+            })),
+        }, {}, undefined, undefined, onInvalidEndpoint);
+
+        const result = await sync.sync();
+
+        expect(result.containers[0].error).toMatchObject({ code: 'invalid_endpoint' });
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+        expect(onInvalidEndpoint).toHaveBeenCalledWith({ serviceId: 'service-running', endpoint: null });
+
+        endpoint = '';
+        await sync.sync();
+        endpoint = undefined;
+        await sync.sync();
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+
+        endpoint = '10.0.0.2:22';
+        await sync.sync();
+        endpoint = null;
+        const missingAgain = await sync.sync();
+        expect(missingAgain.containers[0].error).toMatchObject({ code: 'invalid_endpoint' });
+        expect(onInvalidEndpoint).toHaveBeenCalledTimes(2);
+    });
+
     it('clears an invalid endpoint notification when the service stops', async () => {
         const store = await createStore();
         const onInvalidEndpoint = vi.fn();
@@ -689,6 +719,7 @@ describe('ContainerSync', () => {
         const store = await createStore();
         let resolveBatch: ((value: { containers: ContainerStatusResponse[] }) => void) | undefined;
         const onSync = vi.fn();
+        const onInvalidEndpoint = vi.fn();
         const registry = new ContainerOperationRegistry();
         const sync = new ContainerSync({
             config: store,
@@ -709,16 +740,18 @@ describe('ContainerSync', () => {
             }),
             onSync,
             operationRegistry: registry,
+            onInvalidEndpoint,
         });
 
         const pending = sync.sync();
         await vi.waitFor(() => expect(resolveBatch).toBeDefined());
         registry.begin('container-1', 'stop', 'admin');
-        resolveBatch?.({ containers: [status('container-1', 'running', '10.0.0.1:22', '', '')] });
+        resolveBatch?.({ containers: [status('container-1', 'running', null, '', '')] });
 
         const result = await pending;
         expect(result.error).toMatchObject({ code: 'sync_disposed' });
         expect(onSync).not.toHaveBeenCalled();
+        expect(onInvalidEndpoint).not.toHaveBeenCalled();
     });
 
     it('starts, pauses, resumes, and disposes the configured timer', async () => {
@@ -914,6 +947,52 @@ describe('ContainerSync', () => {
         expect(registry.get('container-1')).toBeUndefined();
     });
 
+    it.each(['start', 'restart'] as const)('keeps %s pending until a valid endpoint is available', async action => {
+        const store = await createStore();
+        const document = await store.read();
+        store.upsertContainer(document.config, {
+            serviceId: 'service-rebuild',
+            host: 'alice/repo',
+            hostName: '10.0.0.1',
+            port: 22,
+        });
+        await store.write(document);
+
+        let endpoint: string | null = null;
+        const registry = new ContainerOperationRegistry();
+        const onInvalidEndpoint = vi.fn();
+        const sync = createSync(store, {
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [status('service-rebuild', 'running', endpoint, 'alice', 'repo')],
+            })),
+        }, {}, registry, undefined, onInvalidEndpoint);
+        registry.begin('service-rebuild', action, 'admin');
+        registry.setPhase('service-rebuild', 'reconciling');
+
+        const rebuilding = await sync.sync();
+        expect(rebuilding.containers[0]).toMatchObject({
+            serviceId: 'service-rebuild',
+            status: 'running',
+            endpoint: null,
+        });
+        expect(rebuilding.containers[0].error).toMatchObject({ code: 'invalid_endpoint' });
+        expect(registry.get('service-rebuild')).toBeDefined();
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+
+        endpoint = '10.0.0.2:22';
+        const started = await sync.sync();
+        expect(started.containers[0]).toMatchObject({
+            serviceId: 'service-rebuild',
+            status: 'running',
+            hostName: '10.0.0.2',
+            port: 22,
+            endpoint: '10.0.0.2:22',
+        });
+        expect(registry.get('service-rebuild')).toBeUndefined();
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+        expect(await fs.readFile(store.filePath, 'utf8')).toContain('HostName 10.0.0.2');
+    });
+
     it('does not confirm restore until a previously deleted local service returns remotely', async () => {
         const store = await createStore();
         const document = await store.read();
@@ -959,7 +1038,7 @@ async function createStore(): Promise<ContainerConfig> {
 function status(
     serviceId: string,
     statusValue: string,
-    endpoint: string | null,
+    endpoint: string | null | undefined,
     giteeUser: string,
     giteeRepository: string,
 ): ContainerStatusResponse {
@@ -984,6 +1063,7 @@ function createSync(
     settings: Partial<ReturnType<NonNullable<ContainerSyncOptionsForTest['getSettings']>>> = {},
     operationRegistry?: ContainerOperationRegistry,
     onSync?: ConstructorParameters<typeof ContainerSync>[0]['onSync'],
+    onInvalidEndpoint?: ConstructorParameters<typeof ContainerSync>[0]['onInvalidEndpoint'],
 ): ContainerSync {
     return new ContainerSync({
         config: store,
@@ -1001,6 +1081,7 @@ function createSync(
         }),
         operationRegistry,
         onSync,
+        onInvalidEndpoint,
         now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 }

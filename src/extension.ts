@@ -89,8 +89,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
         operationRegistry,
         onSync: result => sidebarSyncState.update(result),
         onInvalidEndpoint: ({ serviceId, endpoint }) => {
+            if (!endpoint?.trim()) {
+                void vscode.window.showWarningMessage(
+                    `云端沙箱 服务 "${serviceId}" 暂无可用 endpoint，当前不可连接；状态同步会在地址可用后自动更新。`,
+                );
+                return;
+            }
             void showCopyableErrorMessage(
-                `云端沙箱 服务 "${serviceId}" 的 endpoint 无效，应为 IP:Port：${endpoint ?? '(空)'}`,
+                `云端沙箱 服务 "${serviceId}" 的 endpoint 无效，应为 IP:Port：${endpoint}`,
                 { modal: true },
             );
         },

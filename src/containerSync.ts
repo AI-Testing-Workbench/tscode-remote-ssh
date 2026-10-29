@@ -472,6 +472,12 @@ export class ContainerSync {
             return this.disposedResult();
         }
 
+        for (const remoteStatus of remoteStatuses.values()) {
+            if (remoteStatus.error?.code === 'invalid_endpoint' && remoteStatus.response) {
+                this.reportInvalidEndpoint(remoteStatus.response.service_id, remoteStatus.response.endpoint);
+            }
+        }
+
         return {
             containers: this.buildStates(document.config, visibleRemoteIds, remoteStatuses, hostAssignments),
             changed,
@@ -494,14 +500,15 @@ export class ContainerSync {
     }
 
     private parseStatusResponse(response: ContainerStatusResponse, allowDebugProxy: boolean): RemoteStatusResult {
-        if (response.status.trim().toLowerCase() === 'stopped' && !response.endpoint?.trim()) {
+        const status = response.status.trim().toLowerCase();
+        const endpointMissing = !response.endpoint?.trim();
+        if (endpointMissing && status === 'stopped') {
             this.clearInvalidEndpointNotifications(response.service_id);
             return { response };
         }
 
         const parsedEndpoint = parseContainerEndpoint(response.endpoint, { allowDebugProxy });
         if (!parsedEndpoint) {
-            this.reportInvalidEndpoint(response.service_id, response.endpoint);
             return {
                 response,
                 error: { code: 'invalid_endpoint', message: '云端沙箱 服务 endpoint 必须是 IP:Port' },
@@ -722,7 +729,8 @@ export class ContainerSync {
     }
 
     private reportInvalidEndpoint(serviceId: string, endpoint: string | null | undefined): void {
-        const key = `${serviceId}\u0000${String(endpoint)}`;
+        const normalizedEndpoint = endpoint?.trim() ?? '';
+        const key = `${serviceId}\u0000${normalizedEndpoint || '<missing>'}`;
         if (this.invalidEndpointNotifications.has(key)) {
             return;
         }
