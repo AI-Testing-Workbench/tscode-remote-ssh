@@ -3,7 +3,7 @@ import {Log} from './common/logger';
 import {REMOTE_SSH_AUTHORITY, RemoteSSHResolver} from './authResolver';
 import {connectToContainer, openSSHConfigFile, promptOpenRemoteSSHWindow} from './commands';
 import {getRemoteWorkspaceLocationData, RemoteLocationHistory} from './remoteLocationHistory';
-import {handleOpenRecentUri} from './openRecentUri';
+import {handleOpenUri} from './openRecentUri';
 import {type CloudModeOptions, initializeCloudMode, refreshCloudMode} from './cloudMode';
 import {RestClient} from './api/restClient';
 import {ContainerConfig} from './containerConfig';
@@ -166,7 +166,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAg
     }
 
     context.subscriptions.push(vscode.window.registerUriHandler({
-        handleUri: uri => handleOpenRecentUri(uri, locationHistory, logger),
+        handleUri: uri => handleOpenUri(uri, {
+            history: locationHistory,
+            logger,
+            sync: containerSync,
+            config,
+            isOperationInProgress: serviceId => operationRegistry.has(serviceId),
+            connect: (host, giteeRepository) => connectToContainer(
+                host,
+                () => activeSidebarView?.refreshCloudMode(),
+                giteeRepository,
+            ),
+        }),
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindow', () => promptOpenRemoteSSHWindow(false)));

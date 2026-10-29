@@ -1,12 +1,26 @@
 import * as vscode from 'vscode';
 import { openRemoteSSHLocationWindow } from './commands';
-import { ContainerConfig } from './containerConfig';
+import { ContainerConfig, type ContainerConfigEntry } from './containerConfig';
+import { formatContainerEndpoint, parseContainerEndpoint } from './containerEndpoint';
 import type { Log } from './common/logger';
 import type { RemoteLocationHistory } from './remoteLocationHistory';
+import type { ContainerSync, ContainerSyncResult } from './containerSync';
 import SSHDestination from './ssh/sshDestination';
 
 const OPEN_PATH = '/open';
 const DIR_PARAM = 'dir';
+const SERVICE_ID_PARAM = 'serviceId';
+const uriConnectionsInProgress = new Set<string>();
+
+export interface OpenUriHandlerDependencies {
+    history: RemoteLocationHistory;
+    logger: Log;
+    sync: Pick<ContainerSync, 'refresh'>;
+    config: Pick<ContainerConfig, 'read' | 'list'>;
+    isHostAvailable?: (host: string) => boolean;
+    isOperationInProgress: (serviceId: string) => boolean;
+    connect: (host: string, giteeRepository?: string) => Promise<boolean>;
+}
 
 export interface RemoteLocation {
     host: string;
@@ -76,6 +90,113 @@ export async function handleOpenRecentUri(
 
     const host = SSHDestination.parse(match.host).toEncodedString();
     await openRemoteSSHLocationWindow(host, match.path, true);
+}
+
+export async function handleOpenUri(uri: vscode.Uri, dependencies: OpenUriHandlerDependencies): Promise<void> {
+    if (uri.path !== OPEN_PATH) {
+        return;
+    }
+
+    const params = new URLSearchParams(uri.query);
+    if (params.has(DIR_PARAM)) {
+        await handleOpenRecentUri(
+            uri,
+            dependencies.history,
+            dependencies.logger,
+            dependencies.isHostAvailable,
+        );
+        return;
+    }
+
+    if (!params.has(SERVICE_ID_PARAM)) {
+        return;
+    }
+
+    const serviceId = params.get(SERVICE_ID_PARAM)?.trim();
+    if (!serviceId) {
+        dependencies.logger.error('URI serviceId 参数为空');
+        return;
+    }
+
+    await handleOpenServiceUri(serviceId, dependencies);
+}
+
+async function handleOpenServiceUri(serviceId: string, dependencies: OpenUriHandlerDependencies): Promise<void> {
+    if (uriConnectionsInProgress.has(serviceId) || dependencies.isOperationInProgress(serviceId)) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 当前已有操作，忽略重复连接`);
+        return;
+    }
+
+    uriConnectionsInProgress.add(serviceId);
+    try {
+        await openServiceUri(serviceId, dependencies);
+    } catch (error) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 处理失败`, error);
+    } finally {
+        uriConnectionsInProgress.delete(serviceId);
+    }
+}
+
+async function openServiceUri(serviceId: string, dependencies: OpenUriHandlerDependencies): Promise<void> {
+    let result: ContainerSyncResult;
+    try {
+        result = await dependencies.sync.refresh({ suppressInvalidEndpointNotifications: true });
+    } catch (error) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 状态刷新失败`, error);
+        return;
+    }
+    if (result.error) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 状态刷新失败`, result.error);
+        return;
+    }
+
+    const container = result.containers.find(item => item.serviceId === serviceId);
+    if (!container?.remote) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 不存在或已删除`);
+        return;
+    }
+    if (container.error) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 当前不可连接`, container.error);
+        return;
+    }
+    if (container.status.toLowerCase() !== 'running') {
+        dependencies.logger.error(`URI 服务 ${serviceId} 状态为 ${container.status}，不是 running`);
+        return;
+    }
+
+    let entry: ContainerConfigEntry | undefined;
+    try {
+        const document = await dependencies.config.read();
+        entry = dependencies.config.list(document.config)
+            .find(item => item.serviceId === serviceId && !item.expiresAt);
+    } catch (error) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 的本地配置读取失败`, error);
+        return;
+    }
+
+    if (!entry?.host.trim()) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 没有有效的本地 Host 配置`);
+        return;
+    }
+
+    const endpoint = entry.hostName && entry.port !== undefined
+        ? formatContainerEndpoint(entry.hostName, entry.port)
+        : undefined;
+    if (!parseContainerEndpoint(endpoint)) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 的 endpoint 无效：${endpoint ?? '(空)'}`);
+        return;
+    }
+    if (dependencies.isOperationInProgress(serviceId)) {
+        dependencies.logger.error(`URI 服务 ${serviceId} 在状态刷新期间开始了其他操作，忽略连接`);
+        return;
+    }
+
+    try {
+        await dependencies.connect(entry.host.trim(), container.giteeRepository?.trim() || undefined);
+    } catch (error) {
+        // The SSH resolver owns user-facing connection errors; keep this callback quiet.
+        dependencies.logger.error(`URI 服务 ${serviceId} 连接失败`, error);
+    }
 }
 
 async function createAvailabilityPredicate(logger?: Log): Promise<((host: string) => boolean) | undefined> {

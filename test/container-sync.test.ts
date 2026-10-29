@@ -625,6 +625,24 @@ describe('ContainerSync', () => {
         expect(onInvalidEndpoint).toHaveBeenCalledTimes(2);
     });
 
+    it('suppresses invalid endpoint notifications for a quiet refresh without consuming them', async () => {
+        const store = await createStore();
+        const onInvalidEndpoint = vi.fn();
+        const sync = createSync(store, {
+            getContainerStatuses: vi.fn(async () => ({
+                containers: [status('service-quiet', 'running', 'example.com:22', 'alice', 'repo')],
+            })),
+        }, {}, undefined, undefined, onInvalidEndpoint);
+
+        const quiet = await sync.refresh({ suppressInvalidEndpointNotifications: true });
+
+        expect(quiet.containers[0].error).toMatchObject({ code: 'invalid_endpoint' });
+        expect(onInvalidEndpoint).not.toHaveBeenCalled();
+
+        await sync.refresh();
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
+    });
+
     it('clears an invalid endpoint notification when the service stops', async () => {
         const store = await createStore();
         const onInvalidEndpoint = vi.fn();
@@ -713,6 +731,39 @@ describe('ContainerSync', () => {
         expect(getContainerStatuses).toHaveBeenCalledOnce();
         resolveBatch?.({ containers: [] });
         await first;
+    });
+
+    it('does not silence an existing sync when a quiet refresh overlaps it', async () => {
+        const store = await createStore();
+        let resolveFirstBatch: ((value: { containers: ContainerStatusResponse[] }) => void) | undefined;
+        let callCount = 0;
+        const getContainerStatuses = vi.fn((): Promise<{ containers: ContainerStatusResponse[] }> => {
+            callCount += 1;
+            if (callCount === 1) {
+                return new Promise(resolve => {
+                    resolveFirstBatch = resolve;
+                });
+            }
+            return Promise.resolve({
+                containers: [status('service-quiet-overlap', 'running', 'example.com:22', 'alice', 'repo')],
+            });
+        });
+        const onInvalidEndpoint = vi.fn();
+        const sync = createSync(store, { getContainerStatuses }, {}, undefined, undefined, onInvalidEndpoint);
+
+        const regularSync = sync.sync();
+        await vi.waitFor(() => expect(getContainerStatuses).toHaveBeenCalledOnce());
+        const quietRefresh = sync.refresh({ suppressInvalidEndpointNotifications: true });
+        resolveFirstBatch?.({
+            containers: [status('service-quiet-overlap', 'running', 'example.com:22', 'alice', 'repo')],
+        });
+
+        await regularSync;
+        const quietResult = await quietRefresh;
+
+        expect(quietResult.containers[0].error).toMatchObject({ code: 'invalid_endpoint' });
+        expect(getContainerStatuses).toHaveBeenCalledTimes(2);
+        expect(onInvalidEndpoint).toHaveBeenCalledOnce();
     });
 
     it('does not publish a sync result that crossed a lifecycle operation boundary', async () => {

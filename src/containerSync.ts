@@ -42,6 +42,10 @@ export interface ContainerSyncResult {
     error?: ContainerSyncError;
 }
 
+interface ContainerSyncRunOptions {
+    suppressInvalidEndpointNotifications?: boolean;
+}
+
 export interface ContainerSyncOptions {
     config: ContainerConfig;
     userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
@@ -157,6 +161,7 @@ export class ContainerSync {
     private readonly operationSubscription: { dispose: () => void };
 
     private inFlight: Promise<ContainerSyncResult> | undefined;
+    private inFlightOptions: ContainerSyncRunOptions | undefined;
     private mutationRefresh: Promise<ContainerSyncResult> | undefined;
     private mutationGate: Promise<void> | undefined;
     private timer: ReturnType<typeof setInterval> | undefined;
@@ -182,20 +187,26 @@ export class ContainerSync {
         }) ?? { dispose: () => undefined };
     }
 
-    public sync(): Promise<ContainerSyncResult> {
+    public sync(options: ContainerSyncRunOptions = {}): Promise<ContainerSyncResult> {
         if (this.disposed) {
             return Promise.resolve(this.disposedResult());
         }
         if (this.mutationGate) {
-            return this.mutationGate.then(() => this.sync());
+            return this.mutationGate.then(() => this.sync(options));
         }
         if (this.inFlight) {
-            return this.inFlight;
+            const inFlightSuppressesNotifications = Boolean(this.inFlightOptions?.suppressInvalidEndpointNotifications);
+            const requestSuppressesNotifications = Boolean(options.suppressInvalidEndpointNotifications);
+            return inFlightSuppressesNotifications === requestSuppressesNotifications
+                ? this.inFlight
+                : this.inFlight.then(() => this.sync(options));
         }
 
         const syncGeneration = ++this.syncGeneration;
         const operationGeneration = this.operationGeneration;
-        this.inFlight = this.performSync(syncGeneration, operationGeneration)
+        const runOptions = { ...options };
+        this.inFlightOptions = runOptions;
+        this.inFlight = this.performSync(syncGeneration, operationGeneration, runOptions)
             .catch(error => this.resultWithError(toSyncError(error, 'sync_failed', '云端沙箱 服务同步失败')))
             .then(result => {
                 if (this.isCurrentSync(syncGeneration, operationGeneration)) {
@@ -210,12 +221,13 @@ export class ContainerSync {
             })
             .finally(() => {
                 this.inFlight = undefined;
+                this.inFlightOptions = undefined;
             });
         return this.inFlight;
     }
 
-    public refresh(): Promise<ContainerSyncResult> {
-        return this.sync();
+    public refresh(options: ContainerSyncRunOptions = {}): Promise<ContainerSyncResult> {
+        return this.sync(options);
     }
 
     public refreshAfterMutation(): Promise<ContainerSyncResult> {
@@ -344,7 +356,11 @@ export class ContainerSync {
         }
     }
 
-    private async performSync(syncGeneration: number, operationGeneration: number): Promise<ContainerSyncResult> {
+    private async performSync(
+        syncGeneration: number,
+        operationGeneration: number,
+        options: ContainerSyncRunOptions,
+    ): Promise<ContainerSyncResult> {
         const settings = this.safeSettings();
         let document;
         try {
@@ -473,7 +489,9 @@ export class ContainerSync {
         }
 
         for (const remoteStatus of remoteStatuses.values()) {
-            if (remoteStatus.error?.code === 'invalid_endpoint' && remoteStatus.response) {
+            if (!options.suppressInvalidEndpointNotifications
+                && remoteStatus.error?.code === 'invalid_endpoint'
+                && remoteStatus.response) {
                 this.reportInvalidEndpoint(remoteStatus.response.service_id, remoteStatus.response.endpoint);
             }
         }
