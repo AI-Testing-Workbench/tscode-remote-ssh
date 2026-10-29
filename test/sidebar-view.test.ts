@@ -487,6 +487,13 @@ describe('SidebarViewProvider', () => {
         expect(errorStyle).not.toContain('border-radius');
         expect(errorStyle).not.toContain('background');
         expect(errorStyle).not.toContain('box-shadow');
+        const retryButtonStyle = view.webview.html.match(/\.error-page \.action-button \{[^}]+\}/)?.[0] ?? '';
+        expect(retryButtonStyle).toContain('height: 24px;');
+        expect(retryButtonStyle).toContain('min-height: 24px;');
+        expect(retryButtonStyle).toContain('flex: 0 0 auto;');
+        expect(retryButtonStyle).toContain('padding: 0 8px;');
+        expect(retryButtonStyle).toContain('line-height: 1;');
+        expect(retryButtonStyle).toContain('border-radius: 8px;');
         expect(view.webview.html).not.toContain('.cloud-card, .error-page {');
         expect(view.webview.html).toContain('data-action="refresh"');
         expect(userIdProvider.getCurrentUserId).not.toHaveBeenCalled();

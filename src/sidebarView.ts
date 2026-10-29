@@ -1772,6 +1772,7 @@ function renderDocument(body: string): string {
         .card-error { margin: 13px 0 0; padding: 9px 11px; border-radius: 8px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; }
         .card-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
         .action-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: var(--outline); }
+        .error-page .action-button { height: 24px; min-height: 24px; flex: 0 0 auto; padding: 0 8px; border-radius: 8px; line-height: 1; }
         .action-button .icon { width: 16px; height: 16px; }
         .action-button.is-confirming { color: var(--error); border-color: var(--error); background: transparent; }
         .action-button.is-confirming:hover { color: var(--error); border-color: var(--error); background: var(--surface-container-high); }

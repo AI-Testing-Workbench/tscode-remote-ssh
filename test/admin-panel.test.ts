@@ -563,6 +563,22 @@ describe('AdminPanel', () => {
         expect(adminApi.setExpiration).toHaveBeenCalledWith('service-1', { expiration_hours: 30 });
     });
 
+    it('sets expiration to never when zero hours are added', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        vi.mocked(adminApi.listContainers).mockResolvedValue({ containers: [{
+            ...sampleContainer(),
+            expires_at: new Date(Date.now() + 26 * 60 * 60 * 1000).toISOString(),
+        }] });
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, { command: 'containerAction', serviceId: 'service-1', action: 'expiration', expirationHours: '0' });
+
+        expect(adminApi.setExpiration).toHaveBeenCalledWith('service-1', { expiration_hours: 0 });
+    });
+
     it('treats expired or missing expiration timestamps as zero remaining hours', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -735,7 +751,8 @@ describe('AdminPanel', () => {
         expect(html).toContain('prefers-reduced-motion: reduce');
         expect(html).toContain('CPU (当前值: 2 核)');
         expect(html).toContain('内存 (当前值: 4 Gi)');
-        expect(html).toContain('data-default-value="2" type="number" min="0.01" step="0.01" value="2"');
+        expect(html).toContain('data-default-value="2" type="number" step="1" value="2"');
+        expect(html).toContain('data-persist-key="limit.cpu" type="number" step="1" value="2"');
         expect(html).toContain('data-default-value="4" type="number" min="1" step="1" value="4"');
         expect(html).not.toContain('当前使用');
         expect(html).not.toContain('default-separator');

@@ -1594,6 +1594,9 @@ function toExpirationRequest(message: Record<string, unknown>): ExpirationReques
 
 function toAddedExpirationRequest(message: Record<string, unknown>, expiresAt: string | null | undefined, now = Date.now()): ExpirationRequest {
     const addedHours = requireNonNegativeInteger(message.expirationHours ?? message.expiration_hours, '增加有效期');
+    if (addedHours === 0) {
+        return { expiration_hours: 0 };
+    }
     const expirationTimestamp = expiresAt ? Date.parse(expiresAt) : Number.NaN;
     const remainingHours = Number.isFinite(expirationTimestamp)
         ? Math.max(0, Math.ceil((expirationTimestamp - now) / (60 * 60 * 1000)))
