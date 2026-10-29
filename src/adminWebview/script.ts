@@ -734,6 +734,8 @@ const updateGiteeMode = () => {
         panel.querySelectorAll('[data-field]').forEach(field => { field.disabled = !active; });
     });
     const canSetGiteeOptions = selected === 'full' || selected === 'parts';
+    const submitLabel = document.querySelector('[data-create-submit-label]');
+    if (submitLabel) submitLabel.textContent = selected === 'replace' ? '替换服务' : '创建容器';
     document.querySelectorAll('[data-gitee-dependent]').forEach(field => { field.disabled = !canSetGiteeOptions; });
     const branchRow = document.querySelector('.branch-row');
     if (branchRow) {

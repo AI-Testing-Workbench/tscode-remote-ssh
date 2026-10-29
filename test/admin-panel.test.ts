@@ -99,6 +99,10 @@ describe('AdminPanel', () => {
 
         expect(panel.webview.html).toContain('K8S集群资源情况');
         expect(panel.webview.html).toContain('data-action="openK8sDashboard"');
+        expect(panel.webview.html).toContain('data-action="toggleFailedContainerDeletion"');
+        expect(panel.webview.html).toContain('自动删除失败容器 (已开启)');
+        expect(panel.webview.html.indexOf('data-action="openK8sDashboard"')).toBeLessThan(panel.webview.html.indexOf('data-action="toggleFailedContainerDeletion"'));
+        expect(panel.webview.html.indexOf('data-action="toggleFailedContainerDeletion"')).toBeLessThan(panel.webview.html.indexOf('data-action="refresh"'));
 
         await send(panel, { command: 'openK8sDashboard', requestId: 'open-k8s-1' });
 
@@ -106,6 +110,110 @@ describe('AdminPanel', () => {
             'simpleBrowser.show',
             'http://tscode-gateway.paasuat.cmbchina.cn/sandbox-k8s-dashboard',
         );
+    });
+
+    it('toggles automatic failed-container deletion using the latest server limit values', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        let deleteFailedContainer = true;
+        adminApi.getContainerLimit = vi.fn(async () => ({
+            container_limit: 4,
+            cpu: 2,
+            memory: 4,
+            delete_failed_container: deleteFailedContainer,
+        }));
+        adminApi.setContainerLimit = vi.fn(async request => {
+            if (request.delete_failed_container !== undefined) {
+                deleteFailedContainer = request.delete_failed_container;
+            }
+            return {
+                container_limit: 4,
+                cpu: 2,
+                memory: 4,
+                delete_failed_container: deleteFailedContainer,
+            };
+        });
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, { command: 'toggleFailedContainerDeletion' });
+
+        expect(adminApi.setContainerLimit).toHaveBeenCalledWith({
+            container_limit: 4,
+            cpu: 2,
+            memory: 4,
+            delete_failed_container: false,
+        });
+        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'adminUpdate',
+            html: expect.stringContaining('自动删除失败容器 (已关闭)'),
+        }));
+    });
+
+    it('confirms enabling automatic deletion and keeps it disabled when cancelled', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.getContainerLimit = vi.fn(async () => ({
+            container_limit: 4,
+            cpu: 2,
+            memory: 4,
+            delete_failed_container: false,
+        }));
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+        vscode.window.showWarningMessage.mockResolvedValue(undefined);
+
+        await adminPanel.open();
+        await send(panel, { command: 'toggleFailedContainerDeletion' });
+
+        expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+            '是否在沙盒服务失败后自动将其删除，而非等待其被业务删除？',
+            { modal: true },
+            '开启',
+        );
+        expect(adminApi.setContainerLimit).not.toHaveBeenCalled();
+        expect(panel.webview.html).toContain('自动删除失败容器 (已关闭)');
+    });
+
+    it('enables automatic failed-container deletion after confirmation', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        let deleteFailedContainer = false;
+        adminApi.getContainerLimit = vi.fn(async () => ({
+            container_limit: 4,
+            cpu: 2,
+            memory: 4,
+            delete_failed_container: deleteFailedContainer,
+        }));
+        adminApi.setContainerLimit = vi.fn(async request => {
+            if (request.delete_failed_container !== undefined) {
+                deleteFailedContainer = request.delete_failed_container;
+            }
+            return {
+                container_limit: 4,
+                cpu: 2,
+                memory: 4,
+                delete_failed_container: deleteFailedContainer,
+            };
+        });
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+        vscode.window.showWarningMessage.mockImplementation(async (_message, _options, ...items) => items[0]);
+
+        await adminPanel.open();
+        await send(panel, { command: 'toggleFailedContainerDeletion' });
+
+        expect(adminApi.setContainerLimit).toHaveBeenCalledWith({
+            container_limit: 4,
+            cpu: 2,
+            memory: 4,
+            delete_failed_container: true,
+        });
+        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'adminUpdate',
+            html: expect.stringContaining('自动删除失败容器 (已开启)'),
+        }));
     });
 
     it('loads volume status only on the volume tab and on a volume refresh', async () => {
@@ -606,7 +714,7 @@ describe('AdminPanel', () => {
                 whitelist_count: 4,
                 admin_count: 2,
             },
-            limit: { container_limit: 4, cpu: 2, memory: 4 },
+            limit: { container_limit: 4, cpu: 2, memory: 4, delete_failed_container: true },
             whitelistUsers: [],
             adminUsers: [],
         };
@@ -640,6 +748,8 @@ describe('AdminPanel', () => {
         expect(html.indexOf('value="from" type="radio"')).toBeLessThan(html.indexOf('value="none" type="radio" checked'));
         expect(html.slice(html.indexOf('value="from" type="radio"'), html.indexOf('value="none" type="radio" checked'))).toContain('data-gitee-mode-panel="from"');
         expect(html).toContain('data-field="from" data-persist-key="create.from" type="text" placeholder="service_id" disabled');
+        expect(html).toContain('data-field="replace" data-persist-key="create.replace" type="text" placeholder="service_id" disabled');
+        expect(html).toContain('就地替换已有服务');
         expect(html).toContain('value="none" type="radio" checked>无码云仓库绑定');
         expect(html).toContain('data-gitee-mode-panel="full"');
         expect(html).toContain('data-gitee-mode-panel="parts"');
@@ -667,7 +777,9 @@ describe('AdminPanel', () => {
             'create.giteeMode',
             'create.giteeMode',
             'create.giteeMode',
+            'create.giteeMode',
             'create.from',
+            'create.replace',
             'create.gitee_full_url',
             'create.gitee_user',
             'create.gitee_repository',
@@ -967,6 +1079,37 @@ describe('AdminPanel', () => {
         expect(initializationPoller.initialize).not.toHaveBeenCalled();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('来源服务不存在'), '复制');
         expect(vscode.window.showErrorMessage.mock.calls[0]?.[0]).toContain('source_not_found');
+    });
+
+    it('sends in-place replacement directly, excludes stale Gitee fields, and skips Git initialization polling', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), initializationPoller });
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-1',
+            giteeMode: 'replace',
+            replace: 'service-1',
+            from: 'stale-source',
+            gitee_full_url: 'not a repository url',
+            gitee_user: 'stale-user',
+            gitee_repository: 'stale-repository',
+            gitee_url: 'https://stale.example',
+            gitee_branch: 'stale-branch',
+            authorize_general_account: true,
+        });
+
+        expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+        expect(adminApi.createContainer).toHaveBeenCalledWith({
+            user_id: 'user-1',
+            type: 'testagent_cloud',
+            skip_git: false,
+            replace: 'service-1',
+        });
+        expect(initializationPoller.initialize).not.toHaveBeenCalled();
     });
 
     it('renders the selected image filename after choosing an image file', async () => {
@@ -1919,8 +2062,8 @@ function createAdminApi(): AdminRestApi {
             whitelist_count: 1,
             admin_count: 1,
         })),
-        getContainerLimit: vi.fn(async () => ({ container_limit: 4, cpu: 2, memory: 4 })),
-        setContainerLimit: vi.fn(async () => ({ container_limit: 4, cpu: 2, memory: 4 })),
+        getContainerLimit: vi.fn(async () => ({ container_limit: 4, cpu: 2, memory: 4, delete_failed_container: true })),
+        setContainerLimit: vi.fn(async () => ({ container_limit: 4, cpu: 2, memory: 4, delete_failed_container: true })),
         addWhitelistUser: vi.fn(async () => ({ user_id: 'user-3' })),
         listWhitelistUsers: vi.fn(async () => ({ user_ids: ['user-3'] })),
         deleteWhitelistUser: vi.fn(async () => undefined),

@@ -55,11 +55,16 @@ function renderStatusPage(state: AdminPanelState): string {
 }
 
 function renderReadyPage(state: AdminPanelState): string {
+    const autoDeleteFailedContainers = state.limit?.delete_failed_container;
+    const autoDeleteFailedContainersLabel = typeof autoDeleteFailedContainers === 'boolean'
+        ? autoDeleteFailedContainers ? '已开启' : '已关闭'
+        : '状态未知';
     return `<main class="admin-shell" data-patch-key="admin-root">
         <header class="page-header" data-patch-key="page-header">
             <h1>管理员页面</h1>
             <div class="page-header-actions">
                 <button class="tonal-button" type="button" data-action="openK8sDashboard">K8S集群资源情况</button>
+                <button class="tonal-button" type="button" data-action="toggleFailedContainerDeletion" aria-pressed="${autoDeleteFailedContainers === true}" ${typeof autoDeleteFailedContainers === 'boolean' ? '' : 'disabled'}>自动删除失败容器 (${autoDeleteFailedContainersLabel})</button>
                 <button class="tonal-button" type="button" data-action="refresh">刷新</button>
             </div>
         </header>
@@ -321,6 +326,10 @@ function renderContainersTab(
                     <div class="gitee-fields" data-gitee-mode-panel="from"><label>源容器的服务 ID<input data-field="from" data-persist-key="create.from" type="text" placeholder="service_id" disabled></label></div>
                 </div>
                 <div class="gitee-option-row">
+                    <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="replace" type="radio">就地替换已有服务</label>
+                    <div class="gitee-fields" data-gitee-mode-panel="replace"><label>待替换服务的 ID<input data-field="replace" data-persist-key="create.replace" type="text" placeholder="service_id" disabled></label></div>
+                </div>
+                <div class="gitee-option-row">
                     <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="none" type="radio" checked>无码云仓库绑定</label>
                     <div class="gitee-fields mode-description" data-gitee-mode-panel="none"><span>创建容器时不绑定码云仓库</span></div>
                 </div>
@@ -349,7 +358,7 @@ function renderContainersTab(
                     <label>CPU (核)<input data-field="cpu" data-persist-key="create.cpu" data-default-value="${escapeAttribute(limit?.cpu ?? '')}" type="number" min="0.01" step="0.01" value="${escapeAttribute(limit?.cpu ?? '')}"></label>
                     <label>内存 (Gi)<input data-field="memory" data-persist-key="create.memory" data-default-value="${escapeAttribute(limit?.memory ?? '')}" type="number" min="1" step="1" value="${escapeAttribute(limit?.memory ?? '')}"></label>
                 </div>
-                <div class="form-actions"><label class="check-button form-check skip-git-check" title="跳过容器侧 Git 拉取和验证"><input data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能</label><button class="primary-button" type="button" data-action="createContainer">创建容器</button></div>
+                <div class="form-actions"><label class="check-button form-check skip-git-check" title="跳过容器侧 Git 拉取和验证"><input data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能</label><button class="primary-button" type="button" data-action="createContainer"><span data-create-submit-label>创建容器</span></button></div>
             </div>
         </details>
         ${renderSearchBox('搜索容器...', search)}

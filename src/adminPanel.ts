@@ -528,7 +528,7 @@ export class AdminPanel implements vscode.Disposable {
                     const request = toAdminCreateRequest(message);
                     const created = await adminApi.createContainer(request);
                     let endpoint = created.endpoint;
-                    if (!request.skip_git && this.initializationPoller) {
+                    if (!request.replace && !request.skip_git && this.initializationPoller) {
                         const initializationController = new AbortController();
                         this.initializationControllers.add(initializationController);
                         try {
@@ -552,6 +552,30 @@ export class AdminPanel implements vscode.Disposable {
                 return true;
             case 'setLimit':
                 await adminApi.setContainerLimit(toLimitRequest(message));
+                return true;
+            case 'toggleFailedContainerDeletion':
+                {
+                    const limit = this.state.limit;
+                    if (!limit) {
+                        throw new Error('未读取到失败容器自动删除设置，请刷新后重试');
+                    }
+                    const enabled = !limit.delete_failed_container;
+                    if (enabled) {
+                        const confirmed = await confirmAction(
+                            '是否在沙盒服务失败后自动将其删除，而非等待其被业务删除？',
+                            '开启',
+                        );
+                        if (!confirmed) {
+                            return false;
+                        }
+                    }
+                    await adminApi.setContainerLimit({
+                        container_limit: limit.container_limit,
+                        cpu: limit.cpu,
+                        memory: limit.memory,
+                        delete_failed_container: enabled,
+                    });
+                }
                 return true;
             case 'deleteOrphanContainers':
                 return this.deleteOrphanContainers(adminApi, message, panel, generation);
@@ -1284,6 +1308,7 @@ const ADMIN_ACTIONS = new Set([
     'deleteImage',
     'createContainer',
     'setLimit',
+    'toggleFailedContainerDeletion',
     'deleteOrphanContainers',
     'getContainerLog',
     'containerAction',
@@ -1485,10 +1510,14 @@ function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateCont
         giteeMode = 'none';
     } else if (message.giteeMode === 'from') {
         giteeMode = 'from';
+    } else if (message.giteeMode === 'replace') {
+        giteeMode = 'replace';
     } else if (message.giteeMode === 'parts' || message.giteeMode === undefined && hasSeparateGiteeFields) {
         giteeMode = 'parts';
     }
-    if (giteeMode === 'from') {
+    if (giteeMode === 'replace') {
+        request.replace = requireText(message.replace, '待替换服务 ID 不能为空');
+    } else if (giteeMode === 'from') {
         request.from = requireText(message.from, '源容器服务 ID 不能为空');
     } else if (giteeMode === 'full') {
         const fullUrl = optionalText(message.gitee_full_url);

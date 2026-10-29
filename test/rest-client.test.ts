@@ -64,7 +64,7 @@ describe('RestClient', () => {
         await client.admin.getDefaultImage('autotest_cloud');
         await client.admin.setDefaultImage({ full_name: 'registry/ns/app:v1', type: 'autotest_cloud' });
         await client.admin.unsetDefaultImage('autotest_cloud');
-        await client.admin.createContainer({ user_id: 'user-1' });
+        await client.admin.createContainer({ user_id: 'user-1', replace: 'service-1' });
         await client.admin.listContainers();
         await client.admin.listOrphanContainers();
         await client.admin.deleteOrphanContainers({ container_ids: ['orphan-1'] });
@@ -79,7 +79,7 @@ describe('RestClient', () => {
         await client.admin.restoreContainer('service/1', { expiration_hours: 1 });
         await client.admin.getState();
         await client.admin.getContainerLimit();
-        await client.admin.setContainerLimit({ container_limit: 3, cpu: 1, memory: 1 });
+        await client.admin.setContainerLimit({ container_limit: 3, cpu: 1, memory: 1, delete_failed_container: false });
         await client.admin.addWhitelistUser({ user_id: 'user-1' });
         await client.admin.listWhitelistUsers();
         await client.admin.deleteWhitelistUser({ user_id: 'user-1' });
@@ -134,6 +134,7 @@ describe('RestClient', () => {
         expect(requests[14].url.search).toBe('?container_type=autotest_cloud');
         expect(Buffer.from(requests[0].body ?? '').toString('utf8')).toBe('{"user_id":"user-1"}');
         expect(Buffer.from(requests[3].body ?? '').toString('utf8')).toBe('{"user_id":"user-1"}');
+        expect(Buffer.from(requests[15].body ?? '').toString('utf8')).toBe('{"user_id":"user-1","replace":"service-1"}');
         expect(requests.slice(0, 8).every(request => request.headers[ADMIN_OPERATOR_USER_ID_HEADER] === undefined)).toBe(true);
         expect(requests.slice(8).every(request => request.headers[ADMIN_OPERATOR_USER_ID_HEADER] === 'admin-1')).toBe(true);
         const multipartBody = Buffer.from(requests[8].body ?? '').toString('utf8');
@@ -476,7 +477,7 @@ describe('RestClient', () => {
         });
         await client.admin.deleteOrphanContainers({ container_ids: ['orphan-1', 'orphan-2'] });
         await client.admin.setExpiration('container-1', { expiration_hours: 0 });
-        await client.admin.setContainerLimit({ container_limit: 0, cpu: 0.5, memory: 1 });
+        await client.admin.setContainerLimit({ container_limit: 0, cpu: 0.5, memory: 1, delete_failed_container: true });
         await client.admin.deleteImage({ full_name: 'registry.test:5000/testagent/app:v1', also_registry: false });
         await client.admin.addWhitelistUser({ user_id: 'user-2' });
         await client.admin.addAdminUser({ user_id: 'admin-2' });
@@ -508,7 +509,7 @@ describe('RestClient', () => {
         expect(readJsonBody(requests.find(request => request.url.pathname.endsWith('/expiration'))!))
             .toEqual({ expiration_hours: 0 });
         expect(readJsonBody(requests.find(request => request.url.pathname === '/admin/containers/limit')!))
-            .toEqual({ container_limit: 0, cpu: 0.5, memory: 1 });
+            .toEqual({ container_limit: 0, cpu: 0.5, memory: 1, delete_failed_container: true });
         expect(readJsonBody(requests.find(request => request.url.pathname === '/admin/images/delete')!))
             .toEqual({ full_name: 'registry.test:5000/testagent/app:v1', also_registry: false });
         expect(readJsonBody(requests.find(request => request.url.pathname === '/admin/whitelist-users')!))

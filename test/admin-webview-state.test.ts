@@ -240,11 +240,13 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     document: FakeDocument;
     userId: FakeElement;
     giteeModeFrom: FakeElement;
+    giteeModeReplace: FakeElement;
     fullUrl: FakeElement;
     giteeModeNone: FakeElement;
     giteeModeFull: FakeElement;
     giteeModeParts: FakeElement;
     from: FakeElement;
+    replace: FakeElement;
     giteeUser: FakeElement;
     branchRow: FakeElement;
     giteeBranch: FakeElement;
@@ -256,17 +258,21 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     image: FakeElement;
     imageLabel: FakeElement;
     imageTrigger: FakeElement;
+    submitLabel: FakeElement;
     whitelistUserId: FakeElement;
 } {
     const document = new FakeDocument();
     const form = new FakeElement('div', { 'data-form': 'createContainer' });
     const userId = new FakeElement('input', { 'data-field': 'user_id', 'data-persist-key': 'create.user_id', type: 'text' });
     const giteeModeFrom = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'from', type: 'radio' });
+    const giteeModeReplace = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'replace', type: 'radio' });
     const giteeModeNone = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'none', type: 'radio', checked: '' });
     const giteeModeFull = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'full', type: 'radio' });
     const giteeModeParts = new FakeElement('input', { 'data-field': 'giteeMode', 'data-persist-key': 'create.giteeMode', value: 'parts', type: 'radio' });
     const fromPanel = new FakeElement('div', { 'data-gitee-mode-panel': 'from' });
     const from = new FakeElement('input', { 'data-field': 'from', 'data-persist-key': 'create.from', type: 'text', disabled: '' });
+    const replacePanel = new FakeElement('div', { 'data-gitee-mode-panel': 'replace' });
+    const replace = new FakeElement('input', { 'data-field': 'replace', 'data-persist-key': 'create.replace', type: 'text', disabled: '' });
     const fullPanel = new FakeElement('div', { 'data-gitee-mode-panel': 'full' });
     const fullUrl = new FakeElement('input', { 'data-field': 'gitee_full_url', 'data-persist-key': 'create.gitee_full_url', type: 'text' });
     const partsPanel = new FakeElement('div', { 'data-gitee-mode-panel': 'parts' });
@@ -281,6 +287,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     const imageWrapper = new FakeElement('span', { 'data-custom-select': '', class: 'custom-select' });
     const imageLabel = new FakeElement('span', { 'data-select-label': '' });
     const imageTrigger = new FakeElement('button', { 'data-select-trigger': '' });
+    const submitLabel = new FakeElement('span', { 'data-create-submit-label': '' });
     const image = new FakeElement('select', { 'data-field': 'image', 'data-persist-key': 'create.image', value: 'image-1' });
     const imageMenu = new FakeElement('span', { 'data-select-menu': '' });
     image.options.push(...imageValues.map(value => ({ value })));
@@ -288,6 +295,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     const whitelistUserId = new FakeElement('input', { 'data-field': 'user_id', 'data-persist-key': 'whitelist.user_id', type: 'text' });
 
     fromPanel.appendChild(from);
+    replacePanel.appendChild(replace);
     fullPanel.appendChild(fullUrl);
     partsPanel.appendChild(giteeUser);
     branchRow.appendChild(giteeBranch);
@@ -295,6 +303,8 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     form.appendChild(userId);
     form.appendChild(giteeModeFrom);
     form.appendChild(fromPanel);
+    form.appendChild(giteeModeReplace);
+    form.appendChild(replacePanel);
     form.appendChild(giteeModeNone);
     form.appendChild(giteeModeFull);
     form.appendChild(fullPanel);
@@ -311,6 +321,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     imageWrapper.appendChild(image);
     imageWrapper.appendChild(imageMenu);
     form.appendChild(imageWrapper);
+    form.appendChild(submitLabel);
     whitelistForm.appendChild(whitelistUserId);
     document.appendChild(form);
     document.appendChild(whitelistForm);
@@ -318,11 +329,13 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
         document,
         userId,
         giteeModeFrom,
+        giteeModeReplace,
         fullUrl,
         giteeModeNone,
         giteeModeFull,
         giteeModeParts,
         from,
+        replace,
         giteeUser,
         branchRow,
         giteeBranch,
@@ -334,6 +347,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
         image,
         imageLabel,
         imageTrigger,
+        submitLabel,
         whitelistUserId,
     };
 }
@@ -476,6 +490,24 @@ describe('Admin Webview state', () => {
         expect(form.giteeBranch.disabled).toBe(true);
         expect(form.authorize.disabled).toBe(true);
         expect(form.branchRow.classList.contains('gitee-options-disabled')).toBe(true);
+
+        form.giteeModeNone.checked = false;
+        form.giteeModeReplace.checked = true;
+        form.document.dispatch('change', form.giteeModeReplace);
+        expect(form.replace.disabled).toBe(false);
+        expect(form.from.disabled).toBe(true);
+        expect(form.giteeBranch.disabled).toBe(true);
+        expect(form.authorize.disabled).toBe(true);
+        expect(form.submitLabel.textContent).toBe('替换服务');
+
+        form.replace.value = 'target-service-1';
+        form.document.dispatch('input', form.replace);
+        const restoredReplace = createFormDocument();
+        runScript(restoredReplace.document, runtime.getState());
+        expect(restoredReplace.giteeModeReplace.checked).toBe(true);
+        expect(restoredReplace.replace.value).toBe('target-service-1');
+        expect(restoredReplace.replace.disabled).toBe(false);
+        expect(restoredReplace.submitLabel.textContent).toBe('替换服务');
     });
 
     it('uses updated global limits for untouched defaults and preserves edited values', () => {

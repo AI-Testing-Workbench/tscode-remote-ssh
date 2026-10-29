@@ -113,6 +113,7 @@ export interface AdminCreateContainerRequest {
     user_id: string;
     type?: ContainerTypeValue;
     from?: string;
+    replace?: string;
     skip_git?: boolean;
     gitee_user?: string | null;
     gitee_repository?: string | null;
@@ -194,12 +195,14 @@ export interface ContainerLimitRequest {
     container_limit: number;
     cpu: number;
     memory: number;
+    delete_failed_container?: boolean;
 }
 
 export interface ContainerLimitResponse {
     container_limit: number;
     cpu: number;
     memory: number;
+    delete_failed_container: boolean;
 }
 
 export interface ImageReferenceRequest {
