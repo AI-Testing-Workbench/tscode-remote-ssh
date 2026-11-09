@@ -9,7 +9,6 @@ import {
     ContainerTypeValue,
     ExpirationRequest,
     ImageDeleteRequest,
-    ImageListItem,
     UploadImageFileInput,
     VolumeStatusResponse,
 } from './api/models';
@@ -331,14 +330,6 @@ export class AdminPanel implements vscode.Disposable {
                 }
                 return;
             }
-            if (message.command === 'checkImagePushStates') {
-                const list = await adminApi.checkImagePushStates();
-                if (this.isActive(panel, generation)) {
-                    this.state.images = list.images;
-                    this.postAdminUpdate(panel, generation);
-                }
-                return;
-            }
             const changed = await this.executeAction(adminApi, message, panel, generation);
             if (changed) {
                 await this.refresh(panel, generation, false, true);
@@ -430,14 +421,10 @@ export class AdminPanel implements vscode.Disposable {
                 if (!this.isActive(panel, generation)) {
                     return;
                 }
-                const mergedData: AdminData = {
-                    ...data,
-                    images: mergeImagePushStates(this.state.images, data.images),
-                };
-                const dataChanged = hasAdminDataChanged(this.state, mergedData);
+                const dataChanged = hasAdminDataChanged(this.state, data);
                 this.state = {
                     ...this.state,
-                    ...mergedData,
+                    ...data,
                     status: 'ready',
                     error: undefined,
                 };
@@ -1302,7 +1289,6 @@ export class AdminPanel implements vscode.Disposable {
 const ADMIN_ACTIONS = new Set([
     'uploadImage',
     'pushImage',
-    'checkImagePushStates',
     'setDefaultImage',
     'unsetDefaultImage',
     'deleteImage',
@@ -1483,16 +1469,6 @@ function hasAdminDataChanged(previous: AdminPanelState, next: AdminData): boolea
         whitelistUsers: previous.whitelistUsers,
         adminUsers: previous.adminUsers,
     }) !== JSON.stringify(next);
-}
-
-function mergeImagePushStates(previous: ImageListItem[], next: ImageListItem[]): ImageListItem[] {
-    const checkedStates = new Map(previous
-        .filter(image => ['pushed', 'not_pushed'].includes(image.status.toLowerCase()))
-        .map(image => [image.full_name, image.status] as const));
-    return next.map(image => {
-        const checkedStatus = checkedStates.get(image.full_name);
-        return checkedStatus ? { ...image, status: checkedStatus } : image;
-    });
 }
 
 function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateContainerRequest {

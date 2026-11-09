@@ -250,10 +250,6 @@ function renderImagesTab(
                 </div>
             </div>
         </details>
-        <div class="tab-toolbar image-toolbar">
-            <button class="tonal-button" type="button" data-action="checkImagePushStates">检查全部镜像推送状态</button>
-            <span class="toolbar-hint">列表加载不会自动探测远端仓库；点击后逐个校验「已推送」</span>
-        </div>
         ${renderSearchBox('搜索镜像...', search)}
         ${renderListControls('images')}
         <div class="resource-list image-list" data-resource-list><div class="resource-items" data-resource-items>${rows}</div>${empty}${emptySearch}</div>
@@ -264,13 +260,12 @@ function renderImageRow(image: ImageListItem, defaultImages: AdminDefaultImage[]
     const imageStatus = image.status.toLowerCase();
     const defaultTypes = defaultImageTypes(image.full_name, defaultImages);
     const isDefault = defaultTypes.length > 0;
-    const pushed = imageStatus === 'pushed' || isDefault;
-    const status = isDefault ? 'default' : imageStatus;
+    const status = isDefault || imageStatus === 'default' ? 'default' : '';
     const usageTag = containerCount > 0 ? `<span class="image-usage tag">被 ${containerCount} 个容器使用中</span>` : '';
     const defaultTags = defaultTypes
         .map(type => `<span class="tag default-type-tag">默认·${escapeHtml(containerTypeLabel(type))}</span>`)
         .join('');
-    const searchText = [image.full_name, image.registry, image.namespace, image.name, image.version, status, imageStatusLabel(status)]
+    const searchText = [image.full_name, image.registry, image.namespace, image.name, image.version, status ? imageStatusLabel(status) : '']
         .concat(defaultTypes.map(containerTypeLabel))
         .join(' ');
     const defaultActions = ADMIN_CONTAINER_TYPES.map(({ type, label }) => {
@@ -278,12 +273,12 @@ function renderImageRow(image: ImageListItem, defaultImages: AdminDefaultImage[]
         if (defaultTypes.includes(type)) {
             return `<button class="small-button tonal-button" type="button" data-action="unsetDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}">取消默认·${escapeHtml(label)}</button>`;
         }
-        return `<button class="small-button" type="button" data-action="setDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}" ${pushed ? '' : 'disabled'}>设为默认·${escapeHtml(shortLabel)}</button>`;
+        return `<button class="small-button" type="button" data-action="setDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}">设为默认·${escapeHtml(shortLabel)}</button>`;
     }).join('');
     return `<article class="resource-row image-row searchable" data-patch-key="image:${escapeAttribute(image.full_name)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-sort-name="${escapeAttribute(image.full_name)}" data-sort-status="${escapeAttribute(status)}" data-sort-size="${image.size}" data-sort-created="${escapeAttribute(image.created_at)}">
-        <div class="resource-main"><div class="image-title"><strong>${escapeHtml(image.full_name)}</strong><span class="status-chip tag ${statusClass(status)}">${escapeHtml(imageStatusLabel(status))}</span>${defaultTags}<span class="image-size tag">${formatBytes(image.size)}</span>${usageTag}</div></div>
+        <div class="resource-main"><div class="image-title"><strong>${escapeHtml(image.full_name)}</strong>${status ? `<span class="status-chip tag ${statusClass(status)}">${escapeHtml(imageStatusLabel(status))}</span>` : ''}${defaultTags}<span class="image-size tag">${formatBytes(image.size)}</span>${usageTag}</div></div>
         <div class="row-actions">
-            <button class="small-button" type="button" data-action="pushImage" data-full-name="${escapeAttribute(image.full_name)}" ${pushed ? 'disabled' : ''}>推送</button>
+            <button class="small-button" type="button" data-action="pushImage" data-full-name="${escapeAttribute(image.full_name)}">推送</button>
             ${defaultActions}
             <button class="small-button danger-button" type="button" data-action="deleteImage" data-full-name="${escapeAttribute(image.full_name)}" ${isDefault ? 'disabled' : ''}>删除</button>
             <label class="row-check check-button${isDefault ? ' disabled' : ''}"><input data-field="alsoRegistry" data-persist-key="image.${escapeAttribute(image.full_name)}.alsoRegistry" type="checkbox" checked${isDefault ? ' disabled' : ''}>同步推送至注册表 (镜像仓库)</label>
@@ -319,7 +314,7 @@ function renderContainersTab(
                 </div>
                 <div class="form-row two-fields type-image-row">
                     <label>容器类型${renderStyledSelect('data-field="type" data-persist-key="create.type"', renderContainerTypeOptions())}</label>
-                    <label>镜像${renderStyledSelect('data-field="image" data-persist-key="create.image"', renderImageOptions(images, defaultImages))}</label>
+                    <label>镜像${renderStyledSelect('data-field="image" data-persist-key="create.image"', renderImageOptions(images, defaultImages), true)}</label>
                 </div>
                 <div class="gitee-option-row">
                     <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="from" type="radio">基于已有容器创建</label>
@@ -385,16 +380,14 @@ function renderContainerTypeFilter(): string {
 
 function renderImageOptions(images: ImageListItem[], defaultImages: AdminDefaultImage[]): SelectOption[] {
     const isDefaultImage = (image: ImageListItem): boolean => defaultImageTypes(image.full_name, defaultImages).length > 0;
-    const usableImages = images
-        .filter(image => image.status.toLowerCase() === 'pushed' || image.status.toLowerCase() === 'default' || isDefaultImage(image))
-        .sort((left, right) => {
-            const leftDefault = isDefaultImage(left);
-            const rightDefault = isDefaultImage(right);
-            return leftDefault === rightDefault ? left.full_name.localeCompare(right.full_name) : leftDefault ? -1 : 1;
-        });
+    const sortedImages = [...images].sort((left, right) => {
+        const leftDefault = isDefaultImage(left);
+        const rightDefault = isDefaultImage(right);
+        return leftDefault === rightDefault ? left.full_name.localeCompare(right.full_name) : leftDefault ? -1 : 1;
+    });
     const defaultRef = defaultImages.find(entry => entry.fullName);
-    const statusDefault = usableImages.find(image => image.status.toLowerCase() === 'default');
-    const hasDefault = Boolean(defaultRef && usableImages.some(image => image.full_name === defaultRef.fullName) || statusDefault);
+    const statusDefault = sortedImages.find(image => image.status.toLowerCase() === 'default');
+    const hasDefault = Boolean(defaultRef && sortedImages.some(image => image.full_name === defaultRef.fullName) || statusDefault);
     const options: SelectOption[] = [];
     if (!defaultRef?.fullName && !statusDefault) {
         options.push({ value: '', label: '请选择一个镜像', selected: true, disabled: true });
@@ -405,7 +398,7 @@ function renderImageOptions(images: ImageListItem[], defaultImages: AdminDefault
     if (missingDefault) {
         options.push(missingDefault);
     }
-    options.push(...usableImages.map(image => {
+    options.push(...sortedImages.map(image => {
         const isDefault = isDefaultImage(image) || !defaultRef?.fullName && image.status.toLowerCase() === 'default';
         return {
             value: image.full_name,
@@ -477,7 +470,7 @@ function renderListControls(kind: 'images' | 'containers' | 'users', stateKey: s
             ? [['service_id', '服务 ID'], ['user_id', '用户 ID'], ['status', '状态'], ['created_at', '创建时间']]
             : [['user_id', '用户 ID']];
     const statusOptions = kind === 'images'
-        ? [['not_pushed', '未推送'], ['pushed', '已推送'], ['default', '默认镜像']]
+        ? [['default', '默认镜像']]
         : [['running', '运行中'], ['pending', '准备中'], ['stopped', '已停止'], ['failed', '已失败'], ['business_deleted', '业务删除'], ['unknown', '未知状态']];
     const sortOptions = options.map(([value, label]) => ({ value, label }));
     const statusSelectOptions: SelectOption[] = [['all', '全部状态'], ...statusOptions].map(([value, label]) => ({ value, label }));
@@ -491,14 +484,20 @@ function renderListControls(kind: 'images' | 'containers' | 'users', stateKey: s
     </div>`;
 }
 
-function renderStyledSelect(attributes: string, options: SelectOption[]): string {
+function renderStyledSelect(attributes: string, options: SelectOption[], searchable = false): string {
     const selected = options.find(option => option.selected) ?? options[0];
     const nativeOptions = options.map(option => `<option value="${escapeAttribute(option.value)}"${option.selected ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${escapeHtml(option.label)}</option>`).join('');
-    const menuOptions = options.map(option => `<button class="select-option${option.selected ? ' selected' : ''}" type="button" role="option" data-select-option data-select-value="${escapeAttribute(option.value)}" aria-selected="${option.selected ? 'true' : 'false'}"${option.disabled ? ' disabled' : ''}>${escapeHtml(option.label)}</button>`).join('');
+    const menuOptions = options.map(option => {
+        const searchText = searchable ? ` data-select-search-text="${escapeAttribute(`${option.value} ${option.label}`)}"` : '';
+        return `<button class="select-option${option.selected ? ' selected' : ''}" type="button" role="option" data-select-option data-select-value="${escapeAttribute(option.value)}"${searchText} aria-selected="${option.selected ? 'true' : 'false'}"${option.disabled ? ' disabled' : ''}>${escapeHtml(option.label)}</button>`;
+    }).join('');
+    const searchInput = searchable
+        ? '<input class="select-search-input" data-select-search type="search" placeholder="搜索镜像..." aria-label="搜索镜像" autocomplete="off"><span class="select-search-empty" data-select-search-empty hidden>没有匹配的镜像</span>'
+        : '';
     return `<span class="select-wrap custom-select" data-custom-select>
         <button class="select-trigger" type="button" data-select-trigger aria-haspopup="listbox" aria-expanded="false"><span data-select-label>${escapeHtml(selected?.label ?? '')}</span><span class="select-trigger-arrow" aria-hidden="true"></span></button>
         <select class="native-select" ${attributes}>${nativeOptions}</select>
-        <span class="select-menu" data-select-menu role="listbox">${menuOptions}</span>
+        <span class="select-menu" data-select-menu>${searchInput}<span class="select-options" role="listbox">${menuOptions}</span></span>
     </span>`;
 }
 
@@ -605,12 +604,7 @@ function renderUsersTab(kind: 'whitelist' | 'admin', title: string, users: strin
 }
 
 function imageStatusLabel(status: string): string {
-    switch (status) {
-        case 'not_pushed': return '未推送';
-        case 'pushed': return '已推送';
-        case 'default': return '默认镜像';
-        default: return status || '未知状态';
-    }
+    return status === 'default' ? '默认镜像' : status || '未知状态';
 }
 
 function containerStatusLabel(status: string, deleted: boolean, gitFinStatus?: string): string {
@@ -655,10 +649,9 @@ const GIT_FAILURE_DESCRIPTIONS: Record<string, string> = {
 function statusClass(status: string): string {
     switch (status.toLowerCase()) {
         case 'running':
-        case 'pushed': return 'success';
+            return 'success';
         case 'stopped':
-        case 'failed':
-        case 'not_pushed': return 'warning';
+        case 'failed': return 'warning';
         case 'default': return 'primary';
         case 'unknown': return 'error';
         case 'business_deleted': return 'error';
@@ -863,6 +856,9 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .custom-select.open .select-trigger-arrow { transform: translateY(2px) rotate(225deg); }
 .select-menu { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; display: grid; grid-template-columns: 1fr; gap: 3px; width: 100%; min-width: 130px; max-height: 250px; overflow-y: auto; padding: 5px; border: 1px solid var(--select-border); border-radius: 10px; background: var(--select-background); box-shadow: 0 10px 24px var(--surface); opacity: 0; pointer-events: none; transform: translateY(-4px); visibility: hidden; transition: opacity .14s ease, transform .14s ease, visibility .14s ease; }
 .custom-select.open .select-menu { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
+.select-search-input { position: sticky; top: -5px; z-index: 1; width: 100%; min-height: 34px; background: var(--select-background); }
+.select-search-empty { padding: 8px 9px; color: var(--muted); }
+.select-options { display: grid; grid-template-columns: 1fr; gap: 3px; }
 .select-option { width: 100%; min-height: 32px; padding: 0 9px; border: 0; border-radius: 7px; color: var(--select-foreground); background: var(--select-background); font-size: 12px; text-align: left; white-space: nowrap; }
 .select-option:hover, .select-option.selected { color: var(--select-selected-foreground); background: var(--select-selected-background); }
 .select-option:disabled { color: var(--muted); background: var(--select-background); cursor: not-allowed; }
@@ -1060,8 +1056,6 @@ body.vscode-high-contrast { color-scheme: dark; }
 .container-type-badge { border-style: dashed; color: var(--primary-hover); }
 .container-type-badge[data-container-type="autotest_cloud"] { color: var(--warning); }
 .default-type-tag { color: var(--primary-hover); }
-.image-toolbar, .tab-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
-.toolbar-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .form-row.type-image-row .select-wrap { width: 100%; }
 .volume-panel { min-width: 0; }
 .volume-status-card { display: grid; place-items: center; min-height: 300px; padding: 42px 24px; border: 1px solid var(--outline); border-radius: 14px; background: var(--surface-raised); text-align: center; }

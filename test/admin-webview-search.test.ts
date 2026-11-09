@@ -171,7 +171,7 @@ function createSearchDocument(): { document: FakeDocument; searchInput: FakeElem
     const sortSelect = new FakeElement('select', { 'data-sort-select': '', value: 'name' });
     sortSelect.options.push({ value: 'name' }, { value: 'status' });
     const statusSelect = new FakeElement('select', { 'data-status-filter': '', value: 'all' });
-    statusSelect.options.push({ value: 'all' }, { value: 'pushed' }, { value: 'not_pushed' });
+    statusSelect.options.push({ value: 'all' }, { value: 'default' });
     const pageSize = new FakeElement('select', { 'data-page-size': '', value: '1' });
     pageSize.options.push({ value: '1' }, { value: '20' });
     const sortToggle = new FakeElement('button', { 'data-sort-toggle': '' });
@@ -201,17 +201,17 @@ function createSearchDocument(): { document: FakeDocument; searchInput: FakeElem
     const rows = [
         new FakeElement('article', {
             class: 'searchable',
-            'data-search-text': 'alpha registry pushed',
-            'data-filter-status': 'pushed',
+            'data-search-text': 'alpha registry default',
+            'data-filter-status': 'default',
             'data-sort-name': 'alpha',
-            'data-sort-status': 'pushed',
+            'data-sort-status': 'default',
         }),
         new FakeElement('article', {
             class: 'searchable',
-            'data-search-text': 'beta registry not_pushed',
-            'data-filter-status': 'not_pushed',
+            'data-search-text': 'beta registry',
+            'data-filter-status': '',
             'data-sort-name': 'beta',
-            'data-sort-status': 'not_pushed',
+            'data-sort-status': '',
         }),
     ];
     rows.forEach(row => items.appendChild(row));

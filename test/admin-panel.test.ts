@@ -1031,6 +1031,73 @@ describe('AdminPanel', () => {
         expect(imageWithUsageHtml).toContain('2 个容器使用中');
     });
 
+    it('removes image push-state gates while keeping default fallbacks and exposing all images in the searchable selector', () => {
+        const unverifiedImage = {
+            id: 'image-unverified',
+            full_name: 'registry.test:5000/team/app:v1',
+            registry: 'registry.test:5000',
+            namespace: 'team',
+            name: 'app',
+            version: 'v1',
+            size: 1024,
+            status: 'not_pushed',
+        };
+        const fallbackDefault = {
+            id: 'image-default',
+            full_name: 'registry.test:5000/team/default:v2',
+            registry: 'registry.test:5000',
+            namespace: 'team',
+            name: 'default',
+            version: 'v2',
+            size: 2048,
+            status: 'default',
+        };
+        const baseState: AdminPanelState = {
+            status: 'ready',
+            activeTab: 'images',
+            search: '',
+            images: [unverifiedImage, fallbackDefault],
+            defaultImages: createDefaultImages(null, null),
+            containers: [],
+            orphanContainerIds: [],
+            whitelistUsers: [],
+            adminUsers: [],
+        };
+
+        const imageHtml = renderAdminPage(baseState, 'nonce', 'vscode-resource://test');
+        const unverifiedStart = imageHtml.indexOf(`data-patch-key="image:${unverifiedImage.full_name}"`);
+        const unverifiedRow = imageHtml.slice(unverifiedStart, imageHtml.indexOf('</article>', unverifiedStart));
+        const pushButton = unverifiedRow.match(/<button[^>]*data-action="pushImage"[^>]*>/)?.[0] ?? '';
+        const setDefaultButton = unverifiedRow.match(/<button[^>]*data-action="setDefaultImage"[^>]*>/)?.[0] ?? '';
+
+        expect(imageHtml).not.toContain('检查全部镜像推送状态');
+        expect(imageHtml).not.toContain('已推送');
+        expect(imageHtml).not.toContain('未推送');
+        expect(imageHtml).not.toContain('data-select-value="pushed"');
+        expect(imageHtml).not.toContain('data-select-value="not_pushed"');
+        expect(unverifiedRow).toContain('data-filter-status=""');
+        expect(unverifiedRow).toContain('data-sort-status=""');
+        expect(pushButton).not.toContain('disabled');
+        expect(setDefaultButton).not.toContain('disabled');
+
+        const containersHtml = renderAdminPage({ ...baseState, activeTab: 'containers' }, 'nonce', 'vscode-resource://test');
+        expect(containersHtml).toContain('data-select-search type="search"');
+        expect(containersHtml).toContain('data-select-search-empty hidden>没有匹配的镜像');
+        expect(containersHtml).toContain(`data-select-value="${unverifiedImage.full_name}"`);
+        expect(containersHtml).toContain(`data-select-value="${fallbackDefault.full_name}"`);
+        expect(containersHtml).toContain(`<option value="${fallbackDefault.full_name}" selected>${fallbackDefault.full_name} (默认镜像)</option>`);
+        expect(containersHtml).toContain(`data-select-search-text="${fallbackDefault.full_name} ${fallbackDefault.full_name} (默认镜像)"`);
+
+        const missingDefaultHtml = renderAdminPage({
+            ...baseState,
+            activeTab: 'containers',
+            images: [],
+            defaultImages: createDefaultImages('registry.test:5000/team/missing:v1', null),
+        }, 'nonce', 'vscode-resource://test');
+        expect(missingDefaultHtml).toContain('<option value="registry.test:5000/team/missing:v1" selected>默认镜像 (镜像不存在)</option>');
+        expect(missingDefaultHtml).toContain('data-select-search-text="registry.test:5000/team/missing:v1 默认镜像 (镜像不存在)"');
+    });
+
     it('defaults administrator container creation to no Gitee information', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -1057,7 +1124,7 @@ describe('AdminPanel', () => {
         });
     });
 
-    it('passes source service IDs to the backend and displays its error unchanged', async () => {
+    it('passes source service IDs and images to the backend and displays its error unchanged', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
         const adminApi = createAdminApi();
@@ -1084,6 +1151,7 @@ describe('AdminPanel', () => {
             gitee_repository: 'stale-repository',
             gitee_url: 'https://stale.example',
             gitee_branch: 'stale-branch',
+            image: 'registry.test:5000/testagent/unverified:v1',
             authorize_general_account: true,
         });
 
@@ -1092,6 +1160,7 @@ describe('AdminPanel', () => {
             type: 'testagent_cloud',
             skip_git: false,
             from: 'not-a-valid-service-id',
+            image: 'registry.test:5000/testagent/unverified:v1',
         });
         expect(initializationPoller.initialize).not.toHaveBeenCalled();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('来源服务不存在'), '复制');
@@ -1358,10 +1427,12 @@ describe('AdminPanel', () => {
         await send(panel, { command: 'getContainerLog', serviceId: 'service-1' });
         await send(panel, { command: 'deleteOrphanContainers', orphanContainerIds: 'orphan-container-1,orphan-container-2' });
         await send(panel, { command: 'uploadImage', registry: 'registry.test:5000', namespace: 'testagent', autoPush: false });
+        await send(panel, { command: 'uploadImage', registry: 'registry.test:5000', namespace: 'testagent', autoPush: true });
         await send(panel, { command: 'pushImage', fullName: 'registry.test:5000/testagent/app:v1' });
         await send(panel, { command: 'setDefaultImage', fullName: 'registry.test:5000/testagent/app:v1', type: 'testagent_cloud' });
         await send(panel, { command: 'unsetDefaultImage' });
         await send(panel, { command: 'deleteImage', fullName: 'registry.test:5000/testagent/app:v1', alsoRegistry: false });
+        await send(panel, { command: 'deleteImage', fullName: 'registry.test:5000/testagent/registry-sync:v2', alsoRegistry: true });
         await send(panel, {
             command: 'createContainer',
             user_id: 'user-2',
@@ -1400,6 +1471,9 @@ describe('AdminPanel', () => {
             namespace: 'testagent',
             auto_push: false,
         }));
+        expect(adminApi.uploadImage).toHaveBeenCalledWith(expect.objectContaining({
+            auto_push: true,
+        }));
         expect(adminApi.getContainerLog).toHaveBeenCalledWith('service-1');
         expect(adminApi.deleteOrphanContainers).toHaveBeenCalledWith({ container_ids: ['orphan-container-1', 'orphan-container-2'] });
         expect(adminApi.pushImage).toHaveBeenCalledWith({ full_name: 'registry.test:5000/testagent/app:v1' });
@@ -1411,6 +1485,10 @@ describe('AdminPanel', () => {
         expect(adminApi.deleteImage).toHaveBeenCalledWith({
             full_name: 'registry.test:5000/testagent/app:v1',
             also_registry: false,
+        });
+        expect(adminApi.deleteImage).toHaveBeenCalledWith({
+            full_name: 'registry.test:5000/testagent/registry-sync:v2',
+            also_registry: true,
         });
         expect(adminApi.createContainer).toHaveBeenCalledWith({
             user_id: 'user-2',
@@ -1445,7 +1523,7 @@ describe('AdminPanel', () => {
         expect(adminApi.deleteWhitelistUser).toHaveBeenCalledWith({ user_id: 'user-3' });
         expect(adminApi.addAdminUser).toHaveBeenCalledWith({ user_id: 'admin-2' });
         expect(adminApi.deleteAdminUser).toHaveBeenCalledWith({ user_id: 'admin-2' });
-        expect(userApi.checkAdmin).toHaveBeenCalledTimes(38);
+        expect(userApi.checkAdmin).toHaveBeenCalledTimes(42);
     });
 
     it('connects an admin container through the shared SSH config and sidebar connection handler', async () => {
@@ -1898,81 +1976,6 @@ describe('AdminPanel', () => {
         }));
     });
 
-    it('manually checks image push states without reloading the image list', async () => {
-        const panel = createWebviewPanel();
-        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
-        const adminApi = createAdminApi();
-        adminApi.checkImagePushStates = vi.fn(async () => ({
-            images: [{
-                id: 'image-1',
-                full_name: 'registry.test:5000/testagent/app:v1',
-                registry: 'registry.test:5000',
-                namespace: 'testagent',
-                name: 'app',
-                version: 'v1',
-                created_at: '2026-09-04T00:00:00Z',
-                size: 1024,
-                status: 'not_pushed',
-            }],
-        }));
-        adminApi.getDefaultImage = vi.fn(async (type?: string) => ({ type: type ?? 'testagent_cloud', full_name: null }));
-        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
-
-        await adminPanel.open();
-        const listCallsBefore = vi.mocked(adminApi.listImages).mock.calls.length;
-        await send(panel, { command: 'checkImagePushStates' });
-
-        expect(adminApi.checkImagePushStates).toHaveBeenCalledOnce();
-        expect(vi.mocked(adminApi.listImages).mock.calls.length).toBe(listCallsBefore);
-        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
-            command: 'adminUpdate',
-            html: expect.stringContaining('未推送'),
-        }));
-    });
-
-    it('keeps checked image push states across automatic refreshes', async () => {
-        vi.useFakeTimers();
-        const panel = createWebviewPanel();
-        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
-        const adminApi = createAdminApi();
-        const image = {
-            id: 'image-1',
-            full_name: 'registry.test:5000/testagent/app:v1',
-            registry: 'registry.test:5000',
-            namespace: 'testagent',
-            name: 'app',
-            version: 'v1',
-            created_at: '2026-09-04T00:00:00Z',
-            size: 1024,
-        };
-        adminApi.listImages = vi.fn(async () => ({ images: [{ ...image, status: 'not_pushed' }] }));
-        adminApi.checkImagePushStates = vi.fn(async () => ({ images: [{ ...image, status: 'pushed' }] }));
-        const adminPanel = createPanel({
-            getSettings: () => ({
-                backendApiUrl: 'https://api.example.test',
-                userName: 'root',
-                skipKnownHostsCheck: true,
-                historyLimit: 5,
-                statusSyncInterval: 1,
-                debug: false,
-                disableClientValidation: true,
-            }),
-            adminApiFactory: vi.fn(() => adminApi),
-        });
-
-        await adminPanel.open();
-        panel.fireMessage({ command: 'checkImagePushStates' });
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-        await vi.advanceTimersByTimeAsync(1000);
-
-        expect(panel.webview.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({
-            command: 'adminUpdate',
-            html: expect.stringContaining('已推送'),
-        }));
-    });
-
     it('renders container type badges and the type filter on the containers tab', () => {
         const html = renderAdminPage({
             status: 'ready',
@@ -2056,7 +2059,6 @@ function createAdminApi(): AdminRestApi {
             type: type ?? 'testagent_cloud',
             full_name: 'registry.test:5000/testagent/app:v1',
         })),
-        checkImagePushStates: vi.fn(async () => ({ images: [] })),
         setDefaultImage: vi.fn(async () => undefined),
         unsetDefaultImage: vi.fn(async () => undefined),
             createContainer: vi.fn(async () => ({ ...sampleContainer(), service_id: 'service-1' })),

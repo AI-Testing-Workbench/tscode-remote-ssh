@@ -4,6 +4,7 @@ import { ADMIN_WEBVIEW_SCRIPT } from '../src/adminWebview/script';
 
 interface FakeOption {
     value: string;
+    textContent?: string;
 }
 
 interface MessageEvent {
@@ -63,6 +64,11 @@ class FakeElement {
             this.options.push({ value: child.value });
         }
         return child;
+    }
+
+    public dispatchEvent(): boolean {
+        dispatchChange(this);
+        return true;
     }
 
     public getAttribute(name: string): string | null {
@@ -204,6 +210,17 @@ class FakeDocument extends FakeElement {
     }
 }
 
+function dispatchChange(element: FakeElement): void {
+    let parent = element.parent;
+    while (parent) {
+        if (parent instanceof FakeDocument) {
+            parent.dispatch('change', element);
+            return;
+        }
+        parent = parent.parent;
+    }
+}
+
 interface ScriptRuntime {
     getState: () => Record<string, unknown>;
     messages: unknown[];
@@ -220,6 +237,7 @@ function runScript(document: FakeDocument, initialState: Record<string, unknown>
             setState: (next: Record<string, unknown>) => { state = next; },
             postMessage: (message: unknown) => { messages.push(message); },
         }),
+        Event,
         document,
         window: {
             addEventListener: (type: string, listener: WindowEventListener) => {
@@ -256,8 +274,13 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     memory: FakeElement;
     autoPush: FakeElement;
     image: FakeElement;
+    imageWrapper: FakeElement;
     imageLabel: FakeElement;
     imageTrigger: FakeElement;
+    imageSearchInput: FakeElement;
+    imageSearchEmpty: FakeElement;
+    imageOptions: FakeElement[];
+    outside: FakeElement;
     submitLabel: FakeElement;
     whitelistUserId: FakeElement;
 } {
@@ -288,11 +311,22 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     const imageLabel = new FakeElement('span', { 'data-select-label': '' });
     const imageTrigger = new FakeElement('button', { 'data-select-trigger': '' });
     const submitLabel = new FakeElement('span', { 'data-create-submit-label': '' });
-    const image = new FakeElement('select', { 'data-field': 'image', 'data-persist-key': 'create.image', value: 'image-1' });
+    const image = new FakeElement('select', { class: 'native-select', 'data-field': 'image', 'data-persist-key': 'create.image', value: 'image-1' });
     const imageMenu = new FakeElement('span', { 'data-select-menu': '' });
-    image.options.push(...imageValues.map(value => ({ value })));
+    const imageSearchInput = new FakeElement('input', { 'data-select-search': '', type: 'search' });
+    const imageSearchEmpty = new FakeElement('span', { 'data-select-search-empty': '' });
+    imageSearchEmpty.hidden = true;
+    const imageOptions = imageValues.map(value => new FakeElement('button', {
+        'data-select-option': '',
+        'data-select-value': value,
+        'data-select-search-text': value,
+    }));
+    imageOptions.forEach(option => { option.textContent = option.getAttribute('data-select-value') ?? ''; });
+    image.options.push(...imageValues.map(value => ({ value, textContent: value })));
     const whitelistForm = new FakeElement('div', { 'data-form': 'whitelistUser' });
     const whitelistUserId = new FakeElement('input', { 'data-field': 'user_id', 'data-persist-key': 'whitelist.user_id', type: 'text' });
+    const outside = new FakeElement('button');
+    imageOptions[1]?.setAttribute('data-select-search-text', `${imageValues[1]} (默认镜像)`);
 
     fromPanel.appendChild(from);
     replacePanel.appendChild(replace);
@@ -315,7 +349,9 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     form.appendChild(cpu);
     form.appendChild(memory);
     form.appendChild(autoPush);
-    imageValues.forEach(value => imageMenu.appendChild(new FakeElement('button', { 'data-select-option': '', 'data-select-value': value })));
+    imageMenu.appendChild(imageSearchInput);
+    imageMenu.appendChild(imageSearchEmpty);
+    imageOptions.forEach(option => imageMenu.appendChild(option));
     imageWrapper.appendChild(imageLabel);
     imageWrapper.appendChild(imageTrigger);
     imageWrapper.appendChild(image);
@@ -325,6 +361,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     whitelistForm.appendChild(whitelistUserId);
     document.appendChild(form);
     document.appendChild(whitelistForm);
+    document.appendChild(outside);
     return {
         document,
         userId,
@@ -345,8 +382,13 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
         memory,
         autoPush,
         image,
+        imageWrapper,
         imageLabel,
         imageTrigger,
+        imageSearchInput,
+        imageSearchEmpty,
+        imageOptions,
+        outside,
         submitLabel,
         whitelistUserId,
     };
@@ -546,6 +588,59 @@ describe('Admin Webview state', () => {
             { command: 'setSelectOpen', open: true },
             { command: 'setSelectOpen', open: false },
         ]);
+    });
+
+    it('filters image choices locally, keeps the menu open for search, and clears the query after selection', () => {
+        const form = createFormDocument(['registry.test/team/alpha:v1', 'registry.test/team/beta:v2']);
+        const runtime = runScript(form.document, {});
+
+        form.document.dispatch('click', form.imageTrigger);
+        expect(form.imageTrigger.getAttribute('aria-expanded')).toBe('true');
+        expect(form.document.activeElement).toBe(form.imageSearchInput);
+
+        form.imageSearchInput.value = ' ALPHA ';
+        form.document.dispatch('input', form.imageSearchInput);
+        expect(form.imageOptions.map(option => option.hidden)).toEqual([false, true]);
+        expect(form.imageSearchEmpty.hidden).toBe(true);
+
+        form.document.dispatch('click', form.imageSearchInput);
+        expect(form.imageTrigger.getAttribute('aria-expanded')).toBe('true');
+
+        form.imageSearchInput.value = '默认镜像';
+        form.document.dispatch('input', form.imageSearchInput);
+        expect(form.imageOptions.map(option => option.hidden)).toEqual([true, false]);
+
+        form.imageSearchInput.value = 'missing-image';
+        form.document.dispatch('input', form.imageSearchInput);
+        expect(form.imageOptions.every(option => option.hidden)).toBe(true);
+        expect(form.imageSearchEmpty.hidden).toBe(false);
+
+        form.imageSearchInput.value = 'beta';
+        form.document.dispatch('input', form.imageSearchInput);
+        form.document.dispatch('click', form.imageOptions[1]);
+
+        expect(form.image.value).toBe('registry.test/team/beta:v2');
+        expect(form.imageLabel.textContent).toBe('registry.test/team/beta:v2');
+        expect(form.imageSearchInput.value).toBe('');
+        expect(form.imageOptions.every(option => !option.hidden)).toBe(true);
+        expect(form.imageSearchEmpty.hidden).toBe(true);
+        expect(form.imageTrigger.getAttribute('aria-expanded')).toBe('false');
+        form.document.dispatch('click', form.imageTrigger);
+        form.imageSearchInput.value = 'alpha';
+        form.document.dispatch('input', form.imageSearchInput);
+        form.document.dispatch('click', form.outside);
+        expect(form.imageTrigger.getAttribute('aria-expanded')).toBe('false');
+        expect(form.imageSearchInput.value).toBe('');
+        expect(form.imageOptions.every(option => !option.hidden)).toBe(true);
+        expect(runtime.messages).toEqual([
+            { command: 'ready' },
+            { command: 'setSelectOpen', open: true },
+            { command: 'setSelectOpen', open: false },
+            { command: 'setSelectOpen', open: true },
+            { command: 'setSelectOpen', open: false },
+        ]);
+        expect(runtime.getState().fields).toMatchObject({ 'create.image': 'registry.test/team/beta:v2' });
+        expect(JSON.stringify(runtime.getState())).not.toContain('missing-image');
     });
 
     it('attaches request IDs to actions and ignores stale completions', () => {

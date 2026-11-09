@@ -170,7 +170,6 @@ export interface AdminRestApi {
     uploadImage(input: UploadImageRequest): Promise<void>;
     pushImage(request: ImageReferenceRequest): Promise<void>;
     listImages(): Promise<ImageListResponse>;
-    checkImagePushStates(): Promise<ImageListResponse>;
     deleteImage(request: ImageDeleteRequest): Promise<void>;
     getDefaultImage(type?: ContainerTypeValue): Promise<DefaultImageResponse>;
     setDefaultImage(request: SetDefaultImageRequest): Promise<void>;
@@ -402,7 +401,6 @@ export class RestClient {
             uploadImage: input => this.uploadImage(input),
             pushImage: request => this.requestNoContent('POST', '/admin/images/push', { jsonBody: request }),
             listImages: () => this.requestJson<ImageListResponse>('GET', '/admin/images'),
-            checkImagePushStates: () => this.requestJson<ImageListResponse>('POST', '/admin/images/check'),
             deleteImage: request => this.requestNoContent('POST', '/admin/images/delete', { jsonBody: request }),
             getDefaultImage: type => this.requestJson<DefaultImageResponse>('GET', this.defaultImagePath(type)),
             setDefaultImage: request => this.requestNoContent('POST', '/admin/images/default', { jsonBody: request }),

@@ -663,12 +663,35 @@ const syncCustomSelects = () => {
     document.querySelectorAll('[data-custom-select] select').forEach(syncCustomSelect);
 };
 
+const filterSelectOptions = wrapper => {
+    if (!wrapper) return;
+    const input = wrapper.querySelector('[data-select-search]');
+    const query = input ? input.value.trim().toLowerCase() : '';
+    let matchCount = 0;
+    wrapper.querySelectorAll('[data-select-option]').forEach(option => {
+        const text = option.getAttribute('data-select-search-text') || option.textContent || '';
+        const matches = !query || text.toLowerCase().includes(query);
+        option.hidden = !matches;
+        if (matches) matchCount += 1;
+    });
+    const empty = wrapper.querySelector('[data-select-search-empty]');
+    if (empty) empty.hidden = matchCount > 0;
+};
+
+const resetSelectSearch = wrapper => {
+    const input = wrapper?.querySelector('[data-select-search]');
+    if (!input) return;
+    input.value = '';
+    filterSelectOptions(wrapper);
+};
+
 const closeCustomSelects = except => {
     let closed = false;
     document.querySelectorAll('[data-custom-select].open').forEach(wrapper => {
         if (wrapper === except) return;
         wrapper.classList.remove('open');
         wrapper.querySelector('[data-select-trigger]')?.setAttribute('aria-expanded', 'false');
+        resetSelectSearch(wrapper);
         closed = true;
     });
     if (closed) post('setSelectOpen', { open: false });
@@ -758,15 +781,18 @@ document.addEventListener('click', event => {
         closeCustomSelects();
         return;
     }
+    if (target && target.closest && target.closest('[data-select-search]')) return;
     const trigger = target && target.closest ? target.closest('[data-select-trigger]') : null;
     if (trigger) {
         const wrapper = trigger.closest('[data-custom-select]');
         const open = !wrapper?.classList.contains('open');
         closeCustomSelects(open ? wrapper : null);
         if (wrapper && open) {
+            resetSelectSearch(wrapper);
             wrapper.classList.add('open');
             trigger.setAttribute('aria-expanded', 'true');
             post('setSelectOpen', { open: true });
+            wrapper.querySelector('[data-select-search]')?.focus();
         }
         return;
     }
@@ -822,6 +848,11 @@ document.addEventListener('click', event => {
 document.addEventListener('input', event => {
     const target = event.target;
     if (target && target.matches && target.matches('[data-field]')) saveFormState(target);
+    const selectSearch = target && target.matches && target.matches('[data-select-search]') ? target : null;
+    if (selectSearch) {
+        filterSelectOptions(selectSearch.closest('[data-custom-select]'));
+        return;
+    }
     const input = target && target.matches && target.matches('[data-search-input]') ? target : null;
     if (input) {
         const { controls } = getListContext();

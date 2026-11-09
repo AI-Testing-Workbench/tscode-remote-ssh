@@ -86,7 +86,6 @@ describe('RestClient', () => {
         await client.admin.addAdminUser({ user_id: 'user-1' });
         await client.admin.listAdminUsers();
         await client.admin.deleteAdminUser({ user_id: 'user-1' });
-        await client.admin.checkImagePushStates();
 
         expect(requests.map(request => `${request.method} ${request.url.pathname}`)).toEqual([
             'POST /v1/user/containers',
@@ -126,7 +125,6 @@ describe('RestClient', () => {
             'POST /v1/admin/admin-users',
             'GET /v1/admin/admin-users',
             'POST /v1/admin/admin-users/delete',
-            'POST /v1/admin/images/check',
         ]);
 
         expect(requests[1].url.search).toBe('?user_id=user-1&container_type=autotest_cloud&gitee_user=alice&gitee_repository=repo&gitee_branch=main');
@@ -275,15 +273,12 @@ describe('RestClient', () => {
         });
     });
 
-    it('explicitly serializes false when automatic pushing is disabled', () => {
-        const multipart = buildMultipartBody({
-            file: Buffer.from('tar'),
-            filename: 'image.tar',
-            auto_push: false,
-        });
-        const body = Buffer.from(multipart.body).toString('utf8');
+    it('serializes both enabled and disabled automatic image pushing', () => {
+        const disabled = buildMultipartBody({ file: Buffer.from('tar'), filename: 'image.tar', auto_push: false });
+        const enabled = buildMultipartBody({ file: Buffer.from('tar'), filename: 'image.tar', auto_push: true });
 
-        expect(body).toMatch(/name="auto_push"\r\n\r\nfalse\r\n/);
+        expect(Buffer.from(disabled.body).toString('utf8')).toMatch(/name="auto_push"\r\n\r\nfalse\r\n/);
+        expect(Buffer.from(enabled.body).toString('utf8')).toMatch(/name="auto_push"\r\n\r\ntrue\r\n/);
     });
 
     it('streams path-based image uploads instead of buffering the multipart body', async () => {
