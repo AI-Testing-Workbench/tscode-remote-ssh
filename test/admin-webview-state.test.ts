@@ -282,6 +282,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2', 'imag
     giteeBranch: FakeElement;
     authorize: FakeElement;
     skipGit: FakeElement;
+    disableTestagentAutoStart: FakeElement;
     cpu: FakeElement;
     memory: FakeElement;
     autoPush: FakeElement;
@@ -324,6 +325,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2', 'imag
     const giteeBranch = new FakeElement('input', { 'data-field': 'gitee_branch', 'data-gitee-dependent': '', 'data-persist-key': 'create.gitee_branch', type: 'text', disabled: '' });
     const authorize = new FakeElement('input', { 'data-field': 'authorize_general_account', 'data-gitee-dependent': '', 'data-persist-key': 'create.authorize_general_account', type: 'checkbox', disabled: '' });
     const skipGit = new FakeElement('input', { 'data-field': 'skip_git', 'data-persist-key': 'create.skip_git', type: 'checkbox' });
+    const disableTestagentAutoStart = new FakeElement('input', { 'data-field': 'disable_testagent_auto_start', 'data-persist-key': 'create.disable_testagent_auto_start', type: 'checkbox' });
     const cpu = new FakeElement('input', { 'data-field': 'cpu', 'data-persist-key': 'create.cpu', 'data-default-value': cpuDefault, type: 'number', value: cpuDefault });
     const memory = new FakeElement('input', { 'data-field': 'memory', 'data-persist-key': 'create.memory', 'data-default-value': memoryDefault, type: 'number', value: memoryDefault });
     const autoPush = new FakeElement('input', { 'data-field': 'autoPush', 'data-persist-key': 'upload.autoPush', type: 'checkbox', checked: '' });
@@ -420,6 +422,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2', 'imag
     form.appendChild(containerType);
     form.appendChild(taskFieldsRow);
     form.appendChild(skipGit);
+    form.appendChild(disableTestagentAutoStart);
     form.appendChild(cpu);
     form.appendChild(memory);
     form.appendChild(autoPush);
@@ -454,6 +457,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2', 'imag
         giteeBranch,
         authorize,
         skipGit,
+        disableTestagentAutoStart,
         cpu,
         memory,
         autoPush,
@@ -594,12 +598,15 @@ describe('Admin Webview state', () => {
         form.document.dispatch('input', form.from);
         form.skipGit.checked = true;
         form.document.dispatch('change', form.skipGit);
+        form.disableTestagentAutoStart.checked = true;
+        form.document.dispatch('change', form.disableTestagentAutoStart);
 
         const restored = createFormDocument();
         runScript(restored.document, runtime.getState());
         expect(restored.giteeModeFrom.checked).toBe(true);
         expect(restored.from.value).toBe('source-service-1');
         expect(restored.skipGit.checked).toBe(true);
+        expect(restored.disableTestagentAutoStart.checked).toBe(true);
         expect(restored.giteeBranch.disabled).toBe(true);
         expect(restored.authorize.disabled).toBe(true);
 
@@ -796,6 +803,7 @@ describe('Admin Webview state', () => {
 
         restored.containerType.value = 'testagent_cloud';
         restored.document.dispatch('change', restored.containerType);
+        restored.disableTestagentAutoStart.checked = true;
         expect(restored.autoTestId.disabled).toBe(true);
         expect(restored.sourceBusinessId.disabled).toBe(true);
         expect(restored.taskType.disabled).toBe(true);
@@ -807,6 +815,7 @@ describe('Admin Webview state', () => {
             type: 'testagent_cloud',
             image: 'image-1',
             imageOverride: false,
+            disable_testagent_auto_start: true,
         });
         expect(createMessage).not.toHaveProperty('auto_test_id');
         expect(createMessage).not.toHaveProperty('source_business_id');

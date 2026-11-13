@@ -370,7 +370,7 @@ function renderContainersTab(
                     <label>CPU (核)<input data-field="cpu" data-persist-key="create.cpu" data-default-value="${escapeAttribute(limit?.cpu ?? '')}" type="number" step="1" value="${escapeAttribute(limit?.cpu ?? '')}"></label>
                     <label>内存 (Gi)<input data-field="memory" data-persist-key="create.memory" data-default-value="${escapeAttribute(limit?.memory ?? '')}" type="number" min="1" step="1" value="${escapeAttribute(limit?.memory ?? '')}"></label>
                 </div>
-                <div class="form-actions"><label class="check-button form-check skip-git-check" title="跳过容器侧 Git 拉取和验证"><input data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能</label><button class="primary-button" type="button" data-action="createContainer"><span data-create-submit-label>创建容器</span></button></div>
+                <div class="form-actions"><label class="check-button form-check skip-git-check" title="跳过容器侧 Git 拉取和验证"><input data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能</label><label class="check-button form-check" title="禁止容器自动启动 TestAgent 进程"><input data-field="disable_testagent_auto_start" data-persist-key="create.disable_testagent_auto_start" type="checkbox">强制禁用自动启动 TestAgent</label><button class="primary-button" type="button" data-action="createContainer"><span data-create-submit-label>创建容器</span></button></div>
             </div>
         </details>
         ${renderSearchBox('搜索容器...', search)}

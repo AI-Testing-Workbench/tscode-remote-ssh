@@ -853,7 +853,10 @@ describe('AdminPanel', () => {
         expect(html).toContain('background: var(--surface-soft); color: var(--muted); cursor: not-allowed; opacity: .68;');
         expect(html).not.toContain('.branch-row.gitee-options-disabled .form-check { border-style: dashed');
         expect(html).toContain('data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能');
+        expect(html).toContain('data-field="disable_testagent_auto_start" data-persist-key="create.disable_testagent_auto_start" type="checkbox">强制禁用自动启动 TestAgent');
         expect(html.indexOf('data-field="skip_git"')).toBeLessThan(html.indexOf('data-action="createContainer"'));
+        expect(html.indexOf('data-field="skip_git"')).toBeLessThan(html.indexOf('data-field="disable_testagent_auto_start"'));
+        expect(html.indexOf('data-field="disable_testagent_auto_start"')).toBeLessThan(html.indexOf('data-action="createContainer"'));
         expect(html).toContain('data-default-image-type="testagent_cloud"');
         expect(html).toContain('data-default-image-type="evaluation_cloud"');
         expect(html).toContain('data-default-image-type="autotest_cloud"');
@@ -901,6 +904,7 @@ describe('AdminPanel', () => {
             'create.cpu',
             'create.memory',
             'create.skip_git',
+            'create.disable_testagent_auto_start',
         ]);
 
         const noDefaultHtml = renderAdminPage({ ...state, defaultImages: createDefaultImages(null, null) }, 'nonce', 'vscode-resource://test');
@@ -1221,6 +1225,33 @@ describe('AdminPanel', () => {
             type: 'testagent_cloud',
             skip_git: false,
         });
+    });
+
+    it('disables TestAgent auto-start independently from Git initialization', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({
+            adminApiFactory: vi.fn(() => adminApi),
+            initializationPoller,
+        });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            giteeMode: 'none',
+            disable_testagent_auto_start: true,
+        });
+
+        expect(adminApi.createContainer).toHaveBeenCalledWith({
+            user_id: 'user-5',
+            type: 'testagent_cloud',
+            skip_git: false,
+            enable_testagent_auto_start: false,
+        });
+        expect(initializationPoller.initialize).toHaveBeenCalledOnce();
     });
 
     it('forwards automation metadata, omits blank inherited fields, and preserves explicit image overrides', async () => {

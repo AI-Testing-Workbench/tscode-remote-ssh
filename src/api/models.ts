@@ -26,6 +26,7 @@ export interface UserCreateContainerRequest {
     type?: ContainerTypeValue;
     from?: string;
     skip_git?: boolean;
+    enable_testagent_auto_start?: boolean;
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;
@@ -126,6 +127,7 @@ export interface AdminCreateContainerRequest {
     from?: string;
     replace?: string;
     skip_git?: boolean;
+    enable_testagent_auto_start?: boolean;
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;

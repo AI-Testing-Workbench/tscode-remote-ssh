@@ -1488,6 +1488,9 @@ function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateCont
         type,
         skip_git: asBoolean(message.skip_git, false),
     };
+    if (asBoolean(message.disable_testagent_auto_start, false)) {
+        request.enable_testagent_auto_start = false;
+    }
     const image = optionalText(message.image);
     const hasSeparateGiteeFields = optionalText(message.gitee_user) !== undefined
         || optionalText(message.gitee_repository) !== undefined
