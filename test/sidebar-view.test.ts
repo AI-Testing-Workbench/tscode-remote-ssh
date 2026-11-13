@@ -1270,7 +1270,7 @@ describe('SidebarViewProvider', () => {
             },
             {
                 label: '浏览器执行镜像',
-                description: '使用默认镜像并启用浏览器执行环境',
+                description: '在默认镜像基础上内置浏览器',
                 type: 'testagent_cloud_chrome',
             },
         ], expect.objectContaining({

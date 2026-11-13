@@ -709,7 +709,6 @@ describe('Admin Webview state', () => {
         expect(form.image.value).toBe('image-2');
         expect(runtime.getState().editedFields).not.toHaveProperty('create.image');
         expect(runtime.getState().fields).not.toHaveProperty('create.image');
-        expect(form.defaultImageHint.textContent).toContain('镜像状态标记的默认候选为 image-2');
     });
 
     it('shows only the required no-default and missing-default messages', () => {

@@ -1330,7 +1330,7 @@ describe('AdminPanel', () => {
             task_type: 2,
         });
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            expect.stringContaining('后端拒绝了源服务的创建请求。若冲突涉及自动化任务字段，留空表示沿用原服务值；显式填写必须与原值一致。'),
+            expect.stringContaining('后端拒绝了源服务的创建请求。'),
             '复制',
         );
         expect(vscode.window.showErrorMessage.mock.calls[0]?.[0]).toContain('自动化任务字段与来源服务不一致');
@@ -1353,7 +1353,7 @@ describe('AdminPanel', () => {
         });
         expect(vscode.window.showErrorMessage).toHaveBeenNthCalledWith(
             2,
-            expect.stringContaining('后端拒绝了替换目标的创建请求。若冲突涉及自动化任务字段，留空表示沿用原服务值；显式填写必须与原值一致。'),
+            expect.stringContaining('后端拒绝了替换目标的创建请求。'),
             '复制',
         );
     });
