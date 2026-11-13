@@ -160,6 +160,26 @@ describe('RestClient', () => {
         });
     });
 
+    it('accepts all four container types for public queries and the three logical default groups', async () => {
+        const { requests, transport } = createTransport(jsonResponse(200, {}));
+        const client = new RestClient('https://api.example.test', { transport, operatorUserId: 'admin-1' });
+        const types = ['testagent_cloud', 'testagent_cloud_chrome', 'evaluation_cloud', 'autotest_cloud'] as const;
+
+        for (const type of types) {
+            await client.user.getServiceIds({ user_id: 'user-1', container_type: type });
+        }
+        for (const type of ['testagent_cloud', 'evaluation_cloud', 'autotest_cloud'] as const) {
+            await client.admin.getDefaultImage(type);
+        }
+
+        expect(requests.slice(0, 4).map(request => request.url.search)).toEqual(types.map(type => `?user_id=user-1&container_type=${type}`));
+        expect(requests.slice(4).map(request => request.url.search)).toEqual([
+            '?container_type=testagent_cloud',
+            '?container_type=evaluation_cloud',
+            '?container_type=autotest_cloud',
+        ]);
+    });
+
     it('requests the volume status contract with the bound administrator header', async () => {
         const { requests, transport } = createTransport(jsonResponse(200, {
             enabled: true,
@@ -213,8 +233,23 @@ describe('RestClient', () => {
 
     it('preserves service_id from user and administrator creation responses', async () => {
         const responses = [
-            jsonResponse(200, { service_id: 'service-user-1', status: 'pending', api_token: '' }),
-            jsonResponse(200, { container_id: 'physical-container-2', service_id: 'service-admin-2', status: 'pending', api_token: 'opaque-token' }),
+            jsonResponse(200, {
+                service_id: 'service-user-1',
+                status: 'pending',
+                auto_test_id: 'auto-17',
+                source_business_id: 'business-9',
+                task_type: 0,
+                api_token: '',
+            }),
+            jsonResponse(200, {
+                container_id: 'physical-container-2',
+                service_id: 'service-admin-2',
+                status: 'pending',
+                auto_test_id: 'auto-17',
+                source_business_id: 'business-9',
+                task_type: 0,
+                api_token: 'opaque-token',
+            }),
         ];
         const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
         const client = new RestClient('https://api.example.test', { transport });
@@ -222,6 +257,9 @@ describe('RestClient', () => {
         await expect(client.user.createContainer({ user_id: 'user-1' })).resolves.toEqual({
             service_id: 'service-user-1',
             status: 'pending',
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
             api_token: '',
         });
         await expect(client.admin.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({
@@ -236,6 +274,9 @@ describe('RestClient', () => {
             service_id: 'service-1',
             status: 'running',
             git_fin_status: 'initialized',
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_url: 'https://gitee.com',
@@ -450,14 +491,21 @@ describe('RestClient', () => {
 
         await client.user.createContainer({
             user_id: 'user-1',
+            type: 'autotest_cloud',
+            from: 'source-service-1',
+            skip_git: true,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
             gitee_url: 'https://gitee.com',
             authorize_general_account: true,
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
         });
         await client.admin.createContainer({
             user_id: 'user-1',
+            type: 'autotest_cloud',
             from: 'source-service-1',
             skip_git: true,
             gitee_user: 'alice',
@@ -469,6 +517,9 @@ describe('RestClient', () => {
             expiration_hours: 0,
             cpu: 0.5,
             memory: 1,
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 6,
         });
         await client.admin.deleteOrphanContainers({ container_ids: ['orphan-1', 'orphan-2'] });
         await client.admin.setExpiration('container-1', { expiration_hours: 0 });
@@ -479,14 +530,21 @@ describe('RestClient', () => {
 
         expect(readJsonBody(requests.find(request => request.url.pathname === '/user/containers')!)).toEqual({
             user_id: 'user-1',
+            type: 'autotest_cloud',
+            from: 'source-service-1',
+            skip_git: true,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_branch: 'main',
             gitee_url: 'https://gitee.com',
             authorize_general_account: true,
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
         });
         expect(readJsonBody(requests.find(request => request.url.pathname === '/admin/containers')!)).toEqual({
             user_id: 'user-1',
+            type: 'autotest_cloud',
             from: 'source-service-1',
             skip_git: true,
             gitee_user: 'alice',
@@ -498,6 +556,9 @@ describe('RestClient', () => {
             expiration_hours: 0,
             cpu: 0.5,
             memory: 1,
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 6,
         });
         expect(readJsonBody(requests.find(request => request.url.pathname === '/admin/containers/orphans/delete')!))
             .toEqual({ container_ids: ['orphan-1', 'orphan-2'] });
@@ -523,6 +584,9 @@ describe('RestClient', () => {
             expires_at: null,
             cpu_usage: 0,
             memory_usage: null,
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
             gitee_user: 'alice',
             gitee_repository: 'repo',
             gitee_url: 'https://gitee.com',
@@ -551,6 +615,9 @@ describe('RestClient', () => {
             expires_at: null,
             cpu_usage: null,
             memory_usage: 12.5,
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
             image: 'registry.test:5000/testagent/app:v1',
             user_id: 'user-1',
             api_token: 'opaque-token',

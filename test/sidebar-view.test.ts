@@ -1009,6 +1009,12 @@ describe('SidebarViewProvider', () => {
                     containerType: 'autotest_cloud',
                     novncUrl: 'http://127.0.0.1:59864/proxy/6080/vnc.html?host=127.0.0.1&port=59864&path=proxy/6080',
                 }),
+                syncedContainer('browser-1', 'running', true, undefined, undefined, undefined, {
+                    containerType: 'testagent_cloud_chrome',
+                }),
+                syncedContainer('evaluation-1', 'running', true, undefined, undefined, undefined, {
+                    containerType: 'evaluation_cloud',
+                }),
             ],
             changed: false,
         });
@@ -1021,6 +1027,12 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('TestAgentCloud');
         expect(view.webview.html).toContain('type-badge-autotest');
         expect(view.webview.html).toContain('自动化跑批');
+        expect(view.webview.html).toContain('type-badge-chrome');
+        expect(view.webview.html).toContain('type-badge-evaluation');
+        expect(view.webview.html).toContain('.type-badge-testagent { color: var(--vscode-textLink-foreground, #8ab4f8); }');
+        expect(view.webview.html).toContain('.type-badge-chrome { color: var(--vscode-testing-iconPassed, #3fb950); }');
+        expect(view.webview.html).toContain('.type-badge-evaluation { color: var(--vscode-descriptionForeground, #a0a0a0); }');
+        expect(view.webview.html).toContain('.type-badge-autotest { color: var(--vscode-charts-yellow, #e5c07b); }');
         expect(view.webview.html.match(/data-action="openNovnc"/g)).toHaveLength(1);
         expect(view.webview.html).toContain('访问沙箱浏览器');
     });
@@ -1257,9 +1269,9 @@ describe('SidebarViewProvider', () => {
                 type: 'testagent_cloud',
             },
             {
-                label: '自动化执行镜像',
-                description: '在默认镜像基础上内置浏览器与自动化Agent',
-                type: 'autotest_cloud',
+                label: '浏览器执行镜像',
+                description: '使用默认镜像并启用浏览器执行环境',
+                type: 'testagent_cloud_chrome',
             },
         ], expect.objectContaining({
             title: '创建新 云端沙箱 服务',
@@ -1297,12 +1309,15 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('云端沙箱 服务创建成功');
     });
 
-    it('creates an automation container when the automation image is selected', async () => {
+    it('creates a browser execution container when its image is selected', async () => {
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
             service_id: 'service-created-automation',
             status: 'pending',
             endpoint: '10.0.0.11:2222',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         }));
         const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[1]);
         const showInputBox = vi.fn(async () => 'unused');
@@ -1316,7 +1331,7 @@ describe('SidebarViewProvider', () => {
 
         expect(publicApi.createContainer).toHaveBeenCalledWith({
             plugin_id: 'test-tech.tscode-remote-ssh',
-            type: 'autotest_cloud',
+            type: 'testagent_cloud_chrome',
         }, { initializationSignal: expect.any(AbortSignal) });
         expect(showInputBox).not.toHaveBeenCalled();
     });
@@ -1340,6 +1355,9 @@ describe('SidebarViewProvider', () => {
             service_id: 'service-created-from-url',
             status: 'pending',
             endpoint: '10.0.0.7:2222',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         }));
         const values = ['https://github.com/JustWorkingAndWorking/testagent-cloud-remote-ssh.git', 'develop'];
         const showInputBox = vi.fn(async () => values.shift());
@@ -1367,6 +1385,9 @@ describe('SidebarViewProvider', () => {
             service_id: 'service-created-without-gitee',
             status: 'pending',
             endpoint: '10.0.0.6:2222',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         }));
         const showInputBox = vi.fn(async () => 'unused');
         const showQuickPick = vi.fn()
@@ -1433,6 +1454,9 @@ describe('SidebarViewProvider', () => {
             service_id: 'service-created-2',
             status: 'pending',
             endpoint: 'example.com:22',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         }));
         const values = ['https://gitee.com/alice/repo', 'main'];
         const showInputBox = vi.fn(async () => values.shift());
@@ -1544,6 +1568,9 @@ describe('SidebarViewProvider', () => {
             service_id: 'service-after-wait',
             status: 'pending',
             endpoint: '10.0.0.8:2222',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         });
         await creating;
 
@@ -1557,6 +1584,9 @@ describe('SidebarViewProvider', () => {
             service_id: 'service-before-dispose',
             status: 'pending',
             endpoint: '10.0.0.9:2222',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         }));
         const initializationPoller = {
             initialize: vi.fn(({ signal }: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
@@ -2130,6 +2160,9 @@ function createUserApi(admin: boolean): UserRestApi {
             gitee_repository: '',
             gitee_url: '',
             gitee_branch: null,
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         })),
         checkAdmin: vi.fn(async () => ({ admin, limit: admin ? 'none' as const : 'user' as const })),
         startContainer: vi.fn(async () => undefined),
@@ -2142,7 +2175,13 @@ function createUserApi(admin: boolean): UserRestApi {
 function createPublicApi(userApi?: UserRestApi): PublicUserContainerApi {
     return {
         revealSidebar: vi.fn(async () => undefined),
-        createContainer: vi.fn(async () => ({ service_id: 'service-1', status: 'pending' })),
+        createContainer: vi.fn(async () => ({
+            service_id: 'service-1',
+            status: 'pending',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
+        })),
         getContainer: vi.fn(async () => ({
             service_id: 'service-1',
             status: 'running',
@@ -2150,6 +2189,9 @@ function createPublicApi(userApi?: UserRestApi): PublicUserContainerApi {
             gitee_repository: '',
             gitee_url: '',
             gitee_branch: null,
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         })),
         checkAdmin: vi.fn(async () => userApi
             ? userApi.checkAdmin({ user_id: 'user-1' })

@@ -128,6 +128,115 @@ describe('public user container API', () => {
         expect(userIdProvider.getCurrentUserId).toHaveBeenCalledTimes(8);
     });
 
+    it('forwards the complete user creation contract and exposes automation metadata', async () => {
+        const userApi = createUserApi();
+        vi.mocked(userApi.createContainer).mockResolvedValue({
+            service_id: 'service-autotest',
+            status: 'pending',
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
+        });
+        const api = createApi(userApi);
+
+        const created = await api.createContainer({
+            plugin_id: 'example.plugin',
+            type: 'autotest_cloud',
+            from: 'source-service',
+            skip_git: true,
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
+        });
+
+        expect(userApi.createContainer).toHaveBeenCalledWith({
+            user_id: 'user-1',
+            type: 'autotest_cloud',
+            from: 'source-service',
+            skip_git: true,
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
+        });
+        expect(created).toMatchObject({
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
+        });
+
+        vi.mocked(userApi.getContainer).mockResolvedValue({
+            ...containerStatus('service-autotest', 'running'),
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
+        });
+        await expect(api.getContainer('service-autotest')).resolves.toMatchObject({
+            auto_test_id: 'auto-17',
+            source_business_id: 'business-9',
+            task_type: 0,
+        });
+    });
+
+    it('forwards each supported container type and source creation options', async () => {
+        const userApi = createUserApi();
+        const api = createApi(userApi);
+        const types = ['testagent_cloud', 'testagent_cloud_chrome', 'evaluation_cloud', 'autotest_cloud'] as const;
+
+        for (const [index, type] of types.entries()) {
+            await api.createContainer({
+                plugin_id: 'example.plugin',
+                type,
+                from: `source-service-${index + 1}`,
+                skip_git: true,
+            });
+        }
+
+        expect(vi.mocked(userApi.createContainer).mock.calls.map(([request]) => request)).toEqual(
+            types.map((type, index) => ({
+                user_id: 'user-1',
+                type,
+                from: `source-service-${index + 1}`,
+                skip_git: true,
+            })),
+        );
+    });
+
+    it('returns automation metadata from the final initialization status', async () => {
+        const userApi = createUserApi();
+        vi.mocked(userApi.createContainer).mockResolvedValue({
+            service_id: 'service-autotest',
+            status: 'pending',
+            auto_test_id: 'auto-created',
+            source_business_id: 'business-created',
+            task_type: 0,
+        });
+        const initializationPoller = {
+            initialize: vi.fn(async () => ({
+                container: {
+                    ...containerStatus('service-autotest', 'running', 'initialized'),
+                    auto_test_id: 'auto-final',
+                    source_business_id: 'business-final',
+                    task_type: 6,
+                },
+            })),
+        };
+        const api = createPublicUserContainerApi({
+            userIdProvider: { getCurrentUserId: vi.fn(async () => 'user-1') },
+            getSettings: () => settings('https://api.example.test'),
+            userApiFactory: () => userApi,
+            initializationPoller,
+        });
+
+        const created = await api.createContainer({ plugin_id: 'example.plugin', type: 'autotest_cloud' });
+
+        expect(created).toMatchObject({
+            status: 'running',
+            auto_test_id: 'auto-final',
+            source_business_id: 'business-final',
+            task_type: 6,
+        });
+    });
+
     it('keeps sidebar order and the final status for duplicate service IDs', async () => {
         const userApi = createUserApi();
         vi.mocked(userApi.getContainerStatuses).mockResolvedValue({
@@ -209,6 +318,9 @@ describe('public user container API', () => {
             service_id: 'service-created-1',
             status: 'running',
             endpoint: '10.1.2.3:22',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         });
         const containerPrepared = vi.fn();
         const api = createPublicUserContainerApi({
@@ -311,6 +423,9 @@ describe('public user container API', () => {
             status: 'running',
             endpoint: '10.1.2.3:3022',
             expires_at: '2030-01-01T00:00:00Z',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
         });
         const configuredEntry: ContainerConfigEntry = {
             serviceId: 'service-created-1',
@@ -615,7 +730,13 @@ function createApi(userApi: UserRestApi) {
 
 function createUserApi(): UserRestApi {
     return {
-        createContainer: vi.fn(async () => ({ service_id: 'service-1', status: 'pending' })),
+        createContainer: vi.fn(async () => ({
+            service_id: 'service-1',
+            status: 'pending',
+            auto_test_id: null,
+            source_business_id: null,
+            task_type: null,
+        })),
         getServiceIds: vi.fn(async () => ({ service_ids: ['service-1'] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => containerStatus('service-1', 'running')),
@@ -637,6 +758,9 @@ function containerStatus(serviceId: string, status: string, git_fin_status?: str
         gitee_repository: '',
         gitee_url: '',
         gitee_branch: null,
+        auto_test_id: null,
+        source_business_id: null,
+        task_type: null,
     };
 }
 

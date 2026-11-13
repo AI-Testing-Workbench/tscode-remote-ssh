@@ -29,7 +29,7 @@ import { getRemoteSettings, RemoteSettings } from './settings';
 import { UserIdProvider } from './user';
 import { parseGiteeRepositoryUrl as parseRepositoryUrl } from './giteeRepository';
 import { renderAdminContent, renderAdminPage } from './adminWebview/view';
-import { ADMIN_CONTAINER_TYPES, containerTypeOf } from './adminWebview/containerTypes';
+import { ADMIN_DEFAULT_IMAGE_GROUPS, containerTypeOf } from './adminWebview/containerTypes';
 import { showCopyableErrorMessage } from './copyableErrorMessage';
 import type { AdminDefaultImage, AdminPanelState, AdminTab, AdminVolumeState } from './adminWebview/types';
 import {
@@ -513,7 +513,17 @@ export class AdminPanel implements vscode.Disposable {
             case 'createContainer':
                 {
                     const request = toAdminCreateRequest(message);
-                    const created = await adminApi.createContainer(request);
+                    const created = await adminApi.createContainer(request).catch((error: unknown) => {
+                        if (error instanceof RestClientError
+                            && error.statusCode === 409
+                            && (request.from || request.replace)) {
+                            const context = request.from ? '源服务' : '替换目标';
+                            throw new Error(
+                                `后端拒绝了${context}的创建请求。\n${formatRestClientError(error)}`,
+                            );
+                        }
+                        throw error;
+                    });
                     let endpoint = created.endpoint;
                     if (!request.replace && !request.skip_git && this.initializationPoller) {
                         const initializationController = new AbortController();
@@ -1314,7 +1324,7 @@ function createInitialState(): AdminPanelState {
         activeTab: 'images',
         search: '',
         images: [],
-        defaultImages: ADMIN_CONTAINER_TYPES.map(entry => ({ type: entry.type, fullName: null })),
+        defaultImages: ADMIN_DEFAULT_IMAGE_GROUPS.map(entry => ({ type: entry.type, fullName: null })),
         containers: [],
         orphanContainerIds: [],
         whitelistUsers: [],
@@ -1357,7 +1367,7 @@ async function loadAdminData(adminApi: AdminRestApi, logger?: PanelLogger): Prom
 }
 
 async function loadDefaultImages(adminApi: AdminRestApi): Promise<AdminDefaultImage[]> {
-    const pairs = await Promise.all(ADMIN_CONTAINER_TYPES.map(async entry => {
+    const pairs = await Promise.all(ADMIN_DEFAULT_IMAGE_GROUPS.map(async entry => {
         const response = await adminApi.getDefaultImage(entry.type);
         return { type: entry.type, fullName: response.full_name ?? null };
     }));
@@ -1472,9 +1482,10 @@ function hasAdminDataChanged(previous: AdminPanelState, next: AdminData): boolea
 }
 
 function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateContainerRequest {
+    const type = containerTypeOf(message.type) ?? 'testagent_cloud';
     const request: AdminCreateContainerRequest = {
         user_id: requireText(message.user_id, '用户 ID 不能为空'),
-        type: containerTypeOf(message.type) ?? 'testagent_cloud',
+        type,
         skip_git: asBoolean(message.skip_git, false),
     };
     const image = optionalText(message.image);
@@ -1525,8 +1536,22 @@ function toAdminCreateRequest(message: Record<string, unknown>): AdminCreateCont
         }
         request.authorize_general_account = asBoolean(message.authorize_general_account, false);
     }
-    if (image !== undefined) {
+    if (image !== undefined && message.imageOverride !== false) {
         request.image = image;
+    }
+    if (type === 'autotest_cloud') {
+        const autoTestId = optionalText(message.auto_test_id);
+        const sourceBusinessId = optionalText(message.source_business_id);
+        const taskType = optionalInteger(message.task_type, 'Task Type');
+        if (autoTestId !== undefined) {
+            request.auto_test_id = autoTestId;
+        }
+        if (sourceBusinessId !== undefined) {
+            request.source_business_id = sourceBusinessId;
+        }
+        if (taskType !== undefined) {
+            request.task_type = taskType;
+        }
     }
     const expiration = optionalNonNegativeInteger(message.expiration_hours, '有效期');
     const cpu = optionalPositiveNumber(message.cpu, 'CPU');
@@ -1648,6 +1673,21 @@ function optionalPositiveInteger(value: unknown, label: string): number | undefi
         return undefined;
     }
     return requirePositiveInteger(value, label);
+}
+
+function optionalInteger(value: unknown, label: string): number | undefined {
+    if (isBlank(value)) {
+        return undefined;
+    }
+    const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+    if (!/^-?\d+$/.test(text)) {
+        throw new AdminPanelInputValidationError(`${label} 必须是整数`);
+    }
+    const number = Number(text);
+    if (!Number.isSafeInteger(number)) {
+        throw new AdminPanelInputValidationError(`${label} 超出可支持的整数范围`);
+    }
+    return number;
 }
 
 function requirePositiveNumber(value: unknown, label: string): number {

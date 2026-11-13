@@ -207,6 +207,7 @@ const restoreFormState = () => {
             const isLegacyEdit = hasSavedValue && !hasEditMarker && (typeof value === 'string' || typeof value === 'number') && String(value) !== '';
             const isEdited = editedFields[key] === true || isLegacyEdit;
             if (isEdited && hasSavedValue && (typeof value === 'string' || typeof value === 'number')) {
+                ensureSelectValue(field, String(value));
                 field.value = String(value);
                 if (isLegacyEdit) {
                     editedFields[key] = true;
@@ -524,6 +525,8 @@ const applyAdminUpdate = html => {
     restoreFormState();
     restoreCollapsibleState();
     updateGiteeMode();
+    updateAutomationTaskFields();
+    updateDefaultImageSelection();
     restoreListState();
     syncCustomSelects();
     applyListView();
@@ -578,6 +581,10 @@ const readForm = root => {
         if (field.type === 'radio' && !field.checked) return;
         values[name] = field.type === 'checkbox' ? field.checked : field.value;
     });
+    if (root.matches?.('[data-form="createContainer"]')) {
+        const saved = getSavedState();
+        values.imageOverride = saved.editedFields?.['create.image'] === true;
+    }
     return values;
 };
 
@@ -767,6 +774,128 @@ const updateGiteeMode = () => {
     }
 };
 
+const getSelectedContainerType = () => document.querySelector('[data-field="type"]')?.value || 'testagent_cloud';
+
+const getDefaultImageData = imageField => {
+    const parse = value => {
+        try {
+            const parsed = JSON.parse(value || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch {
+            return {};
+        }
+    };
+    const defaults = parse(imageField?.getAttribute('data-default-images'));
+    const listedDefaultRefs = parse(imageField?.getAttribute('data-listed-default-images'));
+    const selectedType = getSelectedContainerType();
+    const defaultType = selectedType === 'testagent_cloud_chrome' ? 'testagent_cloud' : selectedType;
+    const fallbackRef = imageField?.getAttribute('data-default-image-fallback') || '';
+    const defaultRef = typeof defaults[defaultType] === 'string' ? defaults[defaultType] : '';
+    return {
+        selectedType,
+        defaultRef,
+        selectionRef: defaultRef || fallbackRef,
+        fallbackRef,
+        listedDefaultRefs: Array.isArray(listedDefaultRefs) ? listedDefaultRefs : [],
+    };
+};
+
+const setImageOverrideState = isOverride => {
+    const saved = getSavedState();
+    const fields = { ...(saved.fields || {}) };
+    const editedFields = { ...(saved.editedFields || {}) };
+    const imageField = document.querySelector('[data-field="image"]');
+    const key = 'create.image';
+    if (isOverride && imageField?.value) {
+        editedFields[key] = true;
+        fields[key] = imageField.value;
+    } else {
+        delete editedFields[key];
+        delete fields[key];
+    }
+    vscode.setState({ ...saved, fields, editedFields });
+};
+
+const updateDefaultImageSelection = () => {
+    const imageField = document.querySelector('[data-field="image"]');
+    const hint = document.querySelector('[data-default-image-hint]');
+    if (!imageField) return;
+    const { selectedType, defaultRef, selectionRef, fallbackRef, listedDefaultRefs } = getDefaultImageData(imageField);
+    const typeLabels = {
+        testagent_cloud: '默认镜像',
+        testagent_cloud_chrome: '浏览器执行镜像',
+        evaluation_cloud: '测评镜像',
+        autotest_cloud: '自动化跑批镜像',
+    };
+    const saved = getSavedState();
+    const editedFields = saved.editedFields && typeof saved.editedFields === 'object' ? saved.editedFields : {};
+    let hasOverride = editedFields['create.image'] === true;
+    if (hasOverride && imageField.value === selectionRef) {
+        setImageOverrideState(false);
+        hasOverride = false;
+    }
+    if (!hasOverride) {
+        imageField.setAttribute('data-default-value', selectionRef);
+        imageField.value = selectionRef;
+        saveFormState();
+    }
+    if (hint) {
+        hint.textContent = '';
+        if (!defaultRef) {
+            hint.textContent = fallbackRef
+                ? (typeLabels[selectedType] || selectedType) + '尚未配置默认镜像'
+                : (typeLabels[selectedType] || selectedType) + '尚未配置默认镜像'
+        } else if (!listedDefaultRefs.includes(defaultRef)) {
+            hint.textContent = '当前类型默认镜像未出现在镜像列表中：' + defaultRef + '。可手动选择其他镜像。';
+        }
+    }
+    syncCustomSelect(imageField);
+};
+
+const updateImageOverrideFromSelection = () => {
+    const imageField = document.querySelector('[data-field="image"]');
+    if (!imageField) return;
+    const { selectionRef } = getDefaultImageData(imageField);
+    setImageOverrideState(Boolean(imageField.value) && imageField.value !== selectionRef);
+    updateDefaultImageSelection();
+};
+
+const updateTaskTypeDescription = () => {
+    const input = document.querySelector('[data-field="task_type"]');
+    const description = document.querySelector('[data-task-type-description]');
+    if (!input || !description) return;
+    if (input.disabled || input.value.trim() === '') {
+        description.textContent = '';
+        description.hidden = true;
+        input.setCustomValidity('');
+        return;
+    }
+    if (!/^-?\d+$/.test(input.value.trim()) || !Number.isSafeInteger(Number(input.value))) {
+        description.textContent = 'Task Type 必须是整数';
+        description.hidden = false;
+        input.setCustomValidity('Task Type 必须是整数');
+        return;
+    }
+    let mappings = {};
+    try {
+        mappings = JSON.parse(input.getAttribute('data-task-type-descriptions') || '{}');
+    } catch {
+        mappings = {};
+    }
+    description.textContent = mappings[input.value] || '未知 Task Type';
+    description.hidden = false;
+    input.setCustomValidity('');
+};
+
+const updateAutomationTaskFields = () => {
+    const enabled = getSelectedContainerType() === 'autotest_cloud';
+    const row = document.querySelector('[data-task-fields-row]');
+    if (!row) return;
+    row.classList.toggle('task-fields-disabled', !enabled);
+    row.querySelectorAll('[data-field]').forEach(field => { field.disabled = !enabled; });
+    updateTaskTypeDescription();
+};
+
 document.addEventListener('click', event => {
     const target = event.target;
     const option = target && target.closest ? target.closest('[data-select-option]') : null;
@@ -847,7 +976,10 @@ document.addEventListener('click', event => {
 
 document.addEventListener('input', event => {
     const target = event.target;
-    if (target && target.matches && target.matches('[data-field]')) saveFormState(target);
+    if (target && target.matches && target.matches('[data-field]')) {
+        saveFormState(target);
+        if (target.matches('[data-field="task_type"]')) updateTaskTypeDescription();
+    }
     const selectSearch = target && target.matches && target.matches('[data-select-search]') ? target : null;
     if (selectSearch) {
         filterSelectOptions(selectSearch.closest('[data-custom-select]'));
@@ -867,6 +999,11 @@ document.addEventListener('change', event => {
     const select = event.target;
     if (select && select.matches && select.matches('[data-field]')) saveFormState(select);
     if (select && select.matches && select.matches('.native-select')) syncCustomSelect(select);
+    if (select && select.matches && select.matches('[data-field="type"]')) {
+        updateAutomationTaskFields();
+        updateDefaultImageSelection();
+    }
+    if (select && select.matches && select.matches('[data-field="image"]')) updateImageOverrideFromSelection();
     if (select && select.matches && select.matches('[data-sort-select], [data-status-filter], [data-type-filter], [data-page-size]')) {
         const controls = select.closest('[data-list-controls]');
         controls?.setAttribute('data-page', '1');
@@ -950,6 +1087,8 @@ window.addEventListener('message', event => {
 restoreFormState();
 restoreCollapsibleState();
 updateGiteeMode();
+updateAutomationTaskFields();
+updateDefaultImageSelection();
 restoreListState();
 syncCustomSelects();
 applyListView();

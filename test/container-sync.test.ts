@@ -133,6 +133,9 @@ describe('ContainerSync', () => {
                     gitee_repository: '',
                     gitee_url: '',
                     gitee_branch: null,
+                    auto_test_id: null,
+                    source_business_id: null,
+                    task_type: null,
                 }],
             })),
         });
@@ -696,6 +699,9 @@ describe('ContainerSync', () => {
                     gitee_repository: 'debug-repo',
                     gitee_url: 'https://gitee.com',
                     gitee_branch: null,
+                    auto_test_id: null,
+                    source_business_id: null,
+                    task_type: null,
                 }],
             })),
         }, { debug: true });
@@ -1101,6 +1107,9 @@ function status(
         gitee_repository: giteeRepository,
         gitee_url: '',
         gitee_branch: null,
+        auto_test_id: null,
+        source_business_id: null,
+        task_type: null,
     };
 }
 

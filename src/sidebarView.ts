@@ -974,9 +974,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 type: 'testagent_cloud',
             },
             {
-                label: '自动化执行镜像',
-                description: '在默认镜像基础上内置浏览器与自动化Agent',
-                type: 'autotest_cloud',
+                label: '浏览器执行镜像',
+                description: '在默认镜像基础上内置浏览器',
+                type: 'testagent_cloud_chrome',
             },
         ];
         const selectedContainerType = await this.showQuickPick(containerTypeOptions, {
@@ -987,7 +987,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         });
         if (
             !selectedContainerType
-            || (selectedContainerType.type !== 'testagent_cloud' && selectedContainerType.type !== 'autotest_cloud')
+            || (selectedContainerType.type !== 'testagent_cloud' && selectedContainerType.type !== 'testagent_cloud_chrome')
             || !this.isActiveView(context)
         ) {
             return;
@@ -1533,8 +1533,16 @@ function renderTypeBadge(containerType: string | null | undefined): string {
             label = 'TestAgentCloud';
             variant = 'testagent';
             break;
+        case 'testagent_cloud_chrome':
+            label = '浏览器执行镜像';
+            variant = 'chrome';
+            break;
+        case 'evaluation_cloud':
+            label = '测评镜像';
+            variant = 'evaluation';
+            break;
         case 'autotest_cloud':
-            label = '自动化跑批';
+            label = '自动化跑批镜像';
             variant = 'autotest';
             break;
         default:
@@ -1761,6 +1769,8 @@ function renderDocument(body: string): string {
         .usage-metric-unavailable { color: var(--on-surface); }
         .type-badge { padding: 1px 7px; border: 1px solid currentColor; border-radius: 999px; font-size: 11px; line-height: 1.5; white-space: nowrap; }
         .type-badge-testagent { color: var(--vscode-textLink-foreground, #8ab4f8); }
+        .type-badge-chrome { color: var(--vscode-testing-iconPassed, #3fb950); }
+        .type-badge-evaluation { color: var(--vscode-descriptionForeground, #a0a0a0); }
         .type-badge-autotest { color: var(--vscode-charts-yellow, #e5c07b); }
         .type-badge-unknown { color: var(--on-surface-variant); }
         .sandbox-access-row { display: flex; align-items: center; justify-content: center; margin-top: 12px; }

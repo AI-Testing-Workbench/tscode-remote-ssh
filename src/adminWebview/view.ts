@@ -7,7 +7,13 @@ import type {
 } from '../api/models';
 import { getFileBrowserFrameSource } from '../filebrowserBridge';
 import { ADMIN_WEBVIEW_SCRIPT } from './script';
-import { ADMIN_CONTAINER_TYPES, containerTypeLabel } from './containerTypes';
+import {
+    ADMIN_CONTAINER_TYPES,
+    ADMIN_DEFAULT_IMAGE_GROUPS,
+    containerTypeLabel,
+    defaultImageGroupLabel,
+    defaultImageTypeForContainer,
+} from './containerTypes';
 import type { AdminDefaultImage, AdminPanelState, AdminTab, AdminVolumeState } from './types';
 
 interface SelectOption {
@@ -16,6 +22,16 @@ interface SelectOption {
     selected?: boolean;
     disabled?: boolean;
 }
+
+const TASK_TYPE_DESCRIPTIONS: Record<number, string> = {
+    0: '低码自动化任务',
+    1: '低码自动化重跑任务',
+    2: '并发执行集任务',
+    3: '移动端执行集任务',
+    4: '高码自动化任务',
+    5: '移动端重跑任务',
+    6: '高码自动化重跑任务',
+};
 
 export function renderAdminPage(state: AdminPanelState, nonce: string, cspSource: string): string {
     const frameSource = getVolumeFrameSource(state.volume);
@@ -213,7 +229,7 @@ function renderDefaultBanner(defaultImage: AdminDefaultImage, images: ImageListI
             : '';
     return `<div class="stat-card default-banner overview-card${stateClass}" data-patch-key="default-image:${escapeAttribute(defaultImage.type)}" data-default-image-type="${escapeAttribute(defaultImage.type)}">
         <div class="default-image-copy">
-            <div class="default-image-line"><span class="default-label">${escapeHtml(containerTypeLabel(defaultImage.type))}默认镜像</span><strong class="default-image-name">${defaultImage.fullName ? escapeHtml(defaultImage.fullName) : '请及时设置默认镜像'}</strong></div>
+            <div class="default-image-line"><span class="default-label">${escapeHtml(defaultImageGroupLabel(defaultImage.type))}</span><strong class="default-image-name">${defaultImage.fullName ? escapeHtml(defaultImage.fullName) : '请及时设置默认镜像'}</strong></div>
         </div>
         ${stateTag}
     </div>`;
@@ -260,23 +276,23 @@ function renderImageRow(image: ImageListItem, defaultImages: AdminDefaultImage[]
     const imageStatus = image.status.toLowerCase();
     const defaultTypes = defaultImageTypes(image.full_name, defaultImages);
     const isDefault = defaultTypes.length > 0;
+    const showFallbackDefaultStatus = !isDefault && imageStatus === 'default';
     const status = isDefault || imageStatus === 'default' ? 'default' : '';
     const usageTag = containerCount > 0 ? `<span class="image-usage tag">被 ${containerCount} 个容器使用中</span>` : '';
     const defaultTags = defaultTypes
-        .map(type => `<span class="tag default-type-tag">默认·${escapeHtml(containerTypeLabel(type))}</span>`)
+        .map(type => `<span class="tag default-type-tag" data-container-type="${escapeAttribute(type)}">默认·${escapeHtml(containerTypeLabel(type))}</span>`)
         .join('');
     const searchText = [image.full_name, image.registry, image.namespace, image.name, image.version, status ? imageStatusLabel(status) : '']
         .concat(defaultTypes.map(containerTypeLabel))
         .join(' ');
-    const defaultActions = ADMIN_CONTAINER_TYPES.map(({ type, label }) => {
-        const shortLabel = type === 'testagent_cloud' ? 'TestAgentCloud' : '自动化跑批';
+    const defaultActions = ADMIN_DEFAULT_IMAGE_GROUPS.map(({ type, label }) => {
         if (defaultTypes.includes(type)) {
             return `<button class="small-button tonal-button" type="button" data-action="unsetDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}">取消默认·${escapeHtml(label)}</button>`;
         }
-        return `<button class="small-button" type="button" data-action="setDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}">设为默认·${escapeHtml(shortLabel)}</button>`;
+        return `<button class="small-button" type="button" data-action="setDefaultImage" data-full-name="${escapeAttribute(image.full_name)}" data-type="${type}">设为默认·${escapeHtml(label)}</button>`;
     }).join('');
     return `<article class="resource-row image-row searchable" data-patch-key="image:${escapeAttribute(image.full_name)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-sort-name="${escapeAttribute(image.full_name)}" data-sort-status="${escapeAttribute(status)}" data-sort-size="${image.size}" data-sort-created="${escapeAttribute(image.created_at)}">
-        <div class="resource-main"><div class="image-title"><strong>${escapeHtml(image.full_name)}</strong>${status ? `<span class="status-chip tag ${statusClass(status)}">${escapeHtml(imageStatusLabel(status))}</span>` : ''}${defaultTags}<span class="image-size tag">${formatBytes(image.size)}</span>${usageTag}</div></div>
+        <div class="resource-main"><div class="image-title"><strong>${escapeHtml(image.full_name)}</strong>${showFallbackDefaultStatus ? `<span class="status-chip tag ${statusClass(status)}">${escapeHtml(imageStatusLabel(status))}</span>` : ''}${defaultTags}<span class="image-size tag">${formatBytes(image.size)}</span>${usageTag}</div></div>
         <div class="row-actions">
             <button class="small-button" type="button" data-action="pushImage" data-full-name="${escapeAttribute(image.full_name)}">推送</button>
             ${defaultActions}
@@ -314,7 +330,7 @@ function renderContainersTab(
                 </div>
                 <div class="form-row two-fields type-image-row">
                     <label>容器类型${renderStyledSelect('data-field="type" data-persist-key="create.type"', renderContainerTypeOptions())}</label>
-                    <label>镜像${renderStyledSelect('data-field="image" data-persist-key="create.image"', renderImageOptions(images, defaultImages), true)}</label>
+                    <label>镜像${renderStyledSelect(imageSelectAttributes(images, defaultImages), renderImageOptions(images, defaultImages), true)}<small class="default-image-hint" data-default-image-hint>${escapeHtml(getDefaultImageHint(images, defaultImages, 'testagent_cloud'))}</small></label>
                 </div>
                 <div class="gitee-option-row">
                     <label class="mode-radio"><input data-field="giteeMode" data-persist-key="create.giteeMode" name="gitee-mode" value="from" type="radio">基于已有容器创建</label>
@@ -346,6 +362,7 @@ function renderContainersTab(
                     <label>码云分支<input data-field="gitee_branch" data-gitee-dependent data-persist-key="create.gitee_branch" type="text" placeholder="master" disabled></label>
                     <label class="check-button form-check"><input data-field="authorize_general_account" data-gitee-dependent data-persist-key="create.authorize_general_account" type="checkbox" disabled>授权使用 云端沙箱 通用码云账户</label>
                 </div>
+                ${renderAutomationTaskFields()}
                 <div class="form-row single-field">
                     <label>有效期 (小时)<input data-field="expiration_hours" data-persist-key="create.expiration_hours" type="number" min="0" step="1" placeholder="0 表示该容器永不过期"></label>
                 </div>
@@ -363,9 +380,15 @@ function renderContainersTab(
 }
 
 function renderContainerTypeOptions(): SelectOption[] {
+    const optionLabels: Record<ContainerTypeValue, string> = {
+        testagent_cloud: 'TestAgent',
+        testagent_cloud_chrome: '浏览器执行',
+        evaluation_cloud: '测评',
+        autotest_cloud: '自动化跑批',
+    };
     return ADMIN_CONTAINER_TYPES.map((entry, index) => ({
         value: entry.type,
-        label: entry.label,
+        label: optionLabels[entry.type],
         selected: index === 0,
     }));
 }
@@ -379,34 +402,84 @@ function renderContainerTypeFilter(): string {
 }
 
 function renderImageOptions(images: ImageListItem[], defaultImages: AdminDefaultImage[]): SelectOption[] {
-    const isDefaultImage = (image: ImageListItem): boolean => defaultImageTypes(image.full_name, defaultImages).length > 0;
+    const defaultType = defaultImageTypeForContainer('testagent_cloud');
+    const configuredDefault = defaultImages.find(entry => entry.type === defaultType)?.fullName ?? null;
+    const statusDefault = images.find(image => image.status.toLowerCase() === 'default')?.full_name ?? null;
+    const defaultRef = configuredDefault ?? statusDefault;
+    const isDefaultImage = (image: ImageListItem): boolean => defaultImageTypes(image.full_name, defaultImages).length > 0
+        || image.status.toLowerCase() === 'default';
     const sortedImages = [...images].sort((left, right) => {
         const leftDefault = isDefaultImage(left);
         const rightDefault = isDefaultImage(right);
         return leftDefault === rightDefault ? left.full_name.localeCompare(right.full_name) : leftDefault ? -1 : 1;
     });
-    const defaultRef = defaultImages.find(entry => entry.fullName);
-    const statusDefault = sortedImages.find(image => image.status.toLowerCase() === 'default');
-    const hasDefault = Boolean(defaultRef && sortedImages.some(image => image.full_name === defaultRef.fullName) || statusDefault);
     const options: SelectOption[] = [];
-    if (!defaultRef?.fullName && !statusDefault) {
+    if (!defaultRef) {
         options.push({ value: '', label: '请选择一个镜像', selected: true, disabled: true });
     }
-    const missingDefault = defaultRef?.fullName && !hasDefault
-        ? { value: defaultRef.fullName, label: '默认镜像 (镜像不存在)', selected: true }
-        : undefined;
-    if (missingDefault) {
-        options.push(missingDefault);
+    for (const group of ADMIN_DEFAULT_IMAGE_GROUPS) {
+        const groupDefault = defaultImages.find(entry => entry.type === group.type)?.fullName;
+        if (groupDefault && !sortedImages.some(image => image.full_name === groupDefault)) {
+            options.push({
+                value: groupDefault,
+                label: `${group.label} (镜像不存在)`,
+                selected: groupDefault === defaultRef,
+            });
+        }
     }
     options.push(...sortedImages.map(image => {
-        const isDefault = isDefaultImage(image) || !defaultRef?.fullName && image.status.toLowerCase() === 'default';
+        const isDefault = isDefaultImage(image);
         return {
             value: image.full_name,
-            label: `${image.full_name}${isDefault ? ' (默认镜像)' : ''}`,
-            selected: isDefault,
+            label: `${image.full_name}${image.full_name === configuredDefault ? ' (当前类型默认镜像)' : isDefault ? ' (默认镜像)' : ''}`,
+            selected: image.full_name === defaultRef,
         };
     }));
     return options;
+}
+
+function imageSelectAttributes(images: ImageListItem[], defaultImages: AdminDefaultImage[]): string {
+    const refs = Object.fromEntries(ADMIN_DEFAULT_IMAGE_GROUPS.map(({ type }) => [
+        type,
+        defaultImages.find(entry => entry.type === type)?.fullName ?? '',
+    ]));
+    const statusDefault = images.find(image => image.status.toLowerCase() === 'default')?.full_name ?? '';
+    const initialDefault = refs['testagent_cloud'] || statusDefault;
+    const listedDefaultRefs = defaultImages
+        .map(entry => entry.fullName)
+        .filter((fullName): fullName is string => Boolean(fullName && images.some(image => image.full_name === fullName)));
+    if (statusDefault && !listedDefaultRefs.includes(statusDefault)) {
+        listedDefaultRefs.push(statusDefault);
+    }
+    return `data-field="image" data-persist-key="create.image" data-default-value="${escapeAttribute(initialDefault)}" data-default-images="${escapeAttribute(JSON.stringify(refs))}" data-default-image-fallback="${escapeAttribute(statusDefault)}" data-listed-default-images="${escapeAttribute(JSON.stringify(listedDefaultRefs))}"`;
+}
+
+function getDefaultImageHint(
+    images: ImageListItem[],
+    defaultImages: AdminDefaultImage[],
+    selectedType: ContainerTypeValue,
+): string {
+    const imageType = defaultImageTypeForContainer(selectedType);
+    const defaultRef = defaultImages.find(entry => entry.type === imageType)?.fullName;
+    if (!defaultRef) {
+        const statusDefault = images.find(image => image.status.toLowerCase() === 'default')?.full_name;
+        return statusDefault
+            ? `${containerTypeLabel(selectedType)}尚未配置默认镜像`
+            : `${containerTypeLabel(selectedType)}尚未配置默认镜像`;
+    }
+    if (!images.some(image => image.full_name === defaultRef)) {
+        return `当前类型默认镜像未出现在镜像列表中：${defaultRef}。可手动选择其他镜像。`;
+    }
+    return '';
+}
+
+function renderAutomationTaskFields(): string {
+    const descriptions = escapeAttribute(JSON.stringify(TASK_TYPE_DESCRIPTIONS));
+    return `<div class="task-fields-row task-fields-disabled" data-task-fields-row>
+        <label>Auto Test ID<input data-field="auto_test_id" data-persist-key="create.auto_test_id" type="text" autocomplete="off" disabled></label>
+        <label>Source Business ID<input data-field="source_business_id" data-persist-key="create.source_business_id" type="text" autocomplete="off" disabled></label>
+        <label>Task Type<input data-field="task_type" data-persist-key="create.task_type" data-task-type-descriptions="${descriptions}" type="number" step="1" inputmode="numeric" disabled><small data-task-type-description aria-live="polite" hidden></small></label>
+    </div>`;
 }
 
 function renderStats(stats: AdminStateResponse | undefined, limit: ContainerLimitResponse | undefined, orphanContainerIds: string[]): string {
@@ -894,6 +967,12 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
 .single-field { grid-template-columns: minmax(0, 1fr); }
 .two-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .branch-row { width: 100%; grid-template-columns: minmax(0, 1fr) auto; }
+.task-fields-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: -1px 0 13px; }
+.task-fields-row.task-fields-disabled { opacity: .55; }
+.task-fields-row input:disabled { background: var(--surface-soft); color: var(--muted); cursor: not-allowed; }
+.task-fields-row small, .default-image-hint { min-height: 1.2em; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.task-fields-row small[hidden] { display: none; }
+.default-image-hint { margin-top: 1px; overflow-wrap: anywhere; }
 .branch-row .form-check { width: fit-content; max-width: 100%; justify-self: start; white-space: normal; }
 .branch-row.gitee-options-disabled > label:first-child { opacity: .62; }
 .branch-row.gitee-options-disabled > label:first-child input:disabled { background: var(--surface-soft); color: var(--muted); cursor: not-allowed; opacity: .68; }
@@ -1011,6 +1090,7 @@ input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; min-hei
     .two-fields { grid-template-columns: 1fr; }
     .container-info-row { grid-template-columns: 1fr; }
     .form-check { justify-self: start; }
+    .task-fields-row { grid-template-columns: 1fr; }
     .container-operation-row, .container-expiration-row { justify-content: stretch; }
     .container-expiration-row .inline-number, .container-expiration-row .small-button { flex: 1 1 100%; width: 100%; }
     .upload-actions-row { justify-content: flex-start; }
@@ -1050,12 +1130,20 @@ body.vscode-high-contrast { color-scheme: dark; }
 .empty-message { border-color: var(--outline-soft); background: var(--surface); }
 
 /* ---- 类型与批量检查 ---- */
-.default-banners { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.default-banners { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
 .default-banner { margin-bottom: 0; }
+.default-banner[data-default-image-type="autotest_cloud"] { grid-column: 1 / -1; }
+@media (max-width: 700px) {
+    .default-banners { grid-template-columns: 1fr; }
+    .default-banner[data-default-image-type="autotest_cloud"] { grid-column: auto; }
+}
 .default-banner { border-width: 1px; }
-.container-type-badge { border-style: dashed; color: var(--primary-hover); }
-.container-type-badge[data-container-type="autotest_cloud"] { color: var(--warning); }
-.default-type-tag { color: var(--primary-hover); }
+.container-type-badge { border-style: dashed; color: var(--vscode-descriptionForeground, #4b454d); }
+.default-type-tag { color: var(--vscode-descriptionForeground, #4b454d); }
+.container-type-badge[data-container-type="testagent_cloud"], .default-type-tag[data-container-type="testagent_cloud"] { color: var(--vscode-textLink-foreground, #8ab4f8); }
+.container-type-badge[data-container-type="testagent_cloud_chrome"], .default-type-tag[data-container-type="testagent_cloud_chrome"] { color: var(--vscode-testing-iconPassed, #3fb950); }
+.container-type-badge[data-container-type="evaluation_cloud"], .default-type-tag[data-container-type="evaluation_cloud"] { color: var(--vscode-descriptionForeground, #a0a0a0); }
+.container-type-badge[data-container-type="autotest_cloud"], .default-type-tag[data-container-type="autotest_cloud"] { color: var(--vscode-charts-yellow, #e5c07b); }
 .form-row.type-image-row .select-wrap { width: 100%; }
 .volume-panel { min-width: 0; }
 .volume-status-card { display: grid; place-items: center; min-height: 300px; padding: 42px 24px; border: 1px solid var(--outline); border-radius: 14px; background: var(--surface-raised); text-align: center; }

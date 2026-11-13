@@ -59,8 +59,9 @@ describe('AdminPanel', () => {
         expect(adminApiFactory).toHaveBeenCalledOnce();
         expect(adminApi.listImages).toHaveBeenCalledOnce();
         expect(adminApi.getDefaultImage).toHaveBeenCalledWith('testagent_cloud');
+        expect(adminApi.getDefaultImage).toHaveBeenCalledWith('evaluation_cloud');
         expect(adminApi.getDefaultImage).toHaveBeenCalledWith('autotest_cloud');
-        expect(adminApi.getDefaultImage).toHaveBeenCalledTimes(2);
+        expect(adminApi.getDefaultImage).toHaveBeenCalledTimes(3);
         expect(adminApi.listContainers).toHaveBeenCalledOnce();
         expect(adminApi.listOrphanContainers).toHaveBeenCalledOnce();
         expect(adminApi.getState).toHaveBeenCalledOnce();
@@ -714,13 +715,88 @@ describe('AdminPanel', () => {
         expect(panel.webview.html).toContain('value="user-1"');
     });
 
+    it('uses concise create type options while keeping filtering and card labels aligned', () => {
+        const types = [
+            ['testagent_cloud', '默认镜像'],
+            ['testagent_cloud_chrome', '浏览器执行镜像'],
+            ['evaluation_cloud', '测评镜像'],
+            ['autotest_cloud', '自动化跑批镜像'],
+        ] as const;
+        const html = renderAdminPage({
+            status: 'ready',
+            activeTab: 'containers',
+            search: '',
+            images: [],
+            defaultImages: createDefaultImages(null, null),
+            containers: types.map(([type]) => ({ ...sampleContainer(), type })),
+            orphanContainerIds: [],
+            whitelistUsers: [],
+            adminUsers: [],
+        }, 'nonce', 'vscode-resource://test');
+        const typeOptions = html.match(/<select class="native-select" data-field="type"[^>]*>(.*?)<\/select>/s)?.[1] ?? '';
+        const typeFilter = html.match(/<select class="native-select" data-type-filter[^>]*>(.*?)<\/select>/s)?.[1] ?? '';
+        const badgeMatches = [...html.matchAll(/class="tag container-type-badge" data-container-type="([^"]+)">([^<]+)<\/span>/g)];
+        const typeOptionMatches = [...typeOptions.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)<\/option>/g)];
+
+        expect(typeOptionMatches.map(match => [match[1], match[2]])).toEqual([
+            ['testagent_cloud', 'TestAgent'],
+            ['testagent_cloud_chrome', '浏览器执行'],
+            ['evaluation_cloud', '测评'],
+            ['autotest_cloud', '自动化跑批'],
+        ]);
+        expect([...typeFilter.matchAll(/<option value="([^"]+)"/g)].map(match => match[1])).toEqual(['all', ...types.map(([type]) => type)]);
+        expect(badgeMatches.map(match => [match[1], match[2]])).toEqual(types.map(([type, label]) => [type, label]));
+        expect(html).toContain('.container-type-badge[data-container-type="testagent_cloud"], .default-type-tag[data-container-type="testagent_cloud"] { color: var(--vscode-textLink-foreground, #8ab4f8); }');
+        expect(html).toContain('.container-type-badge[data-container-type="testagent_cloud_chrome"], .default-type-tag[data-container-type="testagent_cloud_chrome"] { color: var(--vscode-testing-iconPassed, #3fb950); }');
+        expect(html).toContain('.container-type-badge[data-container-type="evaluation_cloud"], .default-type-tag[data-container-type="evaluation_cloud"] { color: var(--vscode-descriptionForeground, #a0a0a0); }');
+        expect(html).toContain('.container-type-badge[data-container-type="autotest_cloud"], .default-type-tag[data-container-type="autotest_cloud"] { color: var(--vscode-charts-yellow, #e5c07b); }');
+    });
+
+    it('renders three logical default-image groups and one shared browser default action', () => {
+        const image = {
+            id: 'image-default',
+            full_name: 'registry.test:5000/team/default:v1',
+            registry: 'registry.test:5000',
+            namespace: 'team',
+            name: 'default',
+            version: 'v1',
+            size: 1024,
+            status: 'pushed',
+        };
+        const html = renderAdminPage({
+            status: 'ready',
+            activeTab: 'images',
+            search: '',
+            images: [image],
+            defaultImages: createDefaultImages(image.full_name, 'registry.test:5000/autotest/default:v1', 'registry.test:5000/evaluation/default:v1'),
+            containers: [],
+            orphanContainerIds: [],
+            whitelistUsers: [],
+            adminUsers: [],
+        }, 'nonce', 'vscode-resource://test');
+        const groups = [...html.matchAll(/<div class="stat-card default-banner[^"]*" data-patch-key="default-image:[^"]*" data-default-image-type="([^"]+)"/g)].map(match => match[1]);
+        const actions = [...html.matchAll(/data-action="(?:set|unset)DefaultImage"[^>]*data-type="([^"]+)"/g)].map(match => match[1]);
+
+        expect(groups).toEqual(['testagent_cloud', 'evaluation_cloud', 'autotest_cloud']);
+        expect(actions).toEqual(['testagent_cloud', 'evaluation_cloud', 'autotest_cloud']);
+        expect(html).toContain('默认镜像');
+        expect(html).not.toContain('data-default-image-type="testagent_cloud_chrome"');
+        expect(html).not.toContain('data-type="testagent_cloud_chrome"');
+        expect(html).toContain('.default-banners { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));');
+        expect(html).toContain('.default-banner[data-default-image-type="autotest_cloud"] { grid-column: 1 / -1; }');
+        expect(html).toContain('.default-banner[data-default-image-type="autotest_cloud"] { grid-column: auto; }');
+        expect(html.indexOf('.default-banners { grid-template-columns: 1fr; }')).toBeGreaterThan(
+            html.indexOf('.default-banner[data-default-image-type="autotest_cloud"] { grid-column: 1 / -1; }'),
+        );
+    });
+
     it('renders the compact overview, missing-image marker, collapsible forms, and container terminology', () => {
         const state: AdminPanelState = {
             status: 'ready',
             activeTab: 'containers',
             search: '',
             images: [],
-            defaultImages: createDefaultImages('registry.test:5000/testagent/missing:v1', null),
+            defaultImages: createDefaultImages('registry.test:5000/testagent/missing:v1', 'registry.test:5000/autotest/missing:v1', 'registry.test:5000/evaluation/missing:v1'),
             containers: [],
             orphanContainerIds: ['orphan-container-1', 'orphan-container-2'],
             stats: {
@@ -778,6 +854,19 @@ describe('AdminPanel', () => {
         expect(html).not.toContain('.branch-row.gitee-options-disabled .form-check { border-style: dashed');
         expect(html).toContain('data-field="skip_git" data-persist-key="create.skip_git" type="checkbox">强制禁用码云拉取功能');
         expect(html.indexOf('data-field="skip_git"')).toBeLessThan(html.indexOf('data-action="createContainer"'));
+        expect(html).toContain('data-default-image-type="testagent_cloud"');
+        expect(html).toContain('data-default-image-type="evaluation_cloud"');
+        expect(html).toContain('data-default-image-type="autotest_cloud"');
+        expect(html).toContain('默认镜像');
+        expect(html).toContain('data-field="auto_test_id" data-persist-key="create.auto_test_id"');
+        expect(html).toContain('data-field="source_business_id" data-persist-key="create.source_business_id"');
+        expect(html).toContain('data-field="task_type" data-persist-key="create.task_type"');
+        expect(html).toContain('data-task-type-descriptions="{&quot;0&quot;:&quot;低码自动化任务&quot;');
+        expect(html.indexOf('data-field="gitee_branch"')).toBeLessThan(html.indexOf('data-field="auto_test_id"'));
+        expect(html).toContain('.task-fields-row { grid-template-columns: 1fr; }');
+        expect(html).toContain('data-field="type" data-persist-key="create.type"');
+        expect(html).toContain('value="testagent_cloud_chrome"');
+        expect(html).toContain('value="evaluation_cloud"');
         expect(html).toContain('data-field="gitee_repository" data-persist-key="create.gitee_repository" type="text" placeholder="XXX" disabled');
         expect(html).toContain('placeholder="完整的 https://XXX"');
         expect(html).toContain('placeholder="https://XXX 前缀"');
@@ -805,6 +894,9 @@ describe('AdminPanel', () => {
             'create.authorize_general_account',
             'create.type',
             'create.image',
+            'create.auto_test_id',
+            'create.source_business_id',
+            'create.task_type',
             'create.expiration_hours',
             'create.cpu',
             'create.memory',
@@ -1008,6 +1100,10 @@ describe('AdminPanel', () => {
             }],
         }, 'nonce', 'vscode-resource://test');
         expect(defaultImageHtml).toMatch(/<label class="row-check check-button disabled"><input[^>]*disabled[^>]*>同步推送至注册表 \(镜像仓库\)<\/label>/);
+        const defaultImageRowStart = defaultImageHtml.indexOf('data-patch-key="image:registry.test:5000/testagent/app:v1"');
+        const defaultImageRow = defaultImageHtml.slice(defaultImageRowStart, defaultImageHtml.indexOf('</article>', defaultImageRowStart));
+        expect(defaultImageRow).toContain('class="tag default-type-tag" data-container-type="testagent_cloud">默认·默认镜像</span>');
+        expect(defaultImageRow).not.toContain('status-chip tag primary">默认镜像</span>');
 
         const imageWithUsageHtml = renderAdminPage({
             ...state,
@@ -1087,6 +1183,9 @@ describe('AdminPanel', () => {
         expect(containersHtml).toContain(`data-select-value="${fallbackDefault.full_name}"`);
         expect(containersHtml).toContain(`<option value="${fallbackDefault.full_name}" selected>${fallbackDefault.full_name} (默认镜像)</option>`);
         expect(containersHtml).toContain(`data-select-search-text="${fallbackDefault.full_name} ${fallbackDefault.full_name} (默认镜像)"`);
+        const fallbackRowStart = imageHtml.indexOf(`data-patch-key="image:${fallbackDefault.full_name}"`);
+        const fallbackRow = imageHtml.slice(fallbackRowStart, imageHtml.indexOf('</article>', fallbackRowStart));
+        expect(fallbackRow).toContain('status-chip tag primary">默认镜像</span>');
 
         const missingDefaultHtml = renderAdminPage({
             ...baseState,
@@ -1122,6 +1221,141 @@ describe('AdminPanel', () => {
             type: 'testagent_cloud',
             skip_git: false,
         });
+    });
+
+    it('forwards automation metadata, omits blank inherited fields, and preserves explicit image overrides', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const initializationPoller = { initialize: vi.fn(async () => undefined) };
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi), initializationPoller });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            type: 'autotest_cloud',
+            giteeMode: 'from',
+            from: 'source-service-1',
+            skip_git: true,
+            image: 'registry.test:5000/autotest/default:v1',
+            imageOverride: false,
+            auto_test_id: ' auto-17 ',
+            source_business_id: '   ',
+            task_type: '0',
+        });
+
+        expect(adminApi.createContainer).toHaveBeenNthCalledWith(1, {
+            user_id: 'user-5',
+            type: 'autotest_cloud',
+            skip_git: true,
+            from: 'source-service-1',
+            auto_test_id: 'auto-17',
+            task_type: 0,
+        });
+        expect(initializationPoller.initialize).not.toHaveBeenCalled();
+
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-6',
+            type: 'evaluation_cloud',
+            giteeMode: 'none',
+            image: 'registry.test:5000/evaluation/custom:v2',
+            imageOverride: true,
+            auto_test_id: 'must-not-be-sent',
+            source_business_id: 'must-not-be-sent',
+            task_type: 'not-an-integer',
+        });
+
+        expect(adminApi.createContainer).toHaveBeenNthCalledWith(2, {
+            user_id: 'user-6',
+            type: 'evaluation_cloud',
+            skip_git: false,
+            image: 'registry.test:5000/evaluation/custom:v2',
+        });
+    });
+
+    it('rejects non-integer automation task types before calling the service', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            type: 'autotest_cloud',
+            giteeMode: 'none',
+            task_type: '1.5',
+        });
+
+        expect(adminApi.createContainer).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Task Type 必须是整数');
+    });
+
+    it('shows source-task metadata conflicts without changing the submitted values', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.createContainer = vi.fn(async () => {
+            throw new RestClientError(
+                'http',
+                'automation_metadata_conflict',
+                '自动化任务字段与来源服务不一致',
+                409,
+                undefined,
+                { method: 'POST', path: '/admin/containers' },
+            );
+        });
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-5',
+            type: 'autotest_cloud',
+            giteeMode: 'from',
+            from: 'source-service-1',
+            auto_test_id: 'conflicting-value',
+            task_type: '2',
+        });
+
+        expect(adminApi.createContainer).toHaveBeenCalledWith({
+            user_id: 'user-5',
+            type: 'autotest_cloud',
+            skip_git: false,
+            from: 'source-service-1',
+            auto_test_id: 'conflicting-value',
+            task_type: 2,
+        });
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining('后端拒绝了源服务的创建请求。若冲突涉及自动化任务字段，留空表示沿用原服务值；显式填写必须与原值一致。'),
+            '复制',
+        );
+        expect(vscode.window.showErrorMessage.mock.calls[0]?.[0]).toContain('自动化任务字段与来源服务不一致');
+
+        await send(panel, {
+            command: 'createContainer',
+            user_id: 'user-6',
+            type: 'autotest_cloud',
+            giteeMode: 'replace',
+            replace: 'target-service-1',
+            source_business_id: 'conflicting-business',
+        });
+
+        expect(adminApi.createContainer).toHaveBeenNthCalledWith(2, {
+            user_id: 'user-6',
+            type: 'autotest_cloud',
+            skip_git: false,
+            replace: 'target-service-1',
+            source_business_id: 'conflicting-business',
+        });
+        expect(vscode.window.showErrorMessage).toHaveBeenNthCalledWith(
+            2,
+            expect.stringContaining('后端拒绝了替换目标的创建请求。若冲突涉及自动化任务字段，留空表示沿用原服务值；显式填写必须与原值一致。'),
+            '复制',
+        );
     });
 
     it('passes source service IDs and images to the backend and displays its error unchanged', async () => {
@@ -2099,9 +2333,10 @@ function createAdminApi(): AdminRestApi {
     };
 }
 
-function createDefaultImages(testagentCloud: string | null, autotestCloud: string | null): AdminDefaultImage[] {
+function createDefaultImages(testagentCloud: string | null, autotestCloud: string | null, evaluationCloud: string | null = null): AdminDefaultImage[] {
     return [
         { type: 'testagent_cloud', fullName: testagentCloud },
+        { type: 'evaluation_cloud', fullName: evaluationCloud },
         { type: 'autotest_cloud', fullName: autotestCloud },
     ];
 }
@@ -2127,6 +2362,9 @@ function sampleContainer() {
         authorize_general_account: false,
         deleted_at: null,
         business_deleted: false,
+        auto_test_id: null,
+        source_business_id: null,
+        task_type: null,
     };
 }
 

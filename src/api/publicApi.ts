@@ -596,6 +596,9 @@ function mergeFinalContainerStatus(created: CreateContainerResponse, finalContai
     if (Object.prototype.hasOwnProperty.call(finalContainer, 'api_token')) {
         result.api_token = finalContainer.api_token;
     }
+    result.auto_test_id = finalContainer.auto_test_id ?? created.auto_test_id;
+    result.source_business_id = finalContainer.source_business_id ?? created.source_business_id;
+    result.task_type = finalContainer.task_type ?? created.task_type;
     return result;
 }
 

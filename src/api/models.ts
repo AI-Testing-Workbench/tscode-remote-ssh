@@ -1,6 +1,6 @@
 import type { ContainerConfigEntry } from '../containerConfig';
 
-export type ContainerTypeValue = 'testagent_cloud' | 'autotest_cloud';
+export type ContainerTypeValue = 'testagent_cloud' | 'testagent_cloud_chrome' | 'autotest_cloud' | 'evaluation_cloud';
 
 export type GitFailureStatus =
     | 'failed_timeout'
@@ -24,11 +24,16 @@ export type GitStatus =
 export interface UserCreateContainerRequest {
     user_id: string;
     type?: ContainerTypeValue;
+    from?: string;
+    skip_git?: boolean;
     gitee_user?: string | null;
     gitee_repository?: string | null;
     gitee_branch?: string | null;
     gitee_url?: string | null;
     authorize_general_account?: boolean | null;
+    auto_test_id?: string | null;
+    source_business_id?: string | null;
+    task_type?: number | null;
 }
 
 export type CreateContainerRequest = UserCreateContainerRequest;
@@ -61,6 +66,9 @@ export interface ContainerStatusResponse {
     gitee_repository: string;
     gitee_url: string;
     gitee_branch: string | null;
+    auto_test_id: string | null;
+    source_business_id: string | null;
+    task_type: number | null;
 }
 
 export interface ContainerStatusListResponse {
@@ -76,6 +84,9 @@ export interface CreateContainerResponse {
     started_at?: string | null;
     expires_at?: string | null;
     api_token?: string;
+    auto_test_id: string | null;
+    source_business_id: string | null;
+    task_type: number | null;
 }
 
 /** Receives the same SSH entry shape used by ContainerConfig; async work must be awaited or returned. */
@@ -124,6 +135,9 @@ export interface AdminCreateContainerRequest {
     expiration_hours?: number | null;
     cpu?: number | null;
     memory?: number | null;
+    auto_test_id?: string | null;
+    source_business_id?: string | null;
+    task_type?: number | null;
 }
 
 export interface AdminContainerResponse {
@@ -150,6 +164,9 @@ export interface AdminContainerResponse {
     authorize_general_account: boolean;
     deleted_at?: string | null;
     business_deleted: boolean;
+    auto_test_id: string | null;
+    source_business_id: string | null;
+    task_type: number | null;
 }
 
 export type AdminCreateContainerResponse = Omit<AdminContainerResponse, 'git_fin_status'>;

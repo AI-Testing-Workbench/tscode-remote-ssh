@@ -28,6 +28,16 @@ class FakeClassList {
     public remove(value: string): void {
         this.values.delete(value);
     }
+
+    public toggle(value: string, force?: boolean): boolean {
+        const enabled = force ?? !this.values.has(value);
+        if (enabled) {
+            this.values.add(value);
+        } else {
+            this.values.delete(value);
+        }
+        return enabled;
+    }
 }
 
 class FakeElement {
@@ -134,6 +144,8 @@ class FakeElement {
         this.selectionEnd = end;
         this.selectionDirection = direction;
     }
+
+    public setCustomValidity(): void {}
 
     public get dataset(): Record<string, string> {
         return Object.fromEntries(Object.entries(this.attributes)
@@ -254,7 +266,7 @@ function runScript(document: FakeDocument, initialState: Record<string, unknown>
     };
 }
 
-function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuDefault = '2', memoryDefault = '4'): {
+function createFormDocument(imageValues: string[] = ['image-1', 'image-2', 'image-3'], cpuDefault = '2', memoryDefault = '4'): {
     document: FakeDocument;
     userId: FakeElement;
     giteeModeFrom: FakeElement;
@@ -273,6 +285,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     cpu: FakeElement;
     memory: FakeElement;
     autoPush: FakeElement;
+    containerType: FakeElement;
     image: FakeElement;
     imageWrapper: FakeElement;
     imageLabel: FakeElement;
@@ -283,6 +296,13 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     outside: FakeElement;
     submitLabel: FakeElement;
     whitelistUserId: FakeElement;
+    autoTestId: FakeElement;
+    sourceBusinessId: FakeElement;
+    taskType: FakeElement;
+    taskTypeDescription: FakeElement;
+    taskFieldsRow: FakeElement;
+    defaultImageHint: FakeElement;
+    createButton: FakeElement;
 } {
     const document = new FakeDocument();
     const form = new FakeElement('div', { 'data-form': 'createContainer' });
@@ -307,11 +327,37 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     const cpu = new FakeElement('input', { 'data-field': 'cpu', 'data-persist-key': 'create.cpu', 'data-default-value': cpuDefault, type: 'number', value: cpuDefault });
     const memory = new FakeElement('input', { 'data-field': 'memory', 'data-persist-key': 'create.memory', 'data-default-value': memoryDefault, type: 'number', value: memoryDefault });
     const autoPush = new FakeElement('input', { 'data-field': 'autoPush', 'data-persist-key': 'upload.autoPush', type: 'checkbox', checked: '' });
+    const containerType = new FakeElement('select', {
+        'data-field': 'type',
+        'data-persist-key': 'create.type',
+        type: 'select-one',
+        value: 'testagent_cloud',
+    });
+    containerType.options.push(
+        { value: 'testagent_cloud' },
+        { value: 'testagent_cloud_chrome' },
+        { value: 'evaluation_cloud' },
+        { value: 'autotest_cloud' },
+    );
     const imageWrapper = new FakeElement('span', { 'data-custom-select': '', class: 'custom-select' });
     const imageLabel = new FakeElement('span', { 'data-select-label': '' });
     const imageTrigger = new FakeElement('button', { 'data-select-trigger': '' });
     const submitLabel = new FakeElement('span', { 'data-create-submit-label': '' });
-    const image = new FakeElement('select', { class: 'native-select', 'data-field': 'image', 'data-persist-key': 'create.image', value: 'image-1' });
+    const defaultImages = {
+        testagent_cloud: 'image-1',
+        evaluation_cloud: 'image-3',
+        autotest_cloud: 'image-2',
+    };
+    const image = new FakeElement('select', {
+        class: 'native-select',
+        'data-field': 'image',
+        'data-persist-key': 'create.image',
+        'data-default-value': 'image-1',
+        'data-default-images': JSON.stringify(defaultImages),
+        'data-default-image-fallback': '',
+        'data-listed-default-images': JSON.stringify(Object.values(defaultImages)),
+        value: 'image-1',
+    });
     const imageMenu = new FakeElement('span', { 'data-select-menu': '' });
     const imageSearchInput = new FakeElement('input', { 'data-select-search': '', type: 'search' });
     const imageSearchEmpty = new FakeElement('span', { 'data-select-search-empty': '' });
@@ -323,6 +369,32 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     }));
     imageOptions.forEach(option => { option.textContent = option.getAttribute('data-select-value') ?? ''; });
     image.options.push(...imageValues.map(value => ({ value, textContent: value })));
+    const defaultImageHint = new FakeElement('small', { 'data-default-image-hint': '' });
+    const taskFieldsRow = new FakeElement('div', { 'data-task-fields-row': '', class: 'task-fields-row task-fields-disabled' });
+    const autoTestId = new FakeElement('input', { 'data-field': 'auto_test_id', 'data-persist-key': 'create.auto_test_id', type: 'text', disabled: '' });
+    const sourceBusinessId = new FakeElement('input', { 'data-field': 'source_business_id', 'data-persist-key': 'create.source_business_id', type: 'text', disabled: '' });
+    const taskType = new FakeElement('input', {
+        'data-field': 'task_type',
+        'data-persist-key': 'create.task_type',
+        'data-task-type-descriptions': JSON.stringify({
+            0: '低码自动化任务',
+            1: '低码自动化重跑任务',
+            2: '并发执行集任务',
+            3: '移动端执行集任务',
+            4: '高码自动化任务',
+            5: '移动端重跑任务',
+            6: '高码自动化重跑任务',
+        }),
+        type: 'number',
+        disabled: '',
+    });
+    const taskTypeDescription = new FakeElement('small', { 'data-task-type-description': '' });
+    taskTypeDescription.hidden = true;
+    taskFieldsRow.appendChild(autoTestId);
+    taskFieldsRow.appendChild(sourceBusinessId);
+    taskFieldsRow.appendChild(taskType);
+    taskFieldsRow.appendChild(taskTypeDescription);
+    const createButton = new FakeElement('button', { 'data-action': 'createContainer' });
     const whitelistForm = new FakeElement('div', { 'data-form': 'whitelistUser' });
     const whitelistUserId = new FakeElement('input', { 'data-field': 'user_id', 'data-persist-key': 'whitelist.user_id', type: 'text' });
     const outside = new FakeElement('button');
@@ -345,6 +417,8 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     form.appendChild(giteeModeParts);
     form.appendChild(partsPanel);
     form.appendChild(branchRow);
+    form.appendChild(containerType);
+    form.appendChild(taskFieldsRow);
     form.appendChild(skipGit);
     form.appendChild(cpu);
     form.appendChild(memory);
@@ -357,6 +431,8 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
     imageWrapper.appendChild(image);
     imageWrapper.appendChild(imageMenu);
     form.appendChild(imageWrapper);
+    form.appendChild(defaultImageHint);
+    form.appendChild(createButton);
     form.appendChild(submitLabel);
     whitelistForm.appendChild(whitelistUserId);
     document.appendChild(form);
@@ -381,6 +457,7 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
         cpu,
         memory,
         autoPush,
+        containerType,
         image,
         imageWrapper,
         imageLabel,
@@ -391,6 +468,13 @@ function createFormDocument(imageValues: string[] = ['image-1', 'image-2'], cpuD
         outside,
         submitLabel,
         whitelistUserId,
+        autoTestId,
+        sourceBusinessId,
+        taskType,
+        taskTypeDescription,
+        taskFieldsRow,
+        defaultImageHint,
+        createButton,
     };
 }
 
@@ -492,6 +576,7 @@ describe('Admin Webview state', () => {
     it('enables repository fields only for Gitee binding modes', () => {
         const form = createFormDocument();
         const runtime = runScript(form.document, {});
+        expect(form.defaultImageHint.textContent).toBe('');
 
         expect(form.from.disabled).toBe(true);
         expect(form.giteeBranch.disabled).toBe(true);
@@ -574,6 +659,159 @@ describe('Admin Webview state', () => {
         runScript(latestDefaults.document, updatedRuntime.getState());
         expect(latestDefaults.cpu.value).toBe('1.5');
         expect(latestDefaults.memory.value).toBe('');
+    });
+
+    it('previews the selected type default and retains only deliberate image overrides', () => {
+        const form = createFormDocument();
+        const runtime = runScript(form.document, {});
+
+        form.containerType.value = 'testagent_cloud_chrome';
+        form.document.dispatch('change', form.containerType);
+        expect(form.image.value).toBe('image-1');
+        expect(runtime.getState().editedFields).not.toHaveProperty('create.image');
+
+        form.containerType.value = 'autotest_cloud';
+        form.document.dispatch('change', form.containerType);
+        expect(form.image.value).toBe('image-2');
+        expect(runtime.getState().editedFields).not.toHaveProperty('create.image');
+
+        const evaluation = createFormDocument();
+        const evaluationRuntime = runScript(evaluation.document, {});
+        evaluation.containerType.value = 'evaluation_cloud';
+        evaluation.document.dispatch('change', evaluation.containerType);
+        expect(evaluation.image.value).toBe('image-3');
+        expect(evaluationRuntime.getState().editedFields).not.toHaveProperty('create.image');
+
+        form.image.value = 'image-1';
+        form.document.dispatch('change', form.image);
+        expect(runtime.getState().editedFields).toMatchObject({ 'create.image': true });
+        expect(form.defaultImageHint.textContent).toBe('');
+
+        form.containerType.value = 'evaluation_cloud';
+        form.document.dispatch('change', form.containerType);
+        expect(form.image.value).toBe('image-1');
+        expect(runtime.getState().editedFields).toMatchObject({ 'create.image': true });
+    });
+
+    it('keeps the legacy image-status fallback as a preview without turning it into an override', () => {
+        const form = createFormDocument();
+        form.image.setAttribute('data-default-images', JSON.stringify({
+            testagent_cloud: '',
+            evaluation_cloud: '',
+            autotest_cloud: '',
+        }));
+        form.image.setAttribute('data-default-value', 'image-2');
+        form.image.setAttribute('data-default-image-fallback', 'image-2');
+        form.image.setAttribute('data-listed-default-images', JSON.stringify(['image-2']));
+
+        const runtime = runScript(form.document, {});
+
+        expect(form.image.value).toBe('image-2');
+        expect(runtime.getState().editedFields).not.toHaveProperty('create.image');
+        expect(runtime.getState().fields).not.toHaveProperty('create.image');
+        expect(form.defaultImageHint.textContent).toContain('镜像状态标记的默认候选为 image-2');
+    });
+
+    it('shows only the required no-default and missing-default messages', () => {
+        const noDefault = createFormDocument();
+        noDefault.image.setAttribute('data-default-images', JSON.stringify({
+            testagent_cloud: '',
+            evaluation_cloud: '',
+            autotest_cloud: '',
+        }));
+        noDefault.image.setAttribute('data-default-value', '');
+        noDefault.image.setAttribute('data-default-image-fallback', '');
+        noDefault.image.setAttribute('data-listed-default-images', '[]');
+        runScript(noDefault.document, {});
+        expect(noDefault.defaultImageHint.textContent).toContain('尚未配置默认镜像');
+
+        const missingDefault = createFormDocument();
+        missingDefault.image.setAttribute('data-default-images', JSON.stringify({
+            testagent_cloud: 'missing-image',
+            evaluation_cloud: '',
+            autotest_cloud: '',
+        }));
+        missingDefault.image.setAttribute('data-default-value', 'missing-image');
+        missingDefault.image.setAttribute('data-default-image-fallback', '');
+        missingDefault.image.setAttribute('data-listed-default-images', '[]');
+        runScript(missingDefault.document, {});
+        expect(missingDefault.defaultImageHint.textContent).toContain('默认镜像未出现在镜像列表中：missing-image');
+    });
+
+    it('restores automated task fields, describes task types, and omits disabled fields from submission', () => {
+        const first = createFormDocument();
+        const firstRuntime = runScript(first.document, {});
+        expect(first.autoTestId.disabled).toBe(true);
+
+        first.containerType.value = 'autotest_cloud';
+        first.document.dispatch('change', first.containerType);
+        expect(first.autoTestId.disabled).toBe(false);
+        expect(first.sourceBusinessId.disabled).toBe(false);
+        expect(first.taskType.disabled).toBe(false);
+        expect(first.image.value).toBe('image-2');
+
+        first.autoTestId.value = 'auto-17';
+        first.document.dispatch('input', first.autoTestId);
+        first.sourceBusinessId.value = 'business-9';
+        first.document.dispatch('input', first.sourceBusinessId);
+        first.taskType.value = '0';
+        first.document.dispatch('input', first.taskType);
+        expect(first.taskTypeDescription.textContent).toBe('低码自动化任务');
+        expect(first.taskTypeDescription.hidden).toBe(false);
+
+        const taskTypeDescriptions = [
+            ['0', '低码自动化任务'],
+            ['1', '低码自动化重跑任务'],
+            ['2', '并发执行集任务'],
+            ['3', '移动端执行集任务'],
+            ['4', '高码自动化任务'],
+            ['5', '移动端重跑任务'],
+            ['6', '高码自动化重跑任务'],
+        ];
+        for (const [taskType, expectedDescription] of taskTypeDescriptions) {
+            first.taskType.value = taskType;
+            first.document.dispatch('input', first.taskType);
+            expect(first.taskTypeDescription.textContent).toBe(expectedDescription);
+        }
+
+        first.taskType.value = '9';
+        first.document.dispatch('input', first.taskType);
+        expect(first.taskTypeDescription.textContent).toBe('未知 Task Type');
+        first.taskType.value = '1.5';
+        first.document.dispatch('input', first.taskType);
+        expect(first.taskTypeDescription.textContent).toBe('Task Type 必须是整数');
+        first.taskType.value = '';
+        first.document.dispatch('input', first.taskType);
+        expect(first.taskTypeDescription.hidden).toBe(true);
+
+        first.taskType.value = '0';
+        first.document.dispatch('input', first.taskType);
+        const restored = createFormDocument();
+        const restoredRuntime = runScript(restored.document, firstRuntime.getState());
+        expect(restored.containerType.value).toBe('autotest_cloud');
+        expect(restored.autoTestId.value).toBe('auto-17');
+        expect(restored.sourceBusinessId.value).toBe('business-9');
+        expect(restored.taskType.value).toBe('0');
+        expect(restored.taskFieldsRow.classList.contains('task-fields-disabled')).toBe(false);
+        expect(restored.taskTypeDescription.textContent).toBe('低码自动化任务');
+
+        restored.containerType.value = 'testagent_cloud';
+        restored.document.dispatch('change', restored.containerType);
+        expect(restored.autoTestId.disabled).toBe(true);
+        expect(restored.sourceBusinessId.disabled).toBe(true);
+        expect(restored.taskType.disabled).toBe(true);
+        restored.document.dispatch('click', restored.createButton);
+
+        const createMessage = restoredRuntime.messages.find(message => (message as { command?: string }).command === 'createContainer');
+        expect(createMessage).toMatchObject({
+            command: 'createContainer',
+            type: 'testagent_cloud',
+            image: 'image-1',
+            imageOverride: false,
+        });
+        expect(createMessage).not.toHaveProperty('auto_test_id');
+        expect(createMessage).not.toHaveProperty('source_business_id');
+        expect(createMessage).not.toHaveProperty('task_type');
     });
 
     it('notifies the host while a custom image selector is open', () => {
