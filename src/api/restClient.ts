@@ -28,6 +28,7 @@ import {
     GitFailureStatus,
     GitReportResponse,
     GitStateResponse,
+    GiteeUrlsResponse,
     ImageDeleteRequest,
     ImageListResponse,
     ImageReferenceRequest,
@@ -150,6 +151,7 @@ export interface RestClientOptions {
 export interface UserRestApi {
     createContainer(request: CreateContainerRequest): Promise<CreateContainerResponse>;
     getServiceIds(query: UserContainerQuery): Promise<ServiceIdsResponse>;
+    getGiteeUrlHistory(request: UserIdRequest): Promise<GiteeUrlsResponse>;
     getContainerStatuses(query: UserContainerQuery): Promise<ContainerStatusListResponse>;
     getContainer(serviceId: string): Promise<ContainerStatusResponse>;
     checkAdmin(request: AdminCheckRequest): Promise<AdminCheckResponse>;
@@ -356,6 +358,9 @@ export class RestClient {
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
             }),
             getServiceIds: query => this.requestJson<ServiceIdsResponse>('GET', '/user/containers', { query }),
+            getGiteeUrlHistory: request => this.requestJson<GiteeUrlsResponse>('POST', '/user/gitee-urls', {
+                jsonBody: request,
+            }),
             getContainerStatuses: async query => {
                 const response = await this.requestJson<ContainerStatusListResponse>('GET', '/user/containers/status', { query });
                 return {

@@ -11,7 +11,11 @@ import { WEBVIEW_SCRIPT } from '../src/webviewScript';
 import { ContainerInitializationError } from '../src/containerInitializationPoller';
 import * as vscode from './mocks/vscode';
 
-type ContainerTypeChoice = import('vscode').QuickPickItem & { type: ContainerTypeValue | 'yes' | 'no' };
+type ContainerTypeChoice = import('vscode').QuickPickItem & {
+    type: ContainerTypeValue | 'yes' | 'history' | 'no' | 'gitee-history';
+    giteeUrl?: string;
+    giteeBranch?: string;
+};
 
 describe('SidebarSyncState', () => {
     it('publishes the latest sync result and stops after disposal', () => {
@@ -1228,6 +1232,7 @@ describe('SidebarViewProvider', () => {
         state.update({ containers: [], changed: false });
         const config = createConfig([configuredContainer('existing-service', 'alice/repo')]);
         const publicApi = createPublicApi();
+        const userApi = createUserApi(false);
         publicApi.createContainer = vi.fn(async () => ({
             container_id: 'physical-created-1',
             service_id: 'service-created-1',
@@ -1238,7 +1243,7 @@ describe('SidebarViewProvider', () => {
         const showInputBox = vi.fn(async () => values.shift());
         const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[0]);
         const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
-        const provider = createProvider({ state, config, publicApi, sync, showInputBox, showQuickPick });
+        const provider = createProvider({ state, config, publicApi, userApi, sync, showInputBox, showQuickPick });
         const view = createWebviewView();
         await provider.resolveWebviewView(view as never);
 
@@ -1281,12 +1286,15 @@ describe('SidebarViewProvider', () => {
         }));
         expect(showQuickPick).toHaveBeenNthCalledWith(2, [
             { label: '是', description: '拉取码云仓库', type: 'yes' },
+            { label: '历史', description: '从码云仓库历史记录中选择', type: 'history' },
             { label: '否', description: '不拉取码云仓库', type: 'no' },
         ], expect.objectContaining({
             title: '创建新 云端沙箱 服务',
             canPickMany: false,
             ignoreFocusOut: true,
         }));
+        expect(showQuickPick).toHaveBeenCalledTimes(2);
+        expect(userApi.getGiteeUrlHistory).not.toHaveBeenCalled();
         expect(showQuickPick.mock.invocationCallOrder[0]).toBeLessThan(showInputBox.mock.invocationCallOrder[0]);
         expect(showQuickPick.mock.invocationCallOrder[1]).toBeLessThan(showInputBox.mock.invocationCallOrder[0]);
         expect(config.upsertContainer).toHaveBeenCalledWith(expect.anything(), {
@@ -1309,6 +1317,128 @@ describe('SidebarViewProvider', () => {
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('云端沙箱 服务创建成功');
     });
 
+    it('loads history only after selecting History and keeps the prefilled fields editable', async () => {
+        const config = createConfig();
+        const publicApi = createPublicApi();
+        publicApi.createContainer = vi.fn(async () => ({
+            service_id: 'service-created-from-history',
+            status: 'pending',
+            endpoint: '10.0.0.15:2222',
+        } as never));
+        const userApi = createUserApi(false);
+        const historyUrl = 'https://gitee.com/alice/original-repo';
+        userApi.getGiteeUrlHistory = vi.fn(async () => ({
+            gitee_urls: [{ gitee_url: historyUrl, gitee_branch: 'main' }],
+        }));
+        const values = ['https://gitee.com/bob/edited-repo', 'release'];
+        const showInputBox = vi.fn(async () => values.shift());
+        const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[0])
+            .mockImplementationOnce(async items => items[0])
+            .mockImplementationOnce(async items => items.find(item => item.type === 'history')!)
+            .mockImplementationOnce(async items => items[0]);
+        const provider = createProvider({ config, publicApi, userApi, showInputBox, showQuickPick });
+
+        await provider.createContainerFromPrompt();
+
+        expect(userApi.getGiteeUrlHistory).toHaveBeenCalledWith({ user_id: 'user-1' });
+        expect(showQuickPick).toHaveBeenCalledTimes(3);
+        expect(showQuickPick).toHaveBeenNthCalledWith(2, [
+            { label: '是', description: '拉取码云仓库', type: 'yes' },
+            { label: '历史', description: '从码云仓库历史记录中选择', type: 'history' },
+            { label: '否', description: '不拉取码云仓库', type: 'no' },
+        ], expect.anything());
+        expect(showQuickPick).toHaveBeenNthCalledWith(3, [{
+            label: historyUrl,
+            description: '(main)',
+            type: 'gitee-history',
+            giteeUrl: historyUrl,
+            giteeBranch: 'main',
+        }], expect.objectContaining({ placeHolder: '选择码云仓库历史记录以继续' }));
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            prompt: '码云仓库地址 (HTTP协议)',
+            value: historyUrl,
+        }));
+        expect(showInputBox).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            prompt: '码云分支 (可选)',
+            value: 'main',
+        }));
+        expect(publicApi.createContainer).toHaveBeenCalledWith({
+            plugin_id: 'test-tech.tscode-remote-ssh',
+            type: 'testagent_cloud',
+            gitee_url: 'https://gitee.com',
+            gitee_user: 'bob',
+            gitee_repository: 'edited-repo',
+            gitee_branch: 'release',
+        }, { initializationSignal: expect.any(AbortSignal) });
+    });
+
+    it('falls back to the original editable inputs when history is empty', async () => {
+        const publicApi = createPublicApi();
+        publicApi.createContainer = vi.fn(async () => ({
+            service_id: 'service-created-with-empty-history',
+            status: 'pending',
+            endpoint: '10.0.0.17:2222',
+        } as never));
+        const userApi = createUserApi(false);
+        const values = ['https://gitee.com/bob/new-repo', 'feature'];
+        userApi.getGiteeUrlHistory = vi.fn(async () => ({ gitee_urls: [] }));
+        const showInputBox = vi.fn(async () => values.shift());
+        const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[0])
+            .mockImplementationOnce(async items => items[0])
+            .mockImplementationOnce(async items => items.find(item => item.type === 'history')!);
+        const provider = createProvider({ publicApi, userApi, showInputBox, showQuickPick });
+
+        await provider.createContainerFromPrompt();
+
+        expect(userApi.getGiteeUrlHistory).toHaveBeenCalledOnce();
+        expect(showQuickPick).toHaveBeenCalledTimes(2);
+        expect(showInputBox).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            prompt: '码云仓库地址 (HTTP协议)',
+        }));
+        expect(publicApi.createContainer).toHaveBeenCalledWith(expect.objectContaining({
+            gitee_url: 'https://gitee.com',
+            gitee_user: 'bob',
+            gitee_repository: 'new-repo',
+            gitee_branch: 'feature',
+        }), expect.anything());
+    });
+
+    it('silently falls back to manual entry when Gitee history loading fails', async () => {
+        const publicApi = createPublicApi();
+        publicApi.createContainer = vi.fn(async () => ({
+            service_id: 'service-created-without-history',
+            status: 'pending',
+            endpoint: '10.0.0.16:2222',
+        } as never));
+        const userApi = createUserApi(false);
+        userApi.getGiteeUrlHistory = vi.fn(async () => {
+            throw new Error('history endpoint unavailable');
+        });
+        const values = ['https://gitee.com/alice/manual-repo', 'develop'];
+        const inputBoxOptions: import('vscode').InputBoxOptions[] = [];
+        const showInputBox = vi.fn(async (options: import('vscode').InputBoxOptions) => {
+            inputBoxOptions.push(options);
+            return values.shift();
+        });
+        const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[0])
+            .mockImplementationOnce(async items => items[0])
+            .mockImplementationOnce(async items => items.find(item => item.type === 'history')!);
+        const provider = createProvider({ publicApi, userApi, showInputBox, showQuickPick });
+
+        await provider.createContainerFromPrompt();
+
+        expect(userApi.getGiteeUrlHistory).toHaveBeenCalledOnce();
+        expect(showQuickPick).toHaveBeenCalledTimes(2);
+        expect(inputBoxOptions[0]).not.toHaveProperty('value');
+        expect(inputBoxOptions[1]).not.toHaveProperty('value');
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+        expect(publicApi.createContainer).toHaveBeenCalledWith(expect.objectContaining({
+            gitee_user: 'alice',
+            gitee_repository: 'manual-repo',
+            gitee_branch: 'develop',
+        }), expect.anything());
+    });
+
     it('creates a browser execution container when its image is selected', async () => {
         const publicApi = createPublicApi();
         publicApi.createContainer = vi.fn(async () => ({
@@ -1319,7 +1449,9 @@ describe('SidebarViewProvider', () => {
             source_business_id: null,
             task_type: null,
         }));
-        const showQuickPick = vi.fn(async (items: readonly ContainerTypeChoice[]) => items[1]);
+        const showQuickPick = vi.fn()
+            .mockImplementationOnce(async (items: readonly ContainerTypeChoice[]) => items[1])
+            .mockImplementationOnce(async (items: readonly ContainerTypeChoice[]) => items.find(item => item.type === 'no')!);
         const showInputBox = vi.fn(async () => 'unused');
         const provider = createProvider({
             publicApi,
@@ -1381,6 +1513,7 @@ describe('SidebarViewProvider', () => {
     it('skips the 码云 input and creates without repository fields when No is selected', async () => {
         const config = createConfig();
         const publicApi = createPublicApi();
+        const userApi = createUserApi(false);
         publicApi.createContainer = vi.fn(async () => ({
             service_id: 'service-created-without-gitee',
             status: 'pending',
@@ -1392,13 +1525,14 @@ describe('SidebarViewProvider', () => {
         const showInputBox = vi.fn(async () => 'unused');
         const showQuickPick = vi.fn()
             .mockImplementationOnce(async (items: readonly ContainerTypeChoice[]) => items[0])
-            .mockImplementationOnce(async (items: readonly ContainerTypeChoice[]) => items[1]);
-        const provider = createProvider({ config, publicApi, showInputBox, showQuickPick });
+            .mockImplementationOnce(async (items: readonly ContainerTypeChoice[]) => items.find(item => item.type === 'no')!);
+        const provider = createProvider({ config, publicApi, userApi, showInputBox, showQuickPick });
 
         await provider.createContainerFromPrompt();
 
         expect(showQuickPick).toHaveBeenCalledTimes(2);
         expect(showInputBox).not.toHaveBeenCalled();
+        expect(userApi.getGiteeUrlHistory).not.toHaveBeenCalled();
         expect(publicApi.createContainer).toHaveBeenCalledWith(
             { plugin_id: 'test-tech.tscode-remote-ssh', type: 'testagent_cloud' },
             { initializationSignal: expect.any(AbortSignal) },
@@ -2092,6 +2226,7 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
         config: options.config ?? createConfig(),
         publicApi,
         userIdProvider: options.userIdProvider ?? { getCurrentUserId: vi.fn(async () => 'user-1') },
+        userApiFactory: () => userApi,
         getSettings: settingsValue,
         cloudMode: options.cloudMode,
         getCloudMode: options.getCloudMode,
@@ -2108,7 +2243,7 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
 
 function selectDefaultImageWithoutGitee(): ProviderTestOptions['showQuickPick'] {
     let quickPickIndex = 0;
-    return async items => items[quickPickIndex++ === 0 ? 0 : 1];
+    return async items => quickPickIndex++ === 0 ? items[0] : items.find(item => item.type === 'no');
 }
 
 interface ProviderTestOptions {
@@ -2152,6 +2287,7 @@ function createUserApi(admin: boolean): UserRestApi {
             status: 'pending',
         } as never)),
         getServiceIds: vi.fn(async () => ({ service_ids: [] })),
+        getGiteeUrlHistory: vi.fn(async () => ({ gitee_urls: [] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => ({
             service_id: 'service-1',

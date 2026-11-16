@@ -740,6 +740,7 @@ function createUserApi(): UserRestApi {
             task_type: null,
         })),
         getServiceIds: vi.fn(async () => ({ service_ids: ['service-1'] })),
+        getGiteeUrlHistory: vi.fn(async () => ({ gitee_urls: [] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => containerStatus('service-1', 'running')),
         checkAdmin: vi.fn(async () => ({ admin: false, limit: 'user' as const })),

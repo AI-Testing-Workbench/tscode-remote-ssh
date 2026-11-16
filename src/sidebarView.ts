@@ -24,6 +24,7 @@ import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
 import { PUBLIC_EXTENSION_ID, type PublicUserContainerApi } from './api/publicApi';
 import type { ContainerTypeValue } from './api/models';
+import { RestClient, type UserRestApi } from './api/restClient';
 import {
     showContainerCreationError,
     showContainerCreationSuccess,
@@ -36,7 +37,9 @@ export type SidebarSyncListener = (result: ContainerSyncResult) => void;
 const HELP_MANUAL_URL_BASE64 = 'aHR0cDovL3RzY29kZS1nYXRld2F5LnBhYXN1YXQuY21iY2hpbmEuY24vdGVzdGFnZW50LWNsb3VkLWRvYw==';
 
 interface CreateContainerQuickPickItem extends vscode.QuickPickItem {
-    type: ContainerTypeValue | 'yes' | 'no';
+    type: ContainerTypeValue | 'yes' | 'history' | 'no' | 'gitee-history';
+    giteeUrl?: string;
+    giteeBranch?: string;
 }
 
 export class SidebarSyncState {
@@ -88,6 +91,7 @@ export interface SidebarViewOptions {
     config: ContainerConfig;
     publicApi: PublicUserContainerApi;
     userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
+    userApiFactory?: (baseUrl: string) => UserRestApi;
     getSettings?: () => RemoteSettings;
     cloudMode?: boolean;
     getCloudMode?: () => boolean | Thenable<boolean>;
@@ -130,6 +134,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly config: ContainerConfig;
     private readonly publicApi: PublicUserContainerApi;
     private readonly userIdProvider: Pick<UserIdProvider, 'getCurrentUserId'>;
+    private readonly userApiFactory: (baseUrl: string) => UserRestApi;
     private readonly getSettings: () => RemoteSettings;
     private readonly getCloudMode: () => boolean | Thenable<boolean>;
     private cloudMode: boolean;
@@ -173,6 +178,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.config = options.config;
         this.publicApi = options.publicApi;
         this.userIdProvider = options.userIdProvider;
+        this.userApiFactory = options.userApiFactory ?? (baseUrl => new RestClient(baseUrl).user);
         this.getSettings = options.getSettings ?? getRemoteSettings;
         this.cloudMode = options.cloudMode === true;
         this.getCloudMode = options.getCloudMode ?? (() => this.cloudMode);
@@ -995,6 +1001,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         const containerType = selectedContainerType.type;
         const giteePullOptions: CreateContainerQuickPickItem[] = [
             { label: '是', description: '拉取码云仓库', type: 'yes' },
+            { label: '历史', description: '从码云仓库历史记录中选择', type: 'history' },
             { label: '否', description: '不拉取码云仓库', type: 'no' },
         ];
         const selectedGiteePull = await this.showQuickPick(giteePullOptions, {
@@ -1005,18 +1012,68 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         });
         if (
             !selectedGiteePull
-            || (selectedGiteePull.type !== 'yes' && selectedGiteePull.type !== 'no')
+            || (selectedGiteePull.type !== 'yes' && selectedGiteePull.type !== 'history' && selectedGiteePull.type !== 'no')
             || !this.isActiveView(context)
         ) {
             return;
         }
 
         let normalizedGiteeInput = '';
-        if (selectedGiteePull.type === 'yes') {
+        let initialGiteeUrl: string | undefined;
+        let initialGiteeBranch: string | undefined;
+        if (selectedGiteePull.type !== 'no') {
+            let historyChoices: CreateContainerQuickPickItem[] = [];
+            if (selectedGiteePull.type === 'history') {
+                try {
+                    const userId = (await this.userIdProvider.getCurrentUserId()).trim();
+                    if (userId) {
+                        const response = await this.userApiFactory(this.getSettings().backendApiUrl)
+                            .getGiteeUrlHistory({ user_id: userId });
+                        if (Array.isArray(response.gitee_urls)) {
+                            historyChoices = response.gitee_urls.flatMap(item => {
+                                if (typeof item?.gitee_url !== 'string' || typeof item.gitee_branch !== 'string') {
+                                    return [];
+                                }
+                                const giteeUrl = item.gitee_url.trim();
+                                const giteeBranch = item.gitee_branch.trim();
+                                if (!giteeUrl) {
+                                    return [];
+                                }
+                                return [{
+                                    label: giteeUrl,
+                                    description: giteeBranch ? `(${giteeBranch})` : '',
+                                    type: 'gitee-history' as const,
+                                    giteeUrl,
+                                    giteeBranch,
+                                }];
+                            });
+                        }
+                    }
+                } catch {
+                    // History is optional; API failures must leave manual creation unchanged.
+                }
+                if (!this.isActiveView(context)) {
+                    return;
+                }
+                if (historyChoices.length > 0) {
+                    const selectedHistory = await this.showQuickPick(historyChoices, {
+                        title,
+                        placeHolder: '选择码云仓库历史记录以继续',
+                        canPickMany: false,
+                        ignoreFocusOut: true,
+                    });
+                    if (!selectedHistory || selectedHistory.type !== 'gitee-history') {
+                        return;
+                    }
+                    initialGiteeUrl = selectedHistory.giteeUrl;
+                    initialGiteeBranch = selectedHistory.giteeBranch;
+                }
+            }
             const giteeInput = await this.showInputBox({
                 title,
                 prompt: '码云仓库地址 (HTTP协议)',
                 placeHolder: '请勿直接粘贴码云仓库的地址，请使用 克隆/下载 按钮提供的 URL',
+                ...(initialGiteeUrl !== undefined ? { value: initialGiteeUrl } : {}),
                 ignoreFocusOut: true,
                 validateInput: value => value.trim() ? undefined : '码云仓库地址不能为空',
             });
@@ -1052,6 +1109,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 title,
                 prompt: '码云分支 (可选)',
                 placeHolder: 'master',
+                ...(initialGiteeBranch !== undefined ? { value: initialGiteeBranch } : {}),
                 ignoreFocusOut: true,
             });
             if (giteeBranch === undefined) {

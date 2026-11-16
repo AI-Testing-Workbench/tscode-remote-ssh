@@ -160,6 +160,21 @@ describe('RestClient', () => {
         });
     });
 
+    it('loads the current user Gitee URL history from the user endpoint', async () => {
+        const response = {
+            gitee_urls: [{ gitee_url: 'https://gitee.com/alice/repo', gitee_branch: 'main' }],
+        };
+        const { requests, transport } = createTransport(jsonResponse(200, response));
+        const client = new RestClient('https://api.example.test/v1', { transport });
+
+        await expect(client.user.getGiteeUrlHistory({ user_id: 'user-1' })).resolves.toEqual(response);
+
+        expect(requests).toHaveLength(1);
+        expect(requests[0].method).toBe('POST');
+        expect(requests[0].url.pathname).toBe('/v1/user/gitee-urls');
+        expect(readJsonBody(requests[0])).toEqual({ user_id: 'user-1' });
+    });
+
     it('accepts all four container types for public queries and the three logical default groups', async () => {
         const { requests, transport } = createTransport(jsonResponse(200, {}));
         const client = new RestClient('https://api.example.test', { transport, operatorUserId: 'admin-1' });

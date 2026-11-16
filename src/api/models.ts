@@ -51,6 +51,15 @@ export interface ServiceIdsResponse {
     service_ids: string[];
 }
 
+export interface GiteeUrlHistoryItem {
+    gitee_url: string;
+    gitee_branch: string;
+}
+
+export interface GiteeUrlsResponse {
+    gitee_urls: GiteeUrlHistoryItem[];
+}
+
 export interface ContainerStatusResponse {
     service_id: string;
     type?: ContainerTypeValue | null;

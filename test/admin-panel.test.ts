@@ -2292,6 +2292,7 @@ function createUserApi(admin: boolean): UserRestApi {
     return {
         createContainer: vi.fn(),
         getServiceIds: vi.fn(),
+        getGiteeUrlHistory: vi.fn(async () => ({ gitee_urls: [] })),
         getContainerStatuses: vi.fn(),
         getContainer: vi.fn(),
         checkAdmin: vi.fn(async () => ({ admin, limit: admin ? 'none' as const : 'user' as const })),
