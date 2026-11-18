@@ -1886,7 +1886,7 @@ function renderDocument(body: string): string {
             .action-button { flex: 1 1 90px; }
         }
         @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+            *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
         }
     </style>
 </head>

@@ -144,6 +144,7 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).toContain('border-radius: 12px');
         expect(view.webview.html).toContain('.action-button { position: relative;');
         expect(view.webview.html).toContain('button.is-loading');
+        expect(view.webview.html).toContain('animation-iteration-count: 1 !important;');
         expect(view.webview.html).toContain('.action-button.is-confirming');
         expect(view.webview.html).toContain('justify-content: center');
         expect(view.webview.html).toContain('.app-bar { display: flex; flex-wrap: nowrap; align-items: center;');
