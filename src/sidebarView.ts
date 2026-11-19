@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { URL } from 'node:url';
 import * as vscode from 'vscode';
 import { ContainerConfig } from './containerConfig';
 import {
@@ -23,7 +24,7 @@ import { getEffectiveRemoteUserName, getRemoteSettings, type RemoteSettings } fr
 import { WEBVIEW_SCRIPT } from './webviewScript';
 import { UserIdProvider } from './user';
 import { PUBLIC_EXTENSION_ID, type PublicUserContainerApi } from './api/publicApi';
-import type { ContainerTypeValue } from './api/models';
+import type { ContainerTypeValue, UserContainerFileSummary } from './api/models';
 import { RestClient, type UserRestApi } from './api/restClient';
 import {
     showContainerCreationError,
@@ -114,6 +115,18 @@ interface SidebarViewContext {
     pageGeneration: number;
 }
 
+type SidebarPageMode = 'services' | 'files';
+
+interface SidebarFileContainer extends UserContainerFileSummary {
+    displayName: string;
+}
+
+interface SidebarFilesState {
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    containers: SidebarFileContainer[];
+    error?: string;
+}
+
 interface SidebarActionState {
     action: string;
     serviceId?: string;
@@ -156,6 +169,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     private readonly activeActions = new Map<string, SidebarActionState>();
     private readonly initializationControllers = new Map<AbortController, SidebarViewContext | undefined>();
     private readonly reconciliationTimers = new Map<string, { operationId: number; timer: ReturnType<typeof setTimeout> }>();
+    private pageMode: SidebarPageMode = 'services';
+    private containerFiles: SidebarFilesState = { status: 'idle', containers: [] };
+    private containerFilesGeneration = 0;
+    private containerFilesRequestGeneration = 0;
+    private containerFilesTimer: ReturnType<typeof setInterval> | undefined;
+    private containerFilesRefreshInFlight = false;
 
     private webviewView: vscode.WebviewView | undefined;
     private messageSubscription: vscode.Disposable | undefined;
@@ -204,8 +223,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             return Promise.resolve();
         }
 
+        this.stopContainerFilesAutoRefresh();
         const generation = ++this.viewGeneration;
         const pageGeneration = ++this.pageGeneration;
+        this.pageMode = 'services';
+        this.containerFilesGeneration++;
+        this.containerFilesRequestGeneration++;
         const context: SidebarViewContext = { webviewView, generation, pageGeneration };
         this.messageSubscription?.dispose();
         this.viewDisposeSubscription?.dispose();
@@ -220,6 +243,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
             if (this.webviewView !== webviewView) {
                 return;
             }
+            this.stopContainerFilesAutoRefresh();
             this.viewGeneration++;
             this.webviewView = undefined;
             this.messageSubscription?.dispose();
@@ -264,6 +288,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                 if (currentContext) {
                     void this.refreshForVisibleView(currentContext);
                 }
+            } else if (!webviewView.visible && this.webviewView === webviewView) {
+                this.stopContainerFilesAutoRefresh();
             }
         });
 
@@ -317,6 +343,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.messageSubscription?.dispose();
         this.viewDisposeSubscription?.dispose();
         this.viewVisibilitySubscription?.dispose();
+        this.stopContainerFilesAutoRefresh();
         this.messageSubscription = undefined;
         this.viewDisposeSubscription = undefined;
         this.viewVisibilitySubscription = undefined;
@@ -327,6 +354,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.clearReconciliationTimers();
         this.viewGeneration++;
         this.pageGeneration++;
+        this.containerFilesGeneration++;
+        this.containerFilesRequestGeneration++;
         this.adminCheckInFlight = undefined;
         this.webviewView = undefined;
         this.abortInitializations();
@@ -360,6 +389,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.adminAllowed = false;
         this.render();
         await this.preparePage(refreshedContext);
+        if (!this.isCurrentPage(refreshedContext)) {
+            return;
+        }
+        if (this.pageMode === 'files' && !this.cloudMode && refreshedContext.webviewView.visible) {
+            await this.refreshContainerFiles(refreshedContext, false);
+            this.startContainerFilesAutoRefresh();
+        } else {
+            this.stopContainerFilesAutoRefresh();
+        }
     }
 
     private async preparePage(context?: SidebarViewContext): Promise<void> {
@@ -478,6 +516,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
 
         if (this.cloudMode) {
             this.setWebviewHtml(renderCloudHtml(this.activeActions));
+            return;
+        }
+
+        if (this.pageMode === 'files') {
+            this.setWebviewHtml(renderContainerFilesHtml(
+                this.containerFiles,
+                this.adminAllowed,
+                this.safeIsDisconnected(),
+                this.activeActions,
+            ));
             return;
         }
 
@@ -666,15 +714,45 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         this.render();
         let outcome: SidebarActionOutcome = 'succeeded';
         try {
+            if (this.pageMode === 'files'
+                && ['create', 'connect', 'restart', 'delete', 'removeHistory', 'clearExpired', 'openNovnc'].includes(action)) {
+                throw new Error('当前页面不支持此操作');
+            }
             switch (action) {
                 case 'refresh':
                     this.pageError = undefined;
                     this.render();
-                    if (!this.pageReady) {
+                    if (this.pageMode === 'files') {
+                        await this.refreshContainerFiles(context);
+                    } else if (!this.pageReady) {
                         await this.preparePage(context);
                     } else {
                         await this.sync.refresh();
                     }
+                    return;
+                case 'toggleContainerFiles':
+                    if (this.cloudMode || this.pageMode !== 'services') {
+                        throw new Error('当前页面不支持此操作');
+                    }
+                    await this.toggleContainerFiles(context);
+                    return;
+                case 'returnToServices':
+                    if (this.pageMode !== 'files') {
+                        throw new Error('当前页面不支持此操作');
+                    }
+                    this.returnToServiceList();
+                    return;
+                case 'retryContainerFiles':
+                    if (this.pageMode !== 'files') {
+                        throw new Error('当前页面不支持此操作');
+                    }
+                    await this.refreshContainerFiles(context);
+                    return;
+                case 'openContainerFileShare':
+                    if (this.pageMode !== 'files') {
+                        throw new Error('当前页面不支持此操作');
+                    }
+                    await this.openContainerFileShare(serviceId);
                     return;
                 case 'openConfig':
                     if (!this.adminAllowed) {
@@ -706,11 +784,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
                     await this.connectContainer(serviceId);
                     return;
                 case 'copyServiceId': {
-                    const container = this.findContainer(serviceId);
-                    if (!container) {
-                        throw new Error('无法复制 ID');
+                    const id = this.pageMode === 'files'
+                        ? this.containerFiles.containers.find(item => item.service_id === serviceId)?.service_id
+                        : this.findContainer(serviceId)?.serviceId;
+                    if (!id) {
+                        throw new Error('无法复制服务 ID');
                     }
-                    await vscode.env.clipboard.writeText(container.serviceId);
+                    await vscode.env.clipboard.writeText(id);
                     if (this.isActiveView(context)) {
                         void vscode.window.showInformationMessage('云端沙箱标识码已复制，请按需联系支持人员获取帮助');
                     }
@@ -749,6 +829,172 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         }
     }
 
+    private async toggleContainerFiles(context: SidebarViewContext): Promise<void> {
+        this.pageMode = 'files';
+        this.containerFilesGeneration++;
+        await this.refreshContainerFiles(context);
+        this.startContainerFilesAutoRefresh();
+    }
+
+    private returnToServiceList(): void {
+        this.stopContainerFilesAutoRefresh();
+        this.pageMode = 'services';
+        this.containerFilesGeneration++;
+        this.containerFilesRequestGeneration++;
+        this.render();
+    }
+
+    private async refreshContainerFiles(context: SidebarViewContext, reportRefreshFailure = true): Promise<void> {
+        if (this.containerFilesRefreshInFlight) {
+            return;
+        }
+        this.containerFilesRefreshInFlight = true;
+        const pageGeneration = this.containerFilesGeneration;
+        const requestGeneration = ++this.containerFilesRequestGeneration;
+        const existing = this.containerFiles;
+        const hasLoadedData = existing.status === 'ready' || existing.containers.length > 0;
+
+        try {
+            this.containerFiles = {
+                status: hasLoadedData ? 'ready' : 'loading',
+                containers: existing.containers,
+            };
+            this.render();
+            const settings = this.getSettings();
+            if (!settings.backendApiUrl) {
+                throw new Error('未配置后端 云端沙箱 管理服务的 API 地址');
+            }
+            const userId = await this.userIdProvider.getCurrentUserId();
+            if (!userId.trim()) {
+                throw new Error('未获取到当前用户 ID');
+            }
+            if (!this.isCurrentContainerFilesRequest(context, pageGeneration, requestGeneration)) {
+                return;
+            }
+
+            const response = await this.userApiFactory(settings.backendApiUrl).getContainerFiles(userId);
+            if (!this.isCurrentContainerFilesRequest(context, pageGeneration, requestGeneration)) {
+                return;
+            }
+            const displayNames = await this.getContainerFileDisplayNames();
+            if (!this.isCurrentContainerFilesRequest(context, pageGeneration, requestGeneration)) {
+                return;
+            }
+
+            this.containerFiles = {
+                status: 'ready',
+                containers: response.containers.map(container => ({
+                    ...container,
+                    displayName: displayNames.get(container.service_id) ?? 'sandbox',
+                })),
+            };
+        } catch (error) {
+            if (!this.isCurrentContainerFilesRequest(context, pageGeneration, requestGeneration)) {
+                return;
+            }
+            const message = toSidebarError(error, 'container_files_error', '获取产物列表失败').message;
+            this.containerFiles = {
+                status: hasLoadedData ? 'ready' : 'error',
+                containers: existing.containers,
+                error: message,
+            };
+            if (hasLoadedData && reportRefreshFailure) {
+                void vscode.window.showErrorMessage(`刷新产物列表失败：${message}`);
+            }
+        } finally {
+            this.containerFilesRefreshInFlight = false;
+        }
+
+        if (this.isCurrentContainerFilesRequest(context, pageGeneration, requestGeneration)) {
+            this.render();
+        }
+    }
+
+    private startContainerFilesAutoRefresh(): void {
+        this.stopContainerFilesAutoRefresh();
+        const context = this.getViewContext();
+        if (!context || this.pageMode !== 'files' || this.cloudMode || !context.webviewView.visible) {
+            return;
+        }
+
+        let intervalMs = 5_000;
+        try {
+            const intervalSeconds = this.getSettings().statusSyncInterval;
+            intervalMs = Math.max(1, Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds * 1_000 : 5_000);
+        } catch (error) {
+            console.error('读取自动刷新间隔失败', error);
+        }
+
+        this.containerFilesTimer = setInterval(() => {
+            const currentContext = this.getViewContext();
+            if (!currentContext || this.pageMode !== 'files' || this.cloudMode || !currentContext.webviewView.visible) {
+                this.stopContainerFilesAutoRefresh();
+                return;
+            }
+            if (!this.containerFilesRefreshInFlight) {
+                void this.refreshContainerFiles(currentContext, false);
+            }
+        }, intervalMs);
+    }
+
+    private stopContainerFilesAutoRefresh(): void {
+        if (this.containerFilesTimer) {
+            clearInterval(this.containerFilesTimer);
+            this.containerFilesTimer = undefined;
+        }
+    }
+
+    private async getContainerFileDisplayNames(): Promise<Map<string, string>> {
+        try {
+            const document = await this.config.read();
+            const names = new Map<string, string>();
+            for (const entry of this.config.list(document.config)) {
+                if (names.has(entry.serviceId)) {
+                    continue;
+                }
+                names.set(entry.serviceId, entry.name?.trim() || entry.host.trim() || 'sandbox');
+            }
+            return names;
+        } catch {
+            return new Map();
+        }
+    }
+
+    private isCurrentContainerFilesRequest(
+        context: SidebarViewContext,
+        pageGeneration: number,
+        requestGeneration: number,
+    ): boolean {
+        return this.pageMode === 'files'
+            && this.containerFilesGeneration === pageGeneration
+            && this.containerFilesRequestGeneration === requestGeneration
+            && this.isCurrentPage(context);
+    }
+
+    private async openContainerFileShare(serviceId: string | undefined): Promise<void> {
+        const container = this.containerFiles.containers.find(item => item.service_id === serviceId);
+        const fileShareUrl = container?.file_share_url.trim();
+        if (!fileShareUrl) {
+            throw new Error('该云端沙箱没有可用的产物共享链接。');
+        }
+
+        let url: URL;
+        try {
+            url = new URL(fileShareUrl);
+        } catch {
+            throw new Error('产物共享链接无效，无法打开。');
+        }
+        if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) {
+            throw new Error('产物共享链接无效，无法打开。');
+        }
+
+        try {
+            await vscode.commands.executeCommand('simpleBrowser.show', url.toString());
+        } catch {
+            throw new Error('无法打开产物共享链接。');
+        }
+    }
+
     private async connectContainer(serviceId: string | undefined): Promise<void> {
         const container = this.findContainer(serviceId);
         if (!container || !container.remote) {
@@ -767,7 +1013,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
         const configuredEntry = this.config.list(document.config)
             .find(entry => entry.serviceId === container.serviceId && !entry.expiresAt);
         if (!configuredEntry?.host.trim()) {
-            throw new Error(`服务 "${container.serviceId}" 没有可用的 Host 配置`);
+            throw new Error(`服务 "${container.serviceId}" 没有可用的连接配置`);
         }
 
         const endpoint = configuredEntry.hostName && configuredEntry.port !== undefined
@@ -1319,7 +1565,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider, vscode.D
     }
 }
 
-type SidebarIcon = 'admin' | 'bookOpen' | 'close' | 'config' | 'connect' | 'cloud' | 'cloudAdd' | 'copy' | 'delete' | 'disconnect' | 'external' | 'refresh' | 'restart' | 'search' | 'warning';
+type SidebarIcon = 'admin' | 'bookOpen' | 'close' | 'config' | 'connect' | 'cloud' | 'cloudAdd' | 'copy' | 'delete' | 'disconnect' | 'external' | 'files' | 'refresh' | 'restart' | 'search' | 'warning';
 
 const CLOUD_ICON_PATH = '<path d="M7.5 18.5h9a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 6.58 9.1 3.75 3.75 0 0 0 7.5 18.5Z"/>';
 
@@ -1406,6 +1652,7 @@ const SIDEBAR_ICONS: Record<SidebarIcon, string> = {
     delete: '<path d="M5 7h14M9 7V5h6v2M7 7l.8 12h8.4L17 7M10 10.5v5M14 10.5v5"/>',
     disconnect: '<path d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H9M13 15l4-4-4-4M17 11H9"/>',
     external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+    files: '<path d="M6 3h8l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5M8 13h8M8 17h8"/>',
     refresh: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3M19 20v-4h-4"/>',
     restart: '<path d="M20 11a8 8 0 0 0-14.9-3M5 4v4h4M4 13a8 8 0 0 0 14.9 3"/><path d="M19 16v4h-4"/>',
     search: '<circle cx="10.8" cy="10.8" r="6.3"/><path d="m16 16 4.5 4.5"/>',
@@ -1453,47 +1700,145 @@ function renderSidebarHtml(
             'data-empty-state',
             '没有找到符合搜索条件的云端沙箱',
         );
-    const adminButton = showAdmin
-        ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin', false, findActiveAction(activeActions, 'openAdmin'))
-        : '';
-    const configButton = showAdmin
-        ? renderToolbarButton('openConfig', '打开配置文件', 'config', false, findActiveAction(activeActions, 'openConfig'))
-        : '';
-    const createButton = showCreate
-        ? renderToolbarButton('create', '创建新的服务', 'cloudAdd', false, findActiveAction(activeActions, 'create'))
-        : '';
-    const searchButton = `<button class="icon-button icon-button-search" data-search-action="open" title="搜索您的服务" aria-label="搜索您的服务" aria-expanded="false">${renderIcon('search')}</button>`;
-    const clearExpiredAction = findActiveAction(activeActions, 'clearExpired');
-    const clearExpiredButton = renderToolbarButton(
-        'clearExpired',
-        '清空过期条目',
-        'delete',
-        !containers.some(container => !container.remote && Boolean(container.expiresAt)),
-        clearExpiredAction,
-    );
     return renderDocument(`
-        <main class="sidebar">
+        <main class="sidebar" data-sidebar-page="services">
             <header class="app-bar">
                 <button class="help-link" data-action="openHelp" title="打开帮助手册" aria-label="打开帮助手册">${renderIcon('bookOpen')}<span class="help-link-label">帮助手册</span></button>
-                <div class="toolbar-actions" role="toolbar">
-                    ${adminButton}
-                    ${configButton}
-                    ${createButton}
-                    ${searchButton}
-                    ${clearExpiredButton}
-                    ${renderToolbarButton('refresh', '刷新页面', 'refresh', false, findActiveAction(activeActions, 'refresh'))}
-                </div>
+                ${renderSidebarToolbar(showAdmin, showCreate, containers.some(container => !container.remote && Boolean(container.expiresAt)), activeActions, 'services')}
             </header>
-            <div class="service-search" data-search-panel role="search" hidden>
-                <input type="text" data-search-input aria-label="搜索您的服务" placeholder="输入云端沙箱名称或者服务 ID">
-                <button class="search-close" data-search-action="close" type="button" title="关闭" aria-label="关闭">${renderIcon('close')}</button>
-            </div>
+            ${renderSidebarSearch('services')}
             <section class="container-list">
                 ${cards}
                 ${containers.length ? renderSidebarEmptyState('没有找到符合搜索条件的云端沙箱', 'data-search-empty hidden') : ''}
             </section>
         </main>
     `);
+}
+
+function renderContainerFilesHtml(
+    state: SidebarFilesState,
+    showAdmin: boolean,
+    showCreate: boolean,
+    activeActions: ReadonlyMap<string, SidebarActionState>,
+): string {
+    const search = renderSidebarSearch('files');
+    let content: string;
+    if (state.status === 'loading') {
+        content = '<div class="loading"><span class="loading-indicator"></span><p>正在加载产物列表...</p></div>';
+    } else if (state.status === 'error') {
+        const retryAction = findActiveAction(activeActions, 'retryContainerFiles');
+        content = `<div class="container-files-message" role="alert"><p>${escapeHtml(state.error ?? '获取产物列表失败')}</p><button class="action-button" data-action="retryContainerFiles"${renderActionStateAttributes(false, retryAction)}>${renderIcon('refresh')}重试</button></div>`;
+    } else if (!state.containers.length) {
+        content = `${state.error ? `<div class="container-files-error" role="alert">${escapeHtml(state.error)}</div>` : ''}${renderSidebarEmptyState('当前没有有效的产物共享链接', 'data-empty-state', '没有找到符合搜索条件的产物共享链接')}`;
+    } else {
+        const running = state.containers.filter(container => container.status.toLowerCase() !== 'expired');
+        const expired = state.containers.filter(container => container.status.toLowerCase() === 'expired');
+        content = `${state.error ? `<div class="container-files-error" role="alert">${escapeHtml(state.error)}</div>` : ''}
+            <div class="container-files-groups">
+                <section class="container-files-group"><h2>运行中<span>${running.length}</span></h2>${running.map(container => renderContainerFileCard(container, activeActions)).join('')}</section>
+                <section class="container-files-group"><h2>已过期<span>${expired.length}</span></h2>${expired.map(container => renderContainerFileCard(container, activeActions)).join('')}</section>
+            </div>
+            <div class="empty-state" data-search-empty hidden>当前没有有效的产物共享链接</div>`;
+    }
+
+    return renderDocument(`
+        <main class="sidebar" data-sidebar-page="files">
+            <header class="app-bar">
+                <button class="help-link" data-action="openHelp" title="打开帮助手册" aria-label="打开帮助手册">${renderIcon('bookOpen')}<span class="help-link-label">帮助手册</span></button>
+                ${renderSidebarToolbar(showAdmin, showCreate, false, activeActions, 'files')}
+            </header>
+            ${search}
+            ${content}
+        </main>
+    `);
+}
+
+function renderSidebarToolbar(
+    showAdmin: boolean,
+    showCreate: boolean,
+    hasExpiredLocalContainers: boolean,
+    activeActions: ReadonlyMap<string, SidebarActionState>,
+    pageMode: SidebarPageMode,
+): string {
+    const isFilesPage = pageMode === 'files';
+    const adminButton = showAdmin
+        ? renderToolbarButton('openAdmin', '打开管理员页面', 'admin', false, findActiveAction(activeActions, 'openAdmin'))
+        : '';
+    const configButton = showAdmin
+        ? renderToolbarButton('openConfig', '打开配置文件', 'config', false, findActiveAction(activeActions, 'openConfig'))
+        : '';
+    const createButton = showCreate || isFilesPage
+        ? renderToolbarButton('create', '创建新的服务', 'cloudAdd', isFilesPage || !showCreate, findActiveAction(activeActions, 'create'))
+        : '';
+    const searchLabel = isFilesPage ? '搜索产物链接' : '搜索您的服务';
+    const searchButton = `<button class="icon-button icon-button-search" data-search-action="open" title="${searchLabel}" aria-label="${searchLabel}" aria-expanded="false">${renderIcon('search')}</button>`;
+    const filesButton = renderToolbarButton(
+        isFilesPage ? 'returnToServices' : 'toggleContainerFiles',
+        isFilesPage ? '返回' : '产物共享链接',
+        'files',
+        false,
+        findActiveAction(activeActions, isFilesPage ? 'returnToServices' : 'toggleContainerFiles'),
+    );
+    const clearExpiredButton = renderToolbarButton(
+        'clearExpired',
+        '清空过期条目',
+        'delete',
+        isFilesPage || !hasExpiredLocalContainers,
+        findActiveAction(activeActions, 'clearExpired'),
+    );
+    const refreshButton = renderToolbarButton('refresh', '刷新页面', 'refresh', false, findActiveAction(activeActions, 'refresh'));
+    return `<div class="toolbar-actions" role="toolbar">${adminButton}${configButton}${createButton}${filesButton}${searchButton}${clearExpiredButton}${refreshButton}</div>`;
+}
+
+function renderSidebarSearch(pageMode: SidebarPageMode): string {
+    const label = pageMode === 'files' ? '搜索产物链接' : '搜索您的服务';
+    const placeholder = pageMode === 'files'
+        ? '输入云端沙箱服务 ID'
+        : '输入云端沙箱名称或者服务 ID';
+    return `<div class="service-search" data-search-panel role="search" hidden><input type="text" data-search-input aria-label="${label}" placeholder="${placeholder}"><button class="search-close" data-search-action="close" type="button" title="关闭" aria-label="关闭">${renderIcon('close')}</button></div>`;
+}
+
+function renderContainerFileCard(container: SidebarFileContainer, activeActions: ReadonlyMap<string, SidebarActionState>): string {
+    const expired = container.status.toLowerCase() === 'expired';
+    const statusLabel = getFileStatusLabel(container.status);
+    const statusClass = getFileStatusClass(container.status);
+    const expirationDisplay = container.expires_at ? getContainerFileExpirationDisplay(container.expires_at) : undefined;
+    let expiration: string;
+    if (expired) {
+        expiration = '<div class="expiration-status critical">此云端服务已过期，请及时下载您的产物数据，防止因定时清理导致的数据丢失</div>';
+    } else if (container.expires_at === null) {
+        expiration = '<div class="expiration-status permanent">此云端服务永不过期，产物数据将不会被定时清理</div>';
+    } else {
+        expiration = expirationDisplay
+            ? `<div class="expiration-status ${expirationDisplay.className}">${escapeHtml(expirationDisplay.label)}</div>`
+            : '';
+    }
+    const fileShareDisabled = !container.file_share_url.trim();
+    const serviceId = escapeHtml(container.service_id);
+    const copyAction = findActiveAction(activeActions, 'copyServiceId', container.service_id);
+    const shareAction = findActiveAction(activeActions, 'openContainerFileShare', container.service_id);
+    const searchText = [
+        container.displayName,
+        container.type,
+        container.service_id
+    ].join(' ');
+    return `<article class="container-card file-container-card" data-service-id="${serviceId}" data-search-service-id="${serviceId}" data-search-host="${escapeHtml(container.displayName)}" data-search-name="${escapeHtml(container.displayName)}" data-search-extra="${escapeHtml(searchText)}">
+        <div class="service-heading">
+            <div class="service-name-row">
+                <strong class="service-name">${escapeHtml(container.displayName)}</strong>
+                <button class="service-copy-button${copyAction ? ' is-loading' : ''}" data-action="copyServiceId" data-service-id="${serviceId}" title="复制云端沙箱标识码" ${renderActionStateAttributes(false, copyAction)}>${renderIcon('copy')}</button>
+            </div>
+            <div class="service-status">
+                ${renderTypeBadge(container.type)}
+                <span class="status-dot ${statusClass}"></span>
+                <span class="status-label">${escapeHtml(statusLabel)}</span>
+            </div>
+        </div>
+        <div class="card-actions file-card-actions">
+            <button class="action-button file-share-button${shareAction ? ' is-loading' : ''}" data-action="openContainerFileShare" data-service-id="${serviceId}" ${renderActionStateAttributes(fileShareDisabled, shareAction)}>${renderIcon('external')}产物共享链接</button>
+        </div>
+        ${expiration}
+    </article>`;
 }
 
 function renderSidebarEmptyState(message: string, attributes: string, searchMessage?: string): string {
@@ -1718,6 +2063,22 @@ function getExpirationDisplay(expiresAt: string, now = Date.now()): ExpirationDi
     };
 }
 
+function getContainerFileExpirationDisplay(expiresAt: string, now = Date.now()): ExpirationDisplay | undefined {
+    const expirationTime = Date.parse(expiresAt);
+    if (Number.isNaN(expirationTime)) {
+        return undefined;
+    }
+
+    const remainingMs = expirationTime - now;
+    if (remainingMs <= 0) {
+        return { label: '此云端服务已过期，请及时下载您的产物数据，防止因定时清理导致的数据丢失', className: 'critical' };
+    }
+    if (remainingMs > 3_600_000) {
+        return undefined;
+    }
+    return { label: '此云端服务剩余有效时间不足 1 小时，请及时下载您的产物数据，避免数据丢失', className: 'warning' };
+}
+
 function renderDocument(body: string): string {
     const nonce = randomBytes(16).toString('hex');
     return `<!doctype html>
@@ -1803,6 +2164,18 @@ function renderDocument(body: string): string {
         .search-close:hover { border-color: transparent; color: var(--on-surface); background: var(--surface-container-high); }
         .search-close .icon { width: 16px; height: 16px; }
         .container-list { display: flex; flex-direction: column; gap: 12px; }
+        .container-files-groups { display: grid; gap: 16px; }
+        .container-files-group { display: grid; gap: 12px; }
+        .container-files-group > h2 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--on-surface-variant); font-size: 12px; font-weight: 700; }
+        .container-files-group > h2 span { min-width: 20px; padding: 0 5px; border-radius: 999px; background: var(--surface-container-high); text-align: center; }
+        .file-card-actions { justify-content: flex-start; }
+        .file-card-actions .file-share-button { min-height: 30px; flex: 0 0 auto; padding: 0 12px; border: 1px solid var(--primary); border-radius: 999px; color: var(--primary); background: transparent; }
+        .file-card-actions .file-share-button:hover { border-color: var(--primary); color: var(--primary); background: var(--surface-container-high); }
+        .file-card-actions .file-share-button:disabled { border-color: var(--outline); color: var(--on-surface-variant); background: transparent; }
+        .file-card-actions .file-share-button.is-loading::after { border-color: var(--primary); border-top-color: transparent; }
+        .container-files-message { display: flex; align-items: center; flex-direction: column; gap: 10px; padding: 24px 16px; border: 1px solid var(--outline); border-radius: 12px; color: var(--error); text-align: center; }
+        .container-files-message p { margin: 0; overflow-wrap: anywhere; }
+        .container-files-error { margin-bottom: 12px; padding: 9px 11px; border-radius: 8px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; font-size: 12px; }
         .container-card { padding: 16px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface-container); box-shadow: 0 3px 10px rgba(0, 0, 0, .14); }
         .container-card:hover { border-color: var(--vscode-focusBorder); }
         .service-heading { min-width: 0; }
@@ -1837,6 +2210,7 @@ function renderDocument(body: string): string {
         .sandbox-access-link .icon { width: 15px; height: 15px; }
         .expiration-status { margin-top: 16px; color: var(--warning); font-size: 12px; }
         .expiration-status.critical { color: var(--error); }
+        .expiration-status.permanent { color: var(--on-surface-variant); }
         .card-error { margin: 13px 0 0; padding: 9px 11px; border-radius: 8px; color: var(--error); background: var(--surface-container-high); overflow-wrap: anywhere; }
         .card-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
         .action-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: var(--outline); }
@@ -1927,6 +2301,49 @@ function getStatusClass(container: SyncedContainer): string {
         return 'pending';
     }
     return 'unknown';
+}
+
+function getFileStatusClass(statusValue: string): string {
+    const status = statusValue.toLowerCase();
+    if (status === 'running') {
+        return 'running';
+    }
+    if (status === 'stopped') {
+        return 'stopped';
+    }
+    if (status === 'failed' || status === 'error' || status === 'expired') {
+        return 'failed';
+    }
+    if (['pending', 'starting', 'stopping', 'restarting', 'deleting', 'restoring'].includes(status)) {
+        return 'pending';
+    }
+    return 'unknown';
+}
+
+function getFileStatusLabel(statusValue: string): string {
+    switch (statusValue.toLowerCase()) {
+        case 'running':
+            return '运行中';
+        case 'stopped':
+            return '已停止';
+        case 'failed':
+            return '已失败';
+        case 'starting':
+            return '启动中';
+        case 'stopping':
+            return '停止中';
+        case 'restarting':
+            return '重启中';
+        case 'deleting':
+        case 'restoring':
+            return '操作中';
+        case 'pending':
+            return '准备中';
+        case 'expired':
+            return '已过期';
+        default:
+            return statusValue || '未知';
+    }
 }
 
 function getStatusLabel(container: SyncedContainer): string {

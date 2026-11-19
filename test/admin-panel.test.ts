@@ -113,6 +113,40 @@ describe('AdminPanel', () => {
         );
     });
 
+    it('opens the authorized container artifact URL in Simple Browser without exposing it to the webview', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const shareUrl = 'https://files.example.test/share/opaque-secret';
+        const adminApi = createAdminApi();
+        adminApi.listContainers = vi.fn(async () => ({
+            containers: [{ ...sampleContainer(), business_deleted: true, file_share_url: shareUrl }],
+        }));
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        expect(panel.webview.html).not.toContain(shareUrl);
+        await send(panel, { command: 'openContainerArtifacts', serviceId: 'service-1', requestId: 'artifact-1' });
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('simpleBrowser.show', shareUrl);
+        expect(vscode.env.openExternal).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-HTTP artifact URLs without passing them to Simple Browser', async () => {
+        const panel = createWebviewPanel();
+        vscode.window.createWebviewPanel.mockReturnValue(panel as never);
+        const adminApi = createAdminApi();
+        adminApi.listContainers = vi.fn(async () => ({
+            containers: [{ ...sampleContainer(), file_share_url: 'javascript:alert(1)' }],
+        }));
+        const adminPanel = createPanel({ adminApiFactory: vi.fn(() => adminApi) });
+
+        await adminPanel.open();
+        await send(panel, { command: 'openContainerArtifacts', serviceId: 'service-1', requestId: 'artifact-invalid-1' });
+
+        expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('simpleBrowser.show', expect.anything());
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('产物共享链接无效，无法打开。');
+    });
+
     it('toggles automatic failed-container deletion using the latest server limit values', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -1227,6 +1261,44 @@ describe('AdminPanel', () => {
         });
     });
 
+    it('renders the artifact action between logs and connect and disables missing links', () => {
+        const baseState: AdminPanelState = {
+            status: 'ready',
+            activeTab: 'containers',
+            search: '',
+            images: [],
+            defaultImages: createDefaultImages(null, null),
+            containers: [{ ...sampleContainer(), business_deleted: true }],
+            orphanContainerIds: [],
+            whitelistUsers: [],
+            adminUsers: [],
+        };
+        const missingLinkHtml = renderAdminPage(baseState, 'nonce', 'vscode-resource://test');
+        const artifactButton = getArtifactButton(missingLinkHtml);
+
+        expect(artifactButton).toContain('disabled');
+        expect(artifactButton).not.toContain('title=');
+        expect(artifactButton).not.toContain('aria-label=');
+
+        const shareUrl = 'https://files.example.test/share/not-in-webview';
+        const html = renderAdminPage({
+            ...baseState,
+            containers: [{ ...sampleContainer(), business_deleted: true, file_share_url: shareUrl }],
+        }, 'nonce', 'vscode-resource://test');
+        const logIndex = html.indexOf('data-action="getContainerLog"');
+        const artifactIndex = html.indexOf('data-action="openContainerArtifacts"');
+        const connectIndex = html.indexOf('data-action="connectContainer"');
+
+        expect(logIndex).toBeGreaterThan(-1);
+        expect(artifactIndex).toBeGreaterThan(logIndex);
+        expect(connectIndex).toBeGreaterThan(artifactIndex);
+        expect(html).not.toContain(shareUrl);
+        const availableArtifactButton = getArtifactButton(html);
+        expect(availableArtifactButton).not.toContain('disabled');
+        expect(availableArtifactButton).not.toContain('title=');
+        expect(availableArtifactButton).not.toContain('aria-label=');
+    });
+
     it('disables TestAgent auto-start independently from Git initialization', async () => {
         const panel = createWebviewPanel();
         vscode.window.createWebviewPanel.mockReturnValue(panel as never);
@@ -2292,6 +2364,7 @@ function createUserApi(admin: boolean): UserRestApi {
     return {
         createContainer: vi.fn(),
         getServiceIds: vi.fn(),
+        getContainerFiles: vi.fn(async () => ({ containers: [] })),
         getGiteeUrlHistory: vi.fn(async () => ({ gitee_urls: [] })),
         getContainerStatuses: vi.fn(),
         getContainer: vi.fn(),
@@ -2406,6 +2479,10 @@ function getContainerActionButton(html: string, action: string): string {
 
 function getConnectButton(html: string): string {
     return html.match(/<button[^>]*data-action="connectContainer"[^>]*>[^<]*<\/button>/)?.[0] ?? '';
+}
+
+function getArtifactButton(html: string): string {
+    return html.match(/<button[^>]*data-action="openContainerArtifacts"[^>]*>[^<]*<\/button>/)?.[0] ?? '';
 }
 
 function createWebviewPanel() {

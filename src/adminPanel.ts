@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as fsPromises from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { URL } from 'node:url';
 import * as vscode from 'vscode';
 import type { Log } from './common/logger';
 import {
@@ -328,6 +329,10 @@ export class AdminPanel implements vscode.Disposable {
                 if (this.isActive(panel, generation)) {
                     await panel.webview.postMessage({ command: 'containerLog', serviceId, log });
                 }
+                return;
+            }
+            if (message.command === 'openContainerArtifacts') {
+                await this.openContainerArtifacts(panel, generation, requireText(message.serviceId, '服务 ID 不能为空'));
                 return;
             }
             const changed = await this.executeAction(adminApi, message, panel, generation);
@@ -1016,6 +1021,37 @@ export class AdminPanel implements vscode.Disposable {
         }
     }
 
+    private async openContainerArtifacts(panel: vscode.WebviewPanel, generation: number, serviceId: string): Promise<void> {
+        if (!this.isActive(panel, generation)) {
+            return;
+        }
+        const fileShareUrl = this.state.containers.find(container => container.service_id === serviceId)?.file_share_url?.trim();
+        if (!fileShareUrl) {
+            void vscode.window.showErrorMessage('该云端沙箱没有可用的产物共享链接。');
+            return;
+        }
+
+        let url: URL;
+        try {
+            url = new URL(fileShareUrl);
+        } catch {
+            void vscode.window.showErrorMessage('产物共享链接无效，无法打开。');
+            return;
+        }
+        if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) {
+            void vscode.window.showErrorMessage('产物共享链接无效，无法打开。');
+            return;
+        }
+
+        try {
+            await vscode.commands.executeCommand('simpleBrowser.show', url.toString());
+        } catch {
+            if (this.isActive(panel, generation)) {
+                void vscode.window.showErrorMessage('无法打开产物共享链接。');
+            }
+        }
+    }
+
     private isVolumeRequestActive(panel: vscode.WebviewPanel, generation: number, requestGeneration: number): boolean {
         return this.isActive(panel, generation)
             && this.state.status === 'ready'
@@ -1307,6 +1343,7 @@ const ADMIN_ACTIONS = new Set([
     'toggleFailedContainerDeletion',
     'deleteOrphanContainers',
     'getContainerLog',
+    'openContainerArtifacts',
     'containerAction',
     'connectContainer',
     'addWhitelistUser',

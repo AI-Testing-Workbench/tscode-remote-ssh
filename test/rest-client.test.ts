@@ -160,6 +160,42 @@ describe('RestClient', () => {
         });
     });
 
+    it('loads the complete user file-service list with only the encoded user ID filter', async () => {
+        const response = {
+            containers: [{
+                service_id: 'service-1',
+                type: 'testagent_cloud',
+                status: 'expired',
+                git_fin_status: 'initialized',
+                expires_at: null,
+                file_share_url: 'https://files.example.test/share/opaque-key',
+                gitee_user: 'alice',
+                gitee_repository: 'repo',
+                gitee_url: 'https://gitee.com/alice/repo',
+                gitee_branch: null,
+            }],
+        };
+        const { requests, transport } = createTransport(jsonResponse(200, response));
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.user.getContainerFiles('user &/1')).resolves.toEqual(response);
+
+        expect(requests).toHaveLength(1);
+        expect(requests[0].method).toBe('GET');
+        expect(requests[0].url.pathname).toBe('/user/containers/files');
+        expect(requests[0].url.search).toBe(`?${new URLSearchParams({ user_id: 'user &/1' })}`);
+    });
+
+    it('reports file-service list request failures through the standard REST error contract', async () => {
+        const { transport } = createTransport(new Error('connection refused'));
+        const client = new RestClient('https://api.example.test', { transport });
+
+        await expect(client.user.getContainerFiles('user-1')).rejects.toMatchObject({
+            kind: 'network',
+            code: REST_ERROR_CODES.NETWORK,
+        });
+    });
+
     it('loads the current user Gitee URL history from the user endpoint', async () => {
         const response = {
             gitee_urls: [{ gitee_url: 'https://gitee.com/alice/repo', gitee_branch: 'main' }],
@@ -255,6 +291,8 @@ describe('RestClient', () => {
                 source_business_id: 'business-9',
                 task_type: 0,
                 api_token: '',
+                api_url: 'https://sandbox.example.test/api',
+                file_share_url: 'https://files.example.test/share/user',
             }),
             jsonResponse(200, {
                 container_id: 'physical-container-2',
@@ -264,6 +302,8 @@ describe('RestClient', () => {
                 source_business_id: 'business-9',
                 task_type: 0,
                 api_token: 'opaque-token',
+                api_url: null,
+                file_share_url: 'https://files.example.test/share/admin',
             }),
         ];
         const transport = vi.fn(async (): Promise<RestHttpResponse> => responses.shift()!);
@@ -276,11 +316,15 @@ describe('RestClient', () => {
             source_business_id: 'business-9',
             task_type: 0,
             api_token: '',
+            api_url: 'https://sandbox.example.test/api',
+            file_share_url: 'https://files.example.test/share/user',
         });
         await expect(client.admin.createContainer({ user_id: 'user-1' })).resolves.toMatchObject({
             service_id: 'service-admin-2',
             container_id: 'physical-container-2',
             api_token: 'opaque-token',
+            api_url: null,
+            file_share_url: 'https://files.example.test/share/admin',
         });
     });
 
@@ -297,6 +341,8 @@ describe('RestClient', () => {
             gitee_url: 'https://gitee.com',
             gitee_branch: null,
             api_token: 'opaque-token',
+            api_url: 'https://sandbox.example.test/api',
+            file_share_url: 'https://files.example.test/share/status',
         };
         const responses = [
             jsonResponse(200, { containers: [userStatus] }),

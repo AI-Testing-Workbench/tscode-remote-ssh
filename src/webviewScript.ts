@@ -34,21 +34,36 @@ const clearConfirmation = (key, expectedExpiresAt) => {
 };
 const searchPanel = typeof document.querySelector === 'function' ? document.querySelector('[data-search-panel]') : undefined;
 const searchInput = typeof document.querySelector === 'function' ? document.querySelector('[data-search-input]') : undefined;
+const sidebarPage = typeof document.querySelector === 'function'
+    ? document.querySelector('[data-sidebar-page]')?.getAttribute('data-sidebar-page') || 'services'
+    : 'services';
 const noServicesState = typeof document.querySelector === 'function' ? document.querySelector('[data-empty-state]') : undefined;
 const noServicesText = typeof document.querySelector === 'function' ? document.querySelector('[data-empty-state] [data-empty-text]') : undefined;
 const noSearchResultsState = typeof document.querySelector === 'function' ? document.querySelector('[data-search-empty]') : undefined;
 const searchOpenButton = typeof document.querySelector === 'function' ? document.querySelector('[data-search-action="open"]') : undefined;
-const serviceSearchStateValue = readViewState().serviceSearch;
-let serviceSearchState = serviceSearchStateValue && typeof serviceSearchStateValue === 'object'
+const searchStateKey = sidebarPage === 'files' ? 'containerFilesSearch' : 'serviceSearch';
+const previousSidebarPage = readViewState().sidebarSearchPage;
+if (previousSidebarPage !== undefined && previousSidebarPage !== sidebarPage && typeof vscode.setState === 'function') {
+    vscode.setState({
+        ...readViewState(),
+        sidebarSearchPage: sidebarPage,
+        serviceSearch: { open: false, input: '', query: '' },
+        containerFilesSearch: { open: false, input: '', query: '' },
+    });
+} else if (previousSidebarPage === undefined && typeof vscode.setState === 'function') {
+    vscode.setState({ ...readViewState(), sidebarSearchPage: sidebarPage });
+}
+const searchStateValue = readViewState()[searchStateKey];
+let serviceSearchState = searchStateValue && typeof searchStateValue === 'object'
     ? {
-        open: serviceSearchStateValue.open === true,
-        input: typeof serviceSearchStateValue.input === 'string' ? serviceSearchStateValue.input : '',
-        query: typeof serviceSearchStateValue.input === 'string' ? serviceSearchStateValue.input.trim() : '',
+        open: searchStateValue.open === true,
+        input: typeof searchStateValue.input === 'string' ? searchStateValue.input : '',
+        query: typeof searchStateValue.input === 'string' ? searchStateValue.input.trim() : '',
     }
     : { open: false, input: '', query: '' };
 const writeServiceSearchState = () => {
     if (typeof vscode.setState !== 'function') return;
-    vscode.setState({ ...readViewState(), serviceSearch: { ...serviceSearchState } });
+    vscode.setState({ ...readViewState(), sidebarSearchPage: sidebarPage, [searchStateKey]: { ...serviceSearchState } });
 };
 const applyServiceSearch = () => {
     const query = serviceSearchState.query.toLowerCase();
@@ -59,6 +74,7 @@ const applyServiceSearch = () => {
             card.getAttribute('data-search-host'),
             card.getAttribute('data-search-name'),
             card.getAttribute('data-search-service-id') || card.getAttribute('data-service-id'),
+            card.getAttribute('data-search-extra'),
         ];
         const matches = !query || values.some(value => typeof value === 'string' && value.toLowerCase().includes(query));
         card.hidden = !matches;

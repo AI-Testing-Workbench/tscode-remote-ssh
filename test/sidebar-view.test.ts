@@ -4,12 +4,14 @@ import { ContainerConfig, ContainerConfigEntry } from '../src/containerConfig';
 import { ContainerSyncResult, DEFAULT_CONTAINER_HOST_NAME, SyncedContainer } from '../src/containerSync';
 import { ContainerOperationRegistry } from '../src/containerOperations';
 import { createPublicUserContainerApi, PublicUserContainerApi } from '../src/api/publicApi';
-import type { ContainerTypeValue } from '../src/api/models';
+import type { ContainerTypeValue, UserContainerFileSummary } from '../src/api/models';
 import { UserRestApi } from '../src/api/restClient';
 import { SidebarSyncState, SidebarViewProvider } from '../src/sidebarView';
 import { WEBVIEW_SCRIPT } from '../src/webviewScript';
 import { ContainerInitializationError } from '../src/containerInitializationPoller';
 import * as vscode from './mocks/vscode';
+
+const sidebarProviders = new Set<SidebarViewProvider>();
 
 type ContainerTypeChoice = import('vscode').QuickPickItem & {
     type: ContainerTypeValue | 'yes' | 'history' | 'no' | 'gitee-history';
@@ -51,6 +53,10 @@ describe('SidebarViewProvider', () => {
     });
 
     afterEach(() => {
+        for (const provider of sidebarProviders) {
+            provider.dispose();
+        }
+        sidebarProviders.clear();
         vi.useRealTimers();
     });
 
@@ -198,7 +204,7 @@ describe('SidebarViewProvider', () => {
 
         expect(vscode.env.clipboard.writeText).not.toHaveBeenCalled();
         expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            '无法复制 ID',
+            '无法复制服务 ID',
             { modal: true },
         );
     });
@@ -259,6 +265,294 @@ describe('SidebarViewProvider', () => {
         expect(view.webview.html).not.toContain('data-action="create"');
         expect(view.webview.html).toContain('data-search-action="open"');
         expect(view.webview.html).toMatch(/data-search-action="open"[\s\S]*?data-action="clearExpired"/);
+
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-connected' });
+        await flushMessages();
+        expect(view.webview.html).toMatch(/data-action="create"[^>]*disabled/);
+    });
+
+    it('loads C104 file records in two groups with config names and no exposed share URLs', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('sync-service', 'running', true)], changed: false });
+        const active = fileContainer('file-active', {
+            type: 'evaluation_cloud',
+            status: 'stopped',
+            expires_at: null,
+            file_share_url: 'https://files.example.test/share/secret-active',
+            gitee_user: 'alice',
+            gitee_repository: 'repo-one',
+            gitee_url: 'https://gitee.com/alice/repo-one',
+            gitee_branch: 'main',
+        });
+        const expired = fileContainer('file-expired', {
+            status: 'expired',
+            expires_at: '2026-10-01T00:00:00Z',
+            file_share_url: '',
+        });
+        const pending = fileContainer('file-pending', { status: 'pending', expires_at: '2099-11-20T00:00:00Z' });
+        const failed = fileContainer('file-failed', { status: 'failed' });
+        const unknown = fileContainer('file-unknown', { status: 'unknown' });
+        const running = fileContainer('file-running', {
+            expires_at: new Date(Date.now() + 90 * 60_000).toISOString(),
+        });
+        const nearExpiry = fileContainer('file-near-expiry', {
+            status: 'starting',
+            expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        });
+        const userApi = createUserApi(true);
+        userApi.getContainerFiles = vi.fn(async () => ({ containers: [active, pending, failed, unknown, running, nearExpiry, expired] }));
+        const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
+        const config = createConfig([
+            { ...configuredContainer('file-active', 'ssh-host-active'), name: 'Configured service name' },
+        ]);
+        const view = createWebviewView();
+        const provider = createProvider({ state, userApi, sync, config, view });
+
+        await provider.resolveWebviewView(view as never);
+        await vi.waitFor(() => expect(view.webview.html).toContain('data-action="openAdmin"'));
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-1' });
+        await flushMessages();
+
+        expect(userApi.getContainerFiles).toHaveBeenCalledWith('user-1');
+        expect(sync.refresh).not.toHaveBeenCalled();
+        expect(view.webview.html).toContain('data-sidebar-page="files"');
+        expect(view.webview.html).not.toContain('C104 / ALL SANDBOXES');
+        expect(view.webview.html).not.toContain('<h1>全容器文件</h1>');
+        expect(view.webview.html).toContain('>运行中<span>6</span>');
+        expect(view.webview.html).toContain('>已过期<span>1</span>');
+        expect(view.webview.html).not.toContain('其他状态');
+        expect(view.webview.html).toContain('<strong class="service-name">Configured service name</strong>');
+        expect(view.webview.html).toContain('<strong class="service-name">sandbox</strong>');
+        expect(view.webview.html).toContain('data-service-id="file-active"');
+        expect(view.webview.html).toContain('<div class="service-heading">');
+        expect(view.webview.html).toContain('<div class="service-name-row">');
+        expect(view.webview.html).toContain('<div class="service-status">');
+        expect(view.webview.html).toContain('<button class="service-copy-button');
+        expect(view.webview.html).toContain('>运行中</span>');
+        expect(view.webview.html).toContain('>已停止</span>');
+        expect(view.webview.html).toContain('>准备中</span>');
+        expect(view.webview.html).toContain('>已失败</span>');
+        expect(view.webview.html).toContain('>启动中</span>');
+        expect(view.webview.html).toContain('>unknown</span>');
+        expect(view.webview.html).toContain('永不过期');
+        expect(view.webview.html).toContain('剩余有效时间不足 1 小时');
+        expect(view.webview.html).not.toContain('服务剩余时间:');
+        expect(view.webview.html).toContain('>已过期</span>');
+        const toolbarHtml = view.webview.html.match(/<div class="toolbar-actions" role="toolbar">([\s\S]*?)<\/div>/)?.[1] ?? '';
+        expect((toolbarHtml.match(/<button\b/g) ?? [])).toHaveLength(7);
+        expect(toolbarHtml).toContain('data-action="openAdmin"');
+        expect(toolbarHtml).toContain('data-action="openConfig"');
+        expect(view.webview.html).not.toContain('https://files.example.test/share/secret-active');
+        expect(view.webview.html).not.toContain('CPU占用率');
+        expect(view.webview.html).not.toContain('内存使用率');
+        expect(view.webview.html).not.toMatch(/<button[^>]*data-action="(?:connect|restart|delete)"/);
+        expect(view.webview.html).toMatch(/data-action="openContainerFileShare" data-service-id="file-active"[^>]*>[\s\S]*?产物共享链接/);
+        expect(view.webview.html).toMatch(/data-action="openContainerFileShare" data-service-id="file-expired"[^>]*disabled/);
+        expect(view.webview.html).toMatch(/data-action="create"[^>]*disabled/);
+        expect(view.webview.html).toMatch(/data-action="clearExpired"[^>]*disabled/);
+        expect(view.webview.html).toContain('.file-card-actions { justify-content: flex-start;');
+        expect(view.webview.html).toContain('border-radius: 999px; color: var(--primary);');
+        const activeCard = view.webview.html.match(/<article class="container-card file-container-card" data-service-id="file-active"[\s\S]*?<\/article>/)?.[0] ?? '';
+        const runningCard = view.webview.html.match(/<article class="container-card file-container-card" data-service-id="file-running"[\s\S]*?<\/article>/)?.[0] ?? '';
+        const nearExpiryCard = view.webview.html.match(/<article class="container-card file-container-card" data-service-id="file-near-expiry"[\s\S]*?<\/article>/)?.[0] ?? '';
+        expect((activeCard.match(/<button\b/g) ?? [])).toHaveLength(2);
+        expect(runningCard).not.toContain('class="expiration-status');
+        expect(nearExpiryCard).toContain('class="expiration-status warning">此云端服务剩余有效时间不足 1 小时');
+        expect(activeCard).toContain('class="card-actions file-card-actions"');
+        expect(activeCard).toContain('class="action-button file-share-button');
+        expect(activeCard).not.toContain('file-container-details');
+        expect(activeCard).not.toContain('服务 ID:');
+        expect(activeCard).not.toContain('Gitee:');
+        expect(activeCard).not.toContain('仓库:');
+        expect(activeCard).not.toContain('分支:');
+        expect(activeCard).not.toContain('Git:');
+        expect(activeCard).not.toContain('-- / --');
+        expect(activeCard).not.toContain('data-action="connect"');
+
+        view.fireMessage({ command: 'copyServiceId', serviceId: 'file-active', requestId: 'copy-file-service-id' });
+        await flushMessages();
+        expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('file-active');
+    });
+
+    it('keeps the all-container page isolated from sync updates and returns through the same toolbar icon', async () => {
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('sync-original', 'running', true)], changed: false });
+        const userApi = createUserApi(false);
+        userApi.getContainerFiles = vi.fn(async () => ({ containers: [fileContainer('file-1')] }));
+        const view = createWebviewView();
+        const provider = createProvider({ state, userApi, view });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-isolated' });
+        await flushMessages();
+        expect(view.webview.html).toContain('data-service-id="file-1"');
+
+        state.update({ containers: [syncedContainer('sync-latest', 'running', true)], changed: false });
+        expect(view.webview.html).toContain('data-sidebar-page="files"');
+        expect(view.webview.html).toContain('data-service-id="file-1"');
+        expect(view.webview.html).not.toContain('data-service-id="sync-latest"');
+
+        view.fireMessage({ command: 'returnToServices', requestId: 'files-return' });
+        await flushMessages();
+        expect(view.webview.html).toContain('data-sidebar-page="services"');
+        expect(view.webview.html).toContain('data-service-id="sync-latest"');
+        expect(userApi.getContainerFiles).toHaveBeenCalledOnce();
+    });
+
+    it('shows an initial loading state and an explicit empty state for an empty C104 response', async () => {
+        let resolveFileList!: (response: { containers: UserContainerFileSummary[] }) => void;
+        const userApi = createUserApi(false);
+        userApi.getContainerFiles = vi.fn(() => new Promise<{ containers: UserContainerFileSummary[] }>(resolve => {
+            resolveFileList = resolve;
+        }));
+        const view = createWebviewView();
+        const provider = createProvider({ userApi, view });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-empty' });
+        expect(view.webview.html).toContain('正在加载产物列表');
+        await vi.waitFor(() => expect(userApi.getContainerFiles).toHaveBeenCalledOnce());
+        resolveFileList({ containers: [] });
+        await flushMessages();
+
+        expect(view.webview.html).toContain('data-empty-state');
+        expect(view.webview.html).toContain('当前没有有效的产物共享链接');
+        expect(view.webview.html).not.toContain('class="container-files-group"');
+    });
+
+    it('automatically refreshes C104 while visible and stops polling when leaving the page', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+        const userApi = createUserApi(false);
+        userApi.getContainerFiles = vi.fn(async () => ({ containers: [fileContainer('file-auto-refresh')] }));
+        const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
+        const view = createWebviewView();
+        const provider = createProvider({ userApi, sync, view });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-auto-open' });
+        await flushMessages();
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(2);
+        expect(sync.refresh).not.toHaveBeenCalled();
+
+        view.fireVisibility(false);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(2);
+
+        view.fireVisibility(true);
+        await flushMessages();
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(3);
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(4);
+
+        view.fireMessage({ command: 'returnToServices', requestId: 'files-auto-return' });
+        await flushMessages();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(4);
+        expect(sync.refresh).not.toHaveBeenCalled();
+    });
+
+    it('can return to the service list while the initial C104 request is still pending', async () => {
+        let resolveFileList!: (response: { containers: UserContainerFileSummary[] }) => void;
+        const userApi = createUserApi(false);
+        userApi.getContainerFiles = vi.fn(() => new Promise<{ containers: UserContainerFileSummary[] }>(resolve => {
+            resolveFileList = resolve;
+        }));
+        const state = new SidebarSyncState();
+        state.update({ containers: [syncedContainer('sync-service', 'running', true)], changed: false });
+        const view = createWebviewView();
+        const provider = createProvider({ state, userApi, view });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-pending' });
+        await vi.waitFor(() => expect(userApi.getContainerFiles).toHaveBeenCalledOnce());
+        expect(view.webview.html).toContain('data-action="returnToServices"');
+
+        view.fireMessage({ command: 'returnToServices', requestId: 'files-return-pending' });
+        await flushMessages();
+        expect(view.webview.html).toContain('data-sidebar-page="services"');
+
+        resolveFileList({ containers: [fileContainer('late-file-service')] });
+        await flushMessages();
+        expect(view.webview.html).toContain('data-service-id="sync-service"');
+        expect(view.webview.html).not.toContain('data-service-id="late-file-service"');
+    });
+
+    it('shows retry after the first C104 request fails and restores the separate page on retry', async () => {
+        const userApi = createUserApi(false);
+        userApi.getContainerFiles = vi.fn()
+            .mockRejectedValueOnce(new Error('temporary C104 failure'))
+            .mockResolvedValueOnce({ containers: [fileContainer('file-recovered')] });
+        const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
+        const view = createWebviewView();
+        const provider = createProvider({ userApi, sync, view });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-failure' });
+        await flushMessages();
+
+        expect(view.webview.html).toContain('temporary C104 failure');
+        expect(view.webview.html).toContain('data-action="retryContainerFiles"');
+        expect(view.webview.html).not.toContain('class="error-page"');
+
+        view.fireMessage({ command: 'retryContainerFiles', requestId: 'files-retry' });
+        await flushMessages();
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(2);
+        expect(view.webview.html).toContain('data-sidebar-page="files"');
+        expect(view.webview.html).toContain('data-service-id="file-recovered"');
+        expect(sync.refresh).not.toHaveBeenCalled();
+    });
+
+    it('preserves existing file records and reports a manual C104 refresh failure', async () => {
+        const userApi = createUserApi(false);
+        userApi.getContainerFiles = vi.fn()
+            .mockResolvedValueOnce({ containers: [fileContainer('file-cached')] })
+            .mockRejectedValueOnce(new Error('refresh unavailable'));
+        const sync = { refresh: vi.fn(async () => ({ containers: [], changed: false })) };
+        const view = createWebviewView();
+        const provider = createProvider({ userApi, sync, view });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-cached' });
+        await flushMessages();
+        expect(view.webview.html).toContain('data-service-id="file-cached"');
+
+        view.fireMessage({ command: 'refresh', requestId: 'files-refresh-failure' });
+        await flushMessages();
+
+        expect(userApi.getContainerFiles).toHaveBeenCalledTimes(2);
+        expect(view.webview.html).toContain('data-service-id="file-cached"');
+        expect(view.webview.html).toContain('refresh unavailable');
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('刷新产物列表失败'));
+        expect(sync.refresh).not.toHaveBeenCalled();
+    });
+
+    it('opens only valid HTTP(S) file-share URLs using their service IDs', async () => {
+        const userApi = createUserApi(false);
+        userApi.getContainerFiles = vi.fn(async () => ({
+            containers: [
+                fileContainer('file-link', { file_share_url: 'https://files.example.test/share/opaque-token' }),
+                fileContainer('file-link-invalid', { file_share_url: 'javascript:alert(1)' }),
+            ],
+        }));
+        const view = createWebviewView();
+        const provider = createProvider({ userApi, view });
+
+        await provider.resolveWebviewView(view as never);
+        view.fireMessage({ command: 'toggleContainerFiles', requestId: 'files-open-link' });
+        await flushMessages();
+        view.fireMessage({ command: 'openContainerFileShare', serviceId: 'file-link', requestId: 'file-open-valid' });
+        await flushMessages();
+        view.fireMessage({ command: 'openContainerFileShare', serviceId: 'file-link-invalid', requestId: 'file-open-invalid' });
+        await flushMessages();
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('simpleBrowser.show', 'https://files.example.test/share/opaque-token');
+        expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(1);
+        expect(vscode.env.openExternal).not.toHaveBeenCalled();
+        expect(view.webview.html).not.toContain('https://files.example.test/share/opaque-token');
+        expect(view.webview.html).not.toContain('javascript:alert(1)');
     });
 
     it('renders local syncing cards before user initialization completes', async () => {
@@ -2221,7 +2515,7 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
     const userApi = options.userApi ?? createUserApi(false);
     const settingsValue = options.getSettings ?? (() => settings('https://api.example.test'));
     const publicApi = options.publicApi ?? createPublicApi(userApi);
-    return new SidebarViewProvider({
+    const provider = new SidebarViewProvider({
         state,
         sync: options.sync ?? { refresh: vi.fn(async () => ({ containers: [], changed: false })) },
         config: options.config ?? createConfig(),
@@ -2240,6 +2534,8 @@ function createProvider(options: Partial<ProviderTestOptions> = {}): SidebarView
         showInputBox: options.showInputBox,
         showQuickPick: options.showQuickPick ?? (async items => items[0]),
     });
+    sidebarProviders.add(provider);
+    return provider;
 }
 
 function selectDefaultImageWithoutGitee(): ProviderTestOptions['showQuickPick'] {
@@ -2288,6 +2584,7 @@ function createUserApi(admin: boolean): UserRestApi {
             status: 'pending',
         } as never)),
         getServiceIds: vi.fn(async () => ({ service_ids: [] })),
+        getContainerFiles: vi.fn(async () => ({ containers: [] })),
         getGiteeUrlHistory: vi.fn(async () => ({ gitee_urls: [] })),
         getContainerStatuses: vi.fn(async () => ({ containers: [] })),
         getContainer: vi.fn(async () => ({
@@ -2367,6 +2664,25 @@ function configuredContainer(
     port = 22,
 ): ContainerConfigEntry {
     return { serviceId, host, hostName, port };
+}
+
+function fileContainer(
+    serviceId: string,
+    overrides: Partial<UserContainerFileSummary> = {},
+): UserContainerFileSummary {
+    return {
+        service_id: serviceId,
+        type: 'testagent_cloud',
+        status: 'running',
+        git_fin_status: 'initialized',
+        expires_at: '2099-12-01T00:00:00Z',
+        file_share_url: 'https://files.example.test/share/default',
+        gitee_user: 'test-user',
+        gitee_repository: 'test-repository',
+        gitee_url: 'https://gitee.com/test-user/test-repository',
+        gitee_branch: 'main',
+        ...overrides,
+    };
 }
 
 function settings(backendApiUrl: string) {

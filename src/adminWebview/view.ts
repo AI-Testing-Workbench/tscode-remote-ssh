@@ -581,6 +581,7 @@ function renderContainerRow(container: AdminContainerResponse, processing: boole
     const transitioning = isContainerTransitioning(status);
     const rowClasses = ['resource-row', 'container-row', 'searchable', `status-border-${statusStyle}`, deleted ? 'deleted-row' : ''].filter(Boolean).join(' ');
     const connectDisabled = deleted || status === 'business_deleted' || status === 'processing' || processing || !container.endpoint?.trim();
+    const artifactDisabled = !container.file_share_url?.trim();
     const lifecycle = deleted
         ? { label: '删除时间', value: formatDateTime(container.deleted_at) || '未删除' }
         : { label: '删除时间 (计划)', value: container.expires_at ? formatDateTime(container.expires_at) : '永不过期' };
@@ -603,7 +604,7 @@ function renderContainerRow(container: AdminContainerResponse, processing: boole
     return `<article class="${rowClasses}" data-patch-key="service:${escapeAttribute(container.service_id)}" data-search-text="${escapeAttribute(searchText)}" data-filter-status="${escapeAttribute(status)}" data-filter-type="${escapeAttribute(container.type ?? '')}" data-sort-service_id="${escapeAttribute(container.service_id)}" data-sort-status="${escapeAttribute(status)}" data-sort-user_id="${escapeAttribute(container.user_id)}" data-sort-created_at="${escapeAttribute(container.created_at)}">
         <div class="container-card-heading">
             <div class="container-identity"><div class="resource-main"><div class="container-title"><strong>${escapeHtml(container.service_id)}</strong><span class="status-chip tag ${statusStyle}${transitioning ? ' status-transitioning' : ''}">${escapeHtml(containerStatusLabel(container.status, deleted, container.git_fin_status))}</span>${typeBadge}</div><span>镜像: ${escapeHtml(container.image)}</span><span class="physical-container-id">容器 ID: ${escapeHtml(container.container_id)}</span></div></div>
-            <div class="container-heading-actions"><button class="small-button log-button" type="button" data-action="getContainerLog" data-service-id="${escapeAttribute(container.service_id)}">日志</button><button class="small-button connect-button" type="button" data-action="connectContainer" data-service-id="${escapeAttribute(container.service_id)}"${connectDisabled ? ' disabled' : ''}>连接</button></div>
+            <div class="container-heading-actions"><button class="small-button log-button" type="button" data-action="getContainerLog" data-service-id="${escapeAttribute(container.service_id)}">日志</button><button class="small-button artifact-button" type="button" data-action="openContainerArtifacts" data-service-id="${escapeAttribute(container.service_id)}"${artifactDisabled ? ' disabled' : ''}>产物</button><button class="small-button connect-button" type="button" data-action="connectContainer" data-service-id="${escapeAttribute(container.service_id)}"${connectDisabled ? ' disabled' : ''}>连接</button></div>
         </div>
         <div class="container-details">
             <div class="container-info-row">

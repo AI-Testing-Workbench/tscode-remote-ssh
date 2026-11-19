@@ -69,7 +69,9 @@ export interface ContainerStatusResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    api_url?: string | null;
     api_token?: string;
+    file_share_url?: string;
     cpu_usage?: number | null;
     memory_usage?: number | null;
     gitee_user: string;
@@ -93,7 +95,9 @@ export interface CreateContainerResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    api_url?: string | null;
     api_token?: string;
+    file_share_url?: string;
     auto_test_id: string | null;
     source_business_id: string | null;
     task_type: number | null;
@@ -161,7 +165,9 @@ export interface AdminContainerResponse {
     endpoint?: string | null;
     started_at?: string | null;
     expires_at?: string | null;
+    api_url?: string | null;
     api_token?: string;
+    file_share_url?: string;
     cpu_usage?: number | null;
     memory_usage?: number | null;
     image: string;
@@ -184,6 +190,23 @@ export type AdminCreateContainerResponse = Omit<AdminContainerResponse, 'git_fin
 
 export interface AdminContainerListResponse {
     containers: AdminContainerResponse[];
+}
+
+export interface UserContainerFileSummary {
+    service_id: string;
+    type: string;
+    status: string;
+    git_fin_status: string;
+    expires_at: string | null;
+    file_share_url: string;
+    gitee_user: string;
+    gitee_repository: string;
+    gitee_url: string;
+    gitee_branch: string | null;
+}
+
+export interface UserContainerFilesResponse {
+    containers: UserContainerFileSummary[];
 }
 
 export interface OrphanContainerListResponse {

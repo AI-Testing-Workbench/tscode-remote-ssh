@@ -38,6 +38,7 @@ import {
     UploadImageFileInput,
     UploadImageInput,
     UploadImageRequest,
+    UserContainerFilesResponse,
     UserContainerQuery,
     UserIdRequest,
     UserIdsResponse,
@@ -151,6 +152,7 @@ export interface RestClientOptions {
 export interface UserRestApi {
     createContainer(request: CreateContainerRequest): Promise<CreateContainerResponse>;
     getServiceIds(query: UserContainerQuery): Promise<ServiceIdsResponse>;
+    getContainerFiles(userId: string): Promise<UserContainerFilesResponse>;
     getGiteeUrlHistory(request: UserIdRequest): Promise<GiteeUrlsResponse>;
     getContainerStatuses(query: UserContainerQuery): Promise<ContainerStatusListResponse>;
     getContainer(serviceId: string): Promise<ContainerStatusResponse>;
@@ -358,6 +360,9 @@ export class RestClient {
                 timeoutMs: DEFAULT_LONG_RUNNING_TIMEOUT_MS,
             }),
             getServiceIds: query => this.requestJson<ServiceIdsResponse>('GET', '/user/containers', { query }),
+            getContainerFiles: userId => this.requestJson<UserContainerFilesResponse>('GET', '/user/containers/files', {
+                query: { user_id: userId },
+            }),
             getGiteeUrlHistory: request => this.requestJson<GiteeUrlsResponse>('POST', '/user/gitee-urls', {
                 jsonBody: request,
             }),

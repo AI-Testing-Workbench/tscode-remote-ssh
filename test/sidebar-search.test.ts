@@ -63,6 +63,40 @@ describe('sidebar service search', () => {
         expect(rebuilt.cards.every(card => !card.hidden)).toBe(true);
     });
 
+    it('clears both page searches when switching between services and full-container files', () => {
+        const stateStore = createViewStateStore();
+        const services = createSearchHarness([
+            { host: 'host-one', name: 'Primary', serviceId: 'service-one' },
+        ], stateStore);
+        services.run();
+        services.openButton.fire('click');
+        services.searchInput.value = 'stale-service-query';
+        services.searchInput.fire('input');
+
+        const files = createSearchHarness([
+            { host: 'sandbox', name: 'sandbox', serviceId: 'file-service' },
+        ], stateStore, 'files');
+        files.run();
+        expect(files.searchPanel.hidden).toBe(true);
+        expect(files.searchInput.value).toBe('');
+        expect(stateStore.get().serviceSearch).toEqual({ open: false, input: '', query: '' });
+        expect(stateStore.get().containerFilesSearch).toEqual({ open: false, input: '', query: '' });
+
+        files.openButton.fire('click');
+        files.searchInput.value = 'gitee-query';
+        files.searchInput.fire('input');
+        expect(stateStore.get().containerFilesSearch).toEqual({ open: true, input: 'gitee-query', query: 'gitee-query' });
+
+        const returnedServices = createSearchHarness([
+            { host: 'host-one', name: 'Primary', serviceId: 'service-one' },
+        ], stateStore);
+        returnedServices.run();
+        expect(returnedServices.searchPanel.hidden).toBe(true);
+        expect(returnedServices.searchInput.value).toBe('');
+        expect(stateStore.get().serviceSearch).toEqual({ open: false, input: '', query: '' });
+        expect(stateStore.get().containerFilesSearch).toEqual({ open: false, input: '', query: '' });
+    });
+
     it('updates only the existing empty-state message for a no-match query and restores it on close', () => {
         const harness = createSearchHarness([], createViewStateStore());
         harness.run();
@@ -86,6 +120,20 @@ describe('sidebar service search', () => {
         expect(harness.noServicesState).toBe(originalEmptyState);
         expect(harness.noServicesState?.hidden).toBe(false);
         expect(harness.noServicesText?.textContent).toBe('当前无可用沙箱，可通过上方按钮创建');
+    });
+
+    it('searches C104 status, type, Gitee metadata, and expiration fields', () => {
+        const harness = createSearchHarness([
+            { host: 'sandbox', name: 'sandbox', serviceId: 'service-one', searchExtra: 'evaluation_cloud stopped alice repo-main 2026-12-01' },
+            { host: 'another', name: 'another', serviceId: 'service-two', searchExtra: 'testagent_cloud running bob repo-two never' },
+        ], createViewStateStore(), 'files');
+        harness.run();
+
+        expectOnly(harness, 'stopped', 0);
+        expectOnly(harness, 'evaluation_cloud', 0);
+        expectOnly(harness, 'alice', 0);
+        expectOnly(harness, '2026-12-01', 0);
+        expectOnly(harness, 'repo-two', 1);
     });
 });
 
@@ -145,9 +193,11 @@ interface SearchHarness {
 }
 
 function createSearchHarness(
-    services: Array<{ host: string; name: string; serviceId: string }>,
+    services: Array<{ host: string; name: string; serviceId: string; searchExtra?: string }>,
     stateStore: ReturnType<typeof createViewStateStore>,
+    pageMode: 'services' | 'files' = 'services',
 ): SearchHarness {
+    const pageElement = createTestElement({ 'data-sidebar-page': pageMode });
     const searchPanel = createTestElement({ 'data-search-panel': '' });
     searchPanel.hidden = true;
     const searchInput = createTestElement({ 'data-search-input': '' });
@@ -176,12 +226,14 @@ function createSearchHarness(
         'data-search-service-id': service.serviceId,
         'data-search-host': service.host,
         'data-search-name': service.name,
+        'data-search-extra': service.searchExtra ?? '',
     }));
     const searchButtons = [openButton, closeButton];
     const document = {
         querySelector: (selector: string): TestElement | undefined => ({
             '[data-search-panel]': searchPanel,
             '[data-search-input]': searchInput,
+            '[data-sidebar-page]': pageElement,
             '[data-empty-state]': noServicesState,
             '[data-empty-state] [data-empty-text]': noServicesText,
             '[data-search-empty]': noResultsState,
